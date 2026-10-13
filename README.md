@@ -1,7 +1,26 @@
 # Jarvis
 
-Next.js App Router · TypeScript · Supabase · Vercel을 사용하는 초기 프로젝트입니다.
+Next.js App Router · TypeScript · Supabase · Vercel을 사용하는 개인 워크스페이스입니다.
 Node.js 24와 npm 11을 기준으로 구성했습니다.
+
+배포된 화면: https://jarvis-zeta-three-77.vercel.app
+
+## 화면 구조
+
+대시보드, 작업(`/tasks`), 프로젝트(`/projects`), 노트(`/notes`), 설정(`/settings`)의
+반응형 레이아웃을 구성했습니다. 메뉴 이동, 공간 검색(`Ctrl/⌘ + K`), 모바일 메뉴와
+사용 안내가 동작합니다. 작업 생성·저장, 로그인, 데이터 조회 등 업무 기능은 아직 없으며
+각 모듈은 빈 상태로 표시됩니다. 요약의 0은 초기 화면 표현이며 DB 조회 결과가 아닙니다.
+
+- `src/app/(workspace)/layout.tsx`: 모든 업무 화면의 공통 레이아웃
+- `src/components/workspace/workspace-shell.tsx`: 사이드바, 헤더, 검색, 모바일 탐색
+- `src/components/workspace/dashboard.tsx`: 대시보드의 요약·작업 공간·최근 활동 영역
+- `src/components/workspace/module-placeholder.tsx`: 기능을 붙이기 전 모듈의 빈 화면
+- `src/components/workspace/navigation.ts`: 메뉴 정의
+- `src/components/workspace/workspace.module.css`: 공통 반응형 스타일
+
+각 모듈의 `page.tsx`에서 빈 화면을 실제 기능 컴포넌트로 교체하면 공통 탐색과 레이아웃을
+그대로 사용할 수 있습니다. 대시보드의 요약과 최근 활동은 기능 구현 시 실제 데이터에 연결합니다.
 
 ## 개발 시작
 
@@ -40,8 +59,8 @@ test -f .env.local || cp .env.example .env.local
 `.env.local`에 `NEXT_PUBLIC_SUPABASE_URL`과
 `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`를 채운 뒤 개발 서버를 다시 시작합니다.
 두 값은 Supabase 프로젝트의 API 설정에서 확인할 수 있습니다.
-현재 클라우드에는 검증한 로컬 Supabase 값으로 `.env.local`을 준비해 두었습니다.
-원격 프로젝트로 전환할 때는 두 값을 함께 바꾼 뒤 서버를 다시 시작합니다.
+현재 클라우드의 `.env.local`과 Vercel에는 원격 Jarvis 프로젝트의 공개 값을 준비해 두었습니다.
+다른 프로젝트로 전환할 때는 두 값을 함께 바꾼 뒤 서버를 다시 시작합니다.
 프로덕션 빌드에서는 NEXT_PUBLIC 값이 빌드에 포함되므로 변경 후 다시 빌드해야 합니다.
 `.env.local`은 Git에서 제외되며 `.env.example`에는 값이 없습니다.
 
@@ -80,22 +99,21 @@ npx --no-install supabase projects list
 npx --no-install supabase link --project-ref "$SUPABASE_PROJECT_REF"
 ```
 
-원격 연결은 계정과 프로젝트를 확인한 뒤 실행합니다. DB 연결에 추가 인증이 필요하면
-Supabase가 안내하는 안전한 입력 경로를 사용합니다. 이 초기 설정은 원격 DB를 변경하지 않습니다.
+원격 Jarvis 프로젝트는 `yncczhnvlwkxwzmqqkke`이며 서울 리전에 생성되어 있습니다.
+Codex 클라우드의 토큰은 HTTPS 프록시가 처리하는 보호된 값이라 CLI가 문법 검사에서 거부할 수 있습니다.
+이 환경에서는 `/workspace/.setup/jarvis-cloud.py`의 `status`와 `sync` 명령 및
+`jarvis_cloud_api.py`의 Management API를 사용합니다. DB 변경은 기능 구현에 필요한
+마이그레이션으로 관리하며, 초기 화면에는 업무용 테이블이 없습니다.
 
 ## Vercel 배포
 
-기본 Next.js 설정으로 배포할 수 있어 별도 `vercel.json`은 필요하지 않습니다.
-계정 연결과 배포는 아직 수행하지 않았습니다.
+기본 Next.js 설정으로 배포하므로 별도 `vercel.json`은 필요하지 않습니다.
+Vercel의 `ai-report/jarvis` 프로젝트는 `kjd1374/jarvis` 저장소와 연결되어 있습니다.
+Node 버전은 24.x이며 공개 Supabase 값은 Development, Preview, Production에 등록했습니다.
+`main` push는 프로덕션 배포, PR은 Preview 배포로 이어집니다.
 
-1. 이 초기 코드를 GitHub의 `kjd1374/jarvis` 저장소에 커밋하고 push합니다.
-2. Vercel에서 해당 GitHub 저장소를 Import하고 Framework를 Next.js로 선택합니다.
-   저장소 내 앱 루트는 `/`이며 Node 버전은 24.x입니다.
-3. Vercel의 Development, Preview, Production 환경에 위의 공개 Supabase 환경변수 두 개를
-   각각 등록합니다. 실제 배포에서는 원격 프로젝트 값을 사용합니다.
-4. 연결 후 `main` push는 프로덕션 배포, PR은 Preview 배포로 이어집니다.
-5. Supabase Auth를 사용할 때에는 프로젝트의 Site URL과 Redirect URLs에 실제 배포 주소를
-   등록합니다.
+Supabase Auth의 Site URL과 Redirect URLs에는 현재 프로덕션 주소를 등록해 두었습니다.
+실제 로그인 화면을 추가할 때 그 흐름과 리디렉션을 별도 검증합니다.
 
 CLI를 사용할 경우 환경 설정에 `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`를
 등록한 후 기존 프로젝트에 연결할 수 있습니다. 토큰 값을 채팅이나 저장소에 넣지 않습니다.
@@ -109,6 +127,16 @@ npm run deploy:production
 
 GitHub 연동 자동 배포만 사용할 경우 Vercel CLI 토큰은 필요하지 않습니다.
 `.vercel`의 연결 정보와 `.env.local`은 커밋하지 않습니다.
+
+Codex 클라우드에서 Git 연동 배포가 시작되지 않았다면, 변경을 커밋하고 push한 뒤
+보호된 토큰을 지원하는 API 헬퍼로 해당 커밋을 배포할 수 있습니다.
+
+```sh
+python3 /workspace/.setup/jarvis-cloud.py deploy --ref main --target production
+python3 /workspace/.setup/jarvis-cloud.py status
+```
+
+배포가 `READY`인지 확인한 뒤 공개 프로덕션 도메인에서 화면을 검증합니다.
 
 ## 상태 확인
 

@@ -1,7 +1,10 @@
 :root {
   color-scheme: light;
-  --background: #f8faf8;
-  --foreground: #1c2420;
+  --background: #f6f7f4;
+  --foreground: #222c27;
+  --muted: #747c75;
+  --accent: #c9e797;
+  --border: #e5e8e1;
 }
 
 * {
@@ -17,4 +20,45 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-a { color: inherit; }
+a {
+  color: inherit;
+  text-decoration: none;
+}
+button,
+input {
+  font: inherit;
+}
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: default;
+}
+button,
+input {
+  color: inherit;
+}
+button {
+  border: 0;
+}
+::selection {
+  background: #d7ebbb;
+  color: #222c27;
+}
+:focus-visible {
+  outline: 3px solid #81a55b;
+  outline-offset: 4px;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
