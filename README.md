@@ -1,26 +1,47 @@
 # Jarvis
 
-Next.js App Router · TypeScript · Supabase · Vercel을 사용하는 개인 워크스페이스입니다.
+내가 하는 모든 일을 한곳에서 관리하고, 필요하면 AI가 실행까지 도와주는 개인 통합 업무실입니다.
+회사·개인 자료를 구분하고, 업무 맥락과 결과를 연결해 보존합니다.
+제품 목적과 개발 기준은 [docs/PRODUCT.md](docs/PRODUCT.md)를 먼저 확인합니다.
+
+Next.js App Router · TypeScript · Supabase · Vercel을 사용합니다.
 Node.js 24와 npm 11을 기준으로 구성했습니다.
 
 배포된 화면: https://jarvis-zeta-three-77.vercel.app
 
 ## 화면 구조
 
-대시보드, 작업(`/tasks`), 프로젝트(`/projects`), 노트(`/notes`), 설정(`/settings`)의
-반응형 레이아웃을 구성했습니다. 메뉴 이동, 공간 검색(`Ctrl/⌘ + K`), 모바일 메뉴와
-사용 안내가 동작합니다. 작업 생성·저장, 로그인, 데이터 조회 등 업무 기능은 아직 없으며
-각 모듈은 빈 상태로 표시됩니다. 요약의 0은 초기 화면 표현이며 DB 조회 결과가 아닙니다.
+업무실(`/`), 업무(`/tasks`), 프로젝트(`/projects`), 자료실(`/library`), 맥락(`/notes`),
+설정(`/settings`)을 구성했습니다. 업무실은 오늘의 요약, 대화창, 누적 맥락과 자료 패널을 함께 보여줍니다.
+회사·개인과 프로젝트 범위를 전환할 수 있으며 모바일에서는 대화와 맥락·자료를 전환합니다.
+공간 검색(`Ctrl/⌘ + K`), 모바일 메뉴와 사용 안내가 동작합니다. 로그인 화면은 추가하지 않습니다.
+
+대화 저장·재개, 맥락 편집과 수정 이력, 업무·프로젝트 생성, 업무 상태 변경,
+파일 추가·다운로드와 프로젝트·업무 연결이 동작합니다. 업무실의 수치는 보관한 업무에서 집계합니다.
+대화 내용을 맥락으로 추가하거나 업무로 연결할 수 있습니다.
+
+**현재 데이터는 이 브라우저의 IndexedDB에 보관합니다.** 새로고침과 같은 브라우저의 다른 탭에서
+이어갈 수 있지만 다른 기기와 동기화되지 않습니다. 브라우저 데이터를 삭제하면 보관 내용도 삭제됩니다.
+자료는 파일당 20 MB까지 추가할 수 있습니다. 파일 원본과 메타데이터는 같은 트랜잭션에 저장합니다.
+실제 AI 응답·실행, 자동 요약, 파일 본문 분석, Supabase 서버 동기화와 v4 연결은 아직 구현하지 않았습니다.
+화면에는 AI 연결 대기와 현재 저장 범위를 표시합니다.
 
 - `src/app/(workspace)/layout.tsx`: 모든 업무 화면의 공통 레이아웃
 - `src/components/workspace/workspace-shell.tsx`: 사이드바, 헤더, 검색, 모바일 탐색
-- `src/components/workspace/dashboard.tsx`: 대시보드의 요약·작업 공간·최근 활동 영역
-- `src/components/workspace/module-placeholder.tsx`: 기능을 붙이기 전 모듈의 빈 화면
+- `src/components/workspace/agent-workspace.tsx`: 대화창, 업무 요약, 누적 맥락과 연결 자료
+- `src/components/workspace/workspace-provider.tsx`: 기록 로드·저장과 탭 간 갱신
+- `src/components/workspace/workspace-controls.tsx`: 회사·개인, 프로젝트 범위와 맥락 편집
+- `src/components/workspace/library.tsx`: 파일 보관·다운로드와 프로젝트·업무 연결
+- `src/components/workspace/work-items.tsx`: 프로젝트·업무 생성과 상태 변경
+- `src/components/workspace/context-page.tsx`: 맥락 관리와 수정 이력
+- `src/lib/workspace/types.ts`: 업무 맥락 데이터와 영역별 연결 검증
+- `src/lib/workspace/storage.ts`: IndexedDB 저장 어댑터; 변경과 파일 저장은 원자적으로 처리
 - `src/components/workspace/navigation.ts`: 메뉴 정의
-- `src/components/workspace/workspace.module.css`: 공통 반응형 스타일
+- `src/components/workspace/workspace.module.css`: 공통 탐색 반응형 스타일
+- `src/components/workspace/studio.module.css`: 업무실·자료실·맥락 화면 반응형 스타일
 
-각 모듈의 `page.tsx`에서 빈 화면을 실제 기능 컴포넌트로 교체하면 공통 탐색과 레이아웃을
-그대로 사용할 수 있습니다. 대시보드의 요약과 최근 활동은 기능 구현 시 실제 데이터에 연결합니다.
+서버 저장과 AI 실행을 연결할 때 회사·개인 경계, 프로젝트 연결, 기록 복원과 저장 오류 동작을
+유지합니다. 서버 데이터의 접근 방식은 로그인 화면을 추가하지 않는 요구사항에 맞춰 별도로 설계합니다.
 
 ## 개발 시작
 
@@ -31,7 +52,9 @@ npm run dev
 
 Supabase 계정을 연결하기 전에도 기본 화면과 `/api/health`가 실행됩니다.
 `npm run check`는 ESLint, TypeScript 검사, 프로덕션 빌드를 실행합니다.
-현재 기능 테스트는 없으며 GitHub Actions에 동일한 검사 절차를 등록했습니다.
+GitHub Actions에 동일한 검사 절차를 등록했습니다. 자동 UI 회귀 테스트는 아직 저장소에 등록하지 않았습니다.
+현재 구현은 실제 Chromium에서 대화 복원, 맥락 수정 이력, 파일 원본 복원·다운로드,
+회사·개인 분리, 자료 연결, 동시 탭 저장과 저장 실패 시 롤백을 검증했습니다.
 
 Codex 클라우드에서는 기존 `/workspace/jarvis` 체크아웃을 사용합니다.
 작업마다 환경이 격리되므로 별도 Git worktree를 만들 필요가 없습니다.
@@ -71,7 +94,7 @@ test -f .env.local || cp .env.example .env.local
 서버 클라이언트는 요청마다 생성합니다. 인증을 사용하는 Route Handler에서 세션 쿠키를
 쓰기 시작하면 응답에 `Cache-Control: private, no-store`를 지정해야 합니다.
 테이블을 추가할 때는 RLS와 접근 정책을 함께 설정합니다.
-로그인 화면과 업무용 데이터 스키마는 아직 구현하지 않았습니다.
+업무용 데이터 스키마는 아직 구현하지 않았습니다.
 
 ### 선택: 로컬 데이터베이스
 

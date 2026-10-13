@@ -6,9 +6,12 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "./icon";
 import { navigation } from "./navigation";
 import styles from "./workspace.module.css";
+import { useWorkspace } from "./workspace-provider";
+import { spaceLabels } from "@/lib/workspace/types";
 
 export function WorkspaceShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { data } = useWorkspace();
   const current =
     navigation.find((item) => item.href === pathname) ?? navigation[0];
   const [menuOpen, setMenuOpen] = useState(false);
@@ -49,7 +52,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
         href="/"
         className={styles.brand}
         onClick={() => menuRef.current?.close()}
-        aria-label="Jarvis 대시보드"
+        aria-label="Jarvis 업무실"
       >
         <span className={styles.brandMark}>
           <Icon name="spark" size={25} />
@@ -60,7 +63,8 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
       </Link>
       <div className={styles.workspaceLabel}>
         <span className={styles.workspaceDot} />
-        나의 워크스페이스<span className={styles.personal}>개인</span>
+        통합 업무실
+        <span className={styles.personal}>{spaceLabels[data.activeSpace]}</span>
       </div>
       <p className={styles.navCaption}>WORKSPACE</p>
       <nav className={styles.navigation} aria-label="주 메뉴">
@@ -85,8 +89,8 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
           <span className={styles.smallSpark}>
             <Icon name="spark" size={18} />
           </span>
-          <p>더 가벼운 하루의 시작</p>
-          <span>생각과 할 일에 자리를 만들어주세요.</span>
+          <p>업무 맥락을 이어갑니다</p>
+          <span>대화·자료·결정을 한곳에.</span>
           <button onClick={() => openDialog("help")}>
             Jarvis 둘러보기 <Icon name="arrow" size={15} />
           </button>
@@ -103,8 +107,8 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
         <div className={styles.profile}>
           <span className={styles.avatar}>J</span>
           <div>
-            <strong>내 워크스페이스</strong>
-            <span>Personal space</span>
+            <strong>내 업무실</strong>
+            <span>Personal workspace</span>
           </div>
           <span className={styles.profileDot} />
         </div>
@@ -166,7 +170,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
               <span>작업 공간 검색</span>
               <kbd>⌘ K</kbd>
             </button>
-            <span className={styles.previewBadge}>레이아웃 미리보기</span>
+            <span className={styles.previewBadge}>개인 통합 업무실</span>
             <button
               className={styles.helpButton}
               aria-label="사용 안내"
@@ -180,7 +184,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
         <footer className={styles.footer}>
-          <span>작은 시작이 모여, 더 나은 하루로.</span>
+          <span>맥락이 쌓이고, 실제 일이 끝나는 공간.</span>
           <span>
             JARVIS WORKSPACE <span>↗</span>
           </span>
@@ -209,11 +213,12 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
             <div className={styles.helpIllustration}>
               <Icon name="spark" size={36} />
             </div>
-            <h3>당신의 하루를 담을 공간</h3>
+            <h3>당신의 업무가 쌓이는 공간</h3>
             <p>
-              왼쪽 메뉴에서 작업, 프로젝트, 노트 공간을 둘러보세요. 현재는 기본
-              레이아웃을 미리 볼 수 있으며, 각 공간에 필요한 기능을 차례로 더할
-              예정입니다.
+              업무실에서 대화를 남기고, 배경과 결정을 누적 맥락에 기록하세요.
+              자료실의 파일을 프로젝트·업무에 연결할 수 있습니다. 회사와 개인은
+              구분되며, 현재 기록은 이 브라우저에 보관됩니다. 실제 AI 실행은
+              연결 전입니다.
             </p>
             <button className={styles.primaryButton} onClick={closeDialog}>
               둘러보기 시작 <Icon name="arrow" size={17} />

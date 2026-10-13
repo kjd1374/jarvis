@@ -15,6 +15,7 @@
   top: 12px;
 }
 .sidebar {
+  overflow-y: auto;
   width: 240px;
   position: fixed;
   inset: 0 auto 0 0;
@@ -111,11 +112,11 @@
 }
 .sidebarBottom {
   margin-top: auto;
-  padding-top: 38px;
+  padding-top: 20px;
 }
 .sidebarNote {
-  margin: 0 2px 25px;
-  padding: 18px 15px;
+  margin: 0 2px 16px;
+  padding: 14px;
   border-radius: 10px;
   background: #2b3930;
   border: 1px solid #3c4a3f;
@@ -136,6 +137,11 @@
   font-size: 10px;
   line-height: 1.7;
   color: #a0b1a4;
+}
+@media (max-height: 800px) {
+  .sidebarNote {
+    display: none;
+  }
 }
 .sidebarNote button {
   margin-top: 18px;
@@ -188,7 +194,7 @@
   margin-left: 240px;
 }
 .header {
-  height: 77px;
+  height: 68px;
   padding: 0 42px;
   border-bottom: 1px solid var(--border);
   display: flex;
@@ -254,7 +260,7 @@
 .main {
   max-width: 1440px;
   margin: 0 auto;
-  padding: 37px 42px 34px;
+  padding: 27px 32px 30px;
   outline: none;
 }
 .pageHeading {

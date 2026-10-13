@@ -15,9 +15,44 @@ export type IconName =
   | "spark"
   | "asterisk"
   | "clock"
-  | "help";
+  | "help"
+  | "message"
+  | "paperclip"
+  | "send"
+  | "download"
+  | "link"
+  | "memory";
+// Workspace controls use the same stroke style as the original shell.
 
 const paths: Record<IconName, React.ReactNode> = {
+  message: (
+    <path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l-2 2V11.5A8.5 8.5 0 0 1 10.5 3h2a8.5 8.5 0 0 1 8.5 8.5Z" />
+  ),
+  paperclip: (
+    <path d="m8 12 7-7a3.5 3.5 0 0 1 5 5L10 20a5 5 0 0 1-7-7L13 3m-6 11 8-8" />
+  ),
+  send: (
+    <>
+      <path d="m3 3 19 9-19 9 4-9Z" />
+      <path d="M7 12h15" />
+    </>
+  ),
+  download: (
+    <>
+      <path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4" />
+    </>
+  ),
+  link: (
+    <>
+      <path d="m10 8 3-3a5 5 0 0 1 7 7l-3 3M14 16l-3 3a5 5 0 0 1-7-7l3-3M8 16l8-8" />
+    </>
+  ),
+  memory: (
+    <>
+      <rect x="5" y="5" width="14" height="14" rx="3" />
+      <path d="M9 9h6v6H9ZM9 2v3m6-3v3M9 19v3m6-3v3M2 9h3m-3 6h3M19 9h3m-3 6h3" />
+    </>
+  ),
   grid: (
     <>
       <rect x="3" y="3" width="7" height="7" rx="1.5" />

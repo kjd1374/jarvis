@@ -1,3 +1,5 @@
-import { Dashboard } from "@/components/workspace/dashboard";
+import { AgentWorkspace } from "@/components/workspace/agent-workspace";
 
-export default function Home() { return <Dashboard />; }
+export default function Home() {
+  return <AgentWorkspace />;
+}
