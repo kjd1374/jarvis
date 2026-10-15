@@ -60,8 +60,7 @@ function RequestsView({ projectId }: { projectId?: string }) {
         </button>
       </div>
       <p className={styles.detailFootnote}>
-        요청을 저장해도 서비스가 수정되지는 않습니다. 현재는 요청을 복사해
-        서비스에서 작업하고, 처리 상태와 검증 결과를 직접 기록합니다.
+        직접 처리한 서비스 작업과 검증을 보관하는 기록입니다. GitHub 코드의 자동 수정은 프로젝트 상단 AI 작업실에서 요청하세요.
       </p>
       {notice && (
         <p role="status" className={styles.notice}>

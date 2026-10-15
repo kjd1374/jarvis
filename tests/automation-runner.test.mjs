@@ -100,3 +100,20 @@ test("delivery retry reuses the completed local analysis without another model c
 test("unchanged evidence skips model use entirely", async () => {
   await executeJob({ request: async () => ({ analysisRequired: false }) }, { id: "job" }, { collect: async () => ({ items: [] }), analyze: () => assert.fail("unchanged evidence must not use model"), log: () => {} });
 });
+
+test("web discovery uses homepage, successful deployments, Pages and explicit README links", async () => {
+  const source = sourceGet();
+  const first = await collectRepository({ repository: "example/test" }, async path => {
+    if (path === "repos/example/test") return { full_name: "example/test", default_branch: "main", homepage: "https://project-live.vercel.app", has_pages: true };
+    if (path.endsWith("/pages")) return { status: "built", html_url: "https://example-user.github.io/project/" };
+    if (path.includes("/git/blobs/")) return { encoding: "base64", content: Buffer.from("[Live demo](https://demo-live.vercel.app) [Docs](https://irrelevant-docs.org) [Website](https://localhost)").toString("base64"), size: 200 };
+    if (path.includes("/deployments?")) return [{ id: 1, sha: head, environment: "Production" }, { id: 2, sha: head, environment: "Preview" }];
+    if (path.includes("/deployments/1/statuses")) return [{ state: "success", environment_url: "https://production-live.vercel.app", created_at: stamp }];
+    if (path.includes("/deployments/2/statuses")) return [{ state: "failure", environment_url: "https://failed-live.vercel.app", created_at: stamp }];
+    return source.get(path);
+  });
+  assert.deepEqual(first.webLinks.map(l => l.kind), ["homepage", "deployment", "pages", "readme"]);
+  assert(!JSON.stringify(first.webLinks).includes("failed-live")); assert(!JSON.stringify(first.webLinks).includes("irrelevant-docs"));
+  const second = await collectRepository({ repository: "example/test", previousInspection: first.inspection, previousSourceIds: first.items.map(i => i.externalId), previousWebLinks: first.webLinks }, source.get);
+  assert(second.webLinks.some(l => l.kind === "readme"));
+});

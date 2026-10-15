@@ -334,8 +334,7 @@ function ServicesView({
                   )}
                 </div>
                 <p className={styles.detailFootnote}>
-                  작업 실행 연결 없음 · 웹 주소를 여는 기능입니다. 로컬 프로그램
-                  실행은 PC 실행 연결이 필요합니다.
+                  {repositoryFor(service) ? "웹 주소와 프로젝트 내용을 CLI로 자동 점검합니다. 코드 수정은 프로젝트 상단 AI 작업실에서 요청하세요." : "서비스 열기는 웹 주소를 엽니다. 이 서비스의 업무 데이터 읽기·쓰기는 별도 연결이 필요합니다."}
                 </p>
                 <GitHubMonitor service={service} />
                 <details className={styles.revisionDetails}>

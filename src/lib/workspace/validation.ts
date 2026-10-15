@@ -1,3 +1,4 @@
+import { validateProjectAutomation } from "../automation/work";
 import { validateMonitoring } from "../automation/validation";
 import { unifyProjectConnections } from "./project-connections";
 import { emptyWorkspace, type WorkspaceData, type Space } from "./types";
@@ -237,6 +238,7 @@ export function normalizeWorkspace(value: unknown): WorkspaceData {
     }
   }
   for (const service of data.services) validateMonitoring(service, data);
+  for (const project of data.projects) validateProjectAutomation(project, data);
   const sourceIds = new Set<string>();
   for (const row of data.sourceRecords) {
     const identity = JSON.stringify([row.serviceId, row.externalId]);

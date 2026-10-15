@@ -48,6 +48,9 @@ export type ProjectAnalysis = {
   suggestions: WorkSuggestion[];
 };
 export type GitHubMonitoring = {
+  webLinks?: import("./work-types").DiscoveredWebLink[];
+  runnerSeenAt?: string;
+  runnerVersion?: string;
   lastSuccessAt: string | null;
   lastAttemptAt: string | null;
   error: string | null;

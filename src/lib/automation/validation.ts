@@ -1,3 +1,4 @@
+import { parseWebLinks } from "./web-links";
 import type { Service, WorkspaceData } from "../workspace/types";
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const text = (v: unknown, max: number) => typeof v === "string" && v.length <= max;
@@ -11,6 +12,8 @@ export function validateMonitoring(service: Service, data: WorkspaceData) {
   if (m === undefined) return;
   if (!object(m) || ![m.lastSuccessAt, m.lastAttemptAt, m.nextRetryAt].every(v => v === null || date(v)) || !(m.error === null || text(m.error, 300)) || !repository(m.repository) || typeof m.enabled !== "boolean" || typeof m.automatic !== "boolean" ||
       !Number.isInteger(m.intervalMinutes) || (m.intervalMinutes as number) < 15 || (m.intervalMinutes as number) > 1440 || !Array.isArray(m.previousAnalyses) || m.previousAnalyses.length > 5) invalid();
+  if (m.webLinks !== undefined) parseWebLinks(m.webLinks, m.repository as string, new Date().toISOString());
+  if (m.runnerSeenAt !== undefined && !date(m.runnerSeenAt) || m.runnerVersion !== undefined && !text(m.runnerVersion, 50)) invalid();
   if (m.job !== null) {
     const job = m.job;
     if (!object(job) || !text(job.id, 200) || !repository(job.repository) || !date(job.requestedAt) ||

@@ -72,3 +72,54 @@ test("연결된 실행기의 서버 분석을 열린 화면에서 자동 갱신�
   await page.clock.fastForward(31_000);
   await expect(monitor).toContainText("합성 저장소 분석 결과");
 });
+
+test("프로젝트 상단의 자동 웹 주소·대화 요청·후속 업무는 영역을 유지하고 다시 열어도 보존된다", async ({ page }, info) => {
+  const stamp = new Date().toISOString(), data = automationWorkspace(stamp);
+  data.services[0].monitoring!.webLinks = [{ url: "https://synthetic-project.vercel.app/", kind: "homepage", environment: "홈페이지", sourceUrl: "https://github.com/example/synthetic", observedAt: stamp }];
+  data.services[0].monitoring!.runnerSeenAt = stamp; data.services[0].monitoring!.runnerVersion = "2.0.0";
+  await seed(page, data); await page.goto("/projects/auto-project"); await ready(page);
+  const links = page.getByRole("region", { name: "프로젝트 바로가기", exact: true });
+  await expect(links.getByRole("link", { name: "웹 화면 열기", exact: true })).toHaveAttribute("href", "https://synthetic-project.vercel.app/");
+  const agent = page.getByRole("region", { name: "프로젝트 AI 작업실", exact: true });
+  await expect(agent).toContainText("CLI 연결됨");
+  await agent.getByLabel("AI에게 요청", { exact: true }).fill("합성 모바일 버튼 개선");
+  await agent.getByLabel("반영 범위", { exact: true }).selectOption("pr");
+  await agent.getByRole("button", { name: "요청 보내기", exact: true }).click();
+  await expect(agent).toContainText("실행 대기");
+  await page.reload(); await ready(page); await expect(agent).toContainText("합성 모바일 버튼 개선");
+  const saved = (await state(page))!;
+  expect(saved.projects[0].automation!.turns).toHaveLength(1); expect(saved.tasks).toHaveLength(1);
+  expect(saved.projects[0].automation!.turns[0]).toMatchObject({ mode: "change", publish: "pr", repository: "example/synthetic" });
+  await agent.getByRole("button", { name: "요청 취소", exact: true }).click();
+  await expect(agent).toContainText("요청 취소됨");
+  await agent.getByLabel("요청 방식", { exact: true }).selectOption("ask");
+  await expect(agent.getByLabel("반영 범위", { exact: true })).toHaveCount(0);
+  await agent.getByLabel("AI에게 요청", { exact: true }).fill("합성 프로젝트 구조를 설명해줘");
+  await agent.getByRole("button", { name: "요청 보내기", exact: true }).click();
+  expect((await state(page))!.tasks).toHaveLength(1);
+  await page.setViewportSize({ width: 320, height: 740 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: info.outputPath("project-ai-workroom.png"), fullPage: true });
+  await page.getByRole("button", { name: "개인", exact: true }).click();
+  await expect(page.getByText("합성 모바일 버튼 개선", { exact: true })).toHaveCount(0);
+});
+
+test("CLI 결과를 자동 분류하고 수정·검증·후속 업무를 별도 수기 입력 없이 보여준다", async ({ page }, info) => {
+  const { enqueueWork, claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
+  const stamp = new Date().toISOString();
+  let data = enqueueWork(automationWorkspace(stamp), "company", "auto-project", "auto-service", "합성 모바일 여백 수정", "change", "merge", stamp);
+  const claimed = claimProjectWork(data, { space: "company", projectIds: ["auto-project"], deviceId: "runner" }, stamp), job = claimed.job!;
+  data = reportProjectWork(claimed.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: {
+    reply: "모바일 여백을 수정했습니다. CI와 배포 결과를 확인했습니다.", summary: "모바일 가독성 개선", currentStatus: "반영됨", nextAction: "태블릿 확인", changes: ["src/page.tsx"],
+    checks: [{ name: "GitHub CI", status: "passed", detail: "합성 커밋 검사 성공" }], followUps: [{ title: "태블릿 화면 회귀 확인", reason: "추가 화면 크기", kind: "todo" }, { title: "문구 최종 확인", reason: "표현 결정", kind: "decision" }],
+    outcome: "deployed", branch: `jarvis/work-${job.id}`, baseSha: "a".repeat(40), headSha: "b".repeat(40), prUrl: "https://github.com/example/synthetic/pull/1", deployment: { state: "success", url: "https://synthetic-project.vercel.app/", sha: "c".repeat(40) },
+  } }, "runner", stamp);
+  await seed(page, data); await page.goto("/projects/auto-project"); await ready(page);
+  await expect(page.getByRole("region", { name: "자동 수정 검증 결과", exact: true })).toContainText("통과 · GitHub CI");
+  await expect(page.getByRole("region", { name: "자동 후속 업무", exact: true })).toContainText("태블릿 화면 회귀 확인");
+  await expect(page.getByRole("region", { name: "자동 확인 사항", exact: true })).toContainText("문구 최종 확인");
+  await expect(page.getByRole("region", { name: "프로젝트 바로가기", exact: true }).getByRole("link", { name: "웹 화면 열기", exact: true })).toHaveAttribute("href", "https://synthetic-project.vercel.app/");
+  await page.reload(); await ready(page);
+  expect((await state(page))!.tasks).toHaveLength(3);
+  await page.screenshot({ path: info.outputPath("project-ai-results.png"), fullPage: true });
+});
