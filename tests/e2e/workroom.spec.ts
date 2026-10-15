@@ -207,6 +207,7 @@ test("프로젝트에 서비스·메모·할 일·요청을 저장하고 실제 
   await task.getByLabel("진행 상태", { exact: true }).selectOption("decision");
   await task.getByLabel("일정", { exact: true }).fill("2026-01-01");
   await task.getByRole("button", { name: "업무 저장", exact: true }).click();
+  await expect(task).not.toBeVisible();
   await page.goto(detailUrl);
   await page
     .getByRole("button", { name: "수정 요청 등록", exact: true })
@@ -223,6 +224,8 @@ test("프로젝트에 서비스·메모·할 일·요청을 저장하고 실제 
     .getByLabel("요청 서비스")
     .selectOption({ label: "합성 로컬 웹 서비스" });
   await request.getByRole("button", { name: "요청 저장", exact: true }).click();
+  // The click resolves before IndexedDB commits. The dialog closes after save.
+  await expect(request).not.toBeVisible();
   await page.reload();
   await ready(page);
   const stored = (await state(page))!;
