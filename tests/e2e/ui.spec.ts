@@ -1,4 +1,4 @@
-import { test, expect, ready, state, projectForm } from "../support/fixtures";
+import { test, expect, openDetails, ready, state, projectForm } from "../support/fixtures";
 
 const routes = [
   ["업무실", "/"],
@@ -345,6 +345,7 @@ test("프로젝트 카드는 상세 화면을 열고 프로젝트 대화에서 �
   await expect(page).toHaveURL(/\/projects\/[^/]+$/);
   const detailUrl = page.url();
   await expect(page.locator("h1")).toHaveText("합성 한국어 공부");
+  await openDetails(page, "프로젝트 정보·연결");
   await expect(
     page.getByText("회화 학습 앱을 만들고 진행 상황을 관리한다.", {
       exact: true,
@@ -374,6 +375,7 @@ test("프로젝트 카드는 상세 화면을 열고 프로젝트 대화에서 �
   await expect(editor).not.toBeVisible();
   await expect(page).toHaveURL(detailUrl);
   await expect(page.locator("h1")).toHaveText("합성 한국어 회화 프로젝트");
+  await openDetails(page, "프로젝트 정보·연결");
   await page.getByRole("button", { name: "서비스 등록", exact: true }).click();
   const connection = page.getByRole("dialog", { name: "서비스 등록", exact: true });
   await connection.getByLabel("서비스 이름", { exact: true }).fill("합성 회화 서비스");
@@ -385,6 +387,7 @@ test("프로젝트 카드는 상세 화면을 열고 프로젝트 대화에서 �
     page.getByRole("link", { name: "GitHub 기록 열기", exact: true }),
   ).toHaveAttribute("href", "https://github.com/example/synthetic-project");
   await page.reload();
+  await openDetails(page, "프로젝트 정보·연결");
   await expect(
     page.getByRole("link", { name: "합성 회화 서비스 서비스 열기", exact: true }),
   ).toHaveAttribute("href", "https://synthetic.example.com/");

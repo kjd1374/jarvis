@@ -47,6 +47,7 @@ test("AI 출처·업무는 같은 프로젝트 자료만 허용하고 오래된 
   const result = parseAnalysis(data, service, raw, stamp);
   expect(() => applyAnalysis(service, { ...result, basis: "b".repeat(64) })).toThrow();
   expect(analysisInput(data, service).tasks).toEqual([]);
+  expect(analysisInput(data, service).executionContext).toMatchObject({ jarvisRunner: { lastContactAt: stamp, githubReadAt: stamp }, targetRepository: "example/synthetic" });
 });
 test("제안 채택은 한 번만 등록하고 사용자 선택을 재분석 뒤에도 유지한다", () => {
   let data = analyzed(); const proposal = data.services[0].monitoring!.analysis!.suggestions[0];

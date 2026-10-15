@@ -202,3 +202,11 @@ Validation: lint/typecheck/production build and domain 20 passed. The new end-to
 선택: GitHub 구조화 메타데이터/명시적 README 링크에서 웹 주소를 발견하고 출처를 보관한다. 모델은 선택 저장소의 isolated checkout에서 수정, runner는 실제 Git diff/검사/PR/선택적 merge와 exact merged SHA 배포를 관찰한다. 공개 PR에는 사적 요청 대화를 넣지 않는다. workspace-write sandbox·네트워크 차단·구독 인증 유지, CI 정책/비밀/사용자 데이터 제외, 기기+요청 lease token, 취소 fencing, private journal/중복 전달 복구를 적용했다. 자동 제안은 업무로 등록하되 새 외부 실행 승인으로 확대하지 않는다. 백업의 대기 요청은 복원 시 일시 중단한다.
 
 검증: 실제 임시 Git fixture에서 수정/커밋/푸시/복구를 수행하며 GitHub와 Codex 계약은 합성 처리한다. 도메인에서 scope/lease/late-result/PR-vs-deployment/backup pause를 확인하고, 데스크톱/모바일에서 프로젝트 대화·자동 링크·자동 결과/후속 업무 및 320px을 검증한다. 서버 검증은 disposable local Supabase의 실제 owner/device/CAS를 사용한다. 최종 수치와 운영 배포 증거는 연결 PR에 기록한다. 실제 사용자 subscription/model run은 사용자 PC 최초 연결 이후 별도 확인하며 개발/플랫폼 인증을 대신 사용하지 않는다.
+
+## 2026-10-15 프로젝트 장문/중복 노출과 연결 상태 구분 (Issue #17)
+
+설치된 Next 16.4.0 CSS Modules/client components 공식 문서를 확인했다. 기존 React 19.3.0, CSS Modules, native details/summary를 재사용한다. 앞서 비교한 공식 Radix Primitives와 shadcn/ui 저장소를 다시 확인했다(둘 다 MIT, 비보관, 각각 2026-10-14/15 갱신). React 19와 호환되는 접근성 컴포넌트를 제공하지만 단순 접기 UI에 새 패키지/스타일 체계를 더할 이익이 작아 보류한다. 새 패키지 설치·유료 서비스·외부 업무 전송은 없다.
+
+최신 대화 하나와 제한된 텍스트 미리보기로 기본 높이를 제한하고, 사용자 선택으로 전문·이력·원문을 연다. 중요한 실패/결정 수와 요청 실행 범위는 접지 않는다. 기존 원문/이력은 삭제하거나 요약으로 덮어쓰지 않는다. 원문 카드의 compact 모드는 프로젝트 상세에서만 사용해 홈/검색의 기존 표시 범위를 유지한다.
+
+실행기 접속과 대상 앱 연동을 같은 상태로 취급하지 않는다. 서버가 검증한 임대 heartbeat/수집 성공에서 접속 시각을 기록하고, 오래된 접속은 온라인으로 표시하지 않는다. 서버가 제공하는 작업/분석 context에 관찰된 Jarvis 연결과 대상 저장소의 범위를 구분하며, 현재 2.0 실행기의 기존 JSON 입력 계약을 유지한다. AI 응답의 정확성을 강제로 보장하거나 사용자 기기의 다른 CLI를 검사했다고 주장하지 않는다.
