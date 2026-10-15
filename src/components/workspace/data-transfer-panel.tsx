@@ -7,7 +7,11 @@ import {
   type Backup,
 } from "@/lib/workspace/backup";
 import { mergeWorkspace, scopeWorkspace } from "@/lib/workspace/transfer";
-import { readFile } from "@/lib/workspace/storage";
+import {
+  readFile,
+  readLegacyWorkspace,
+  readLegacyFile,
+} from "@/lib/workspace/storage";
 import {
   cloudStatus,
   pullCloud,
@@ -19,7 +23,7 @@ import { useWorkspace } from "./workspace-provider";
 import styles from "./studio.module.css";
 
 export function DataTransferPanel() {
-  const { data, ready, saving, mutate } = useWorkspace();
+  const { data, ready, saving, mutate, account } = useWorkspace();
   const space = data.activeSpace;
   const [files, setFiles] = useState(true);
   const [scope, setScope] = useState<"all" | "current">("current");
@@ -214,6 +218,26 @@ export function DataTransferPanel() {
           </label>
         </div>
         <div className={styles.projectActions}>
+          {account?.authenticated && (
+            <button
+              className={styles.secondaryButton}
+              disabled={!ready || pending || saving}
+              onClick={() =>
+                void run(async () => {
+                  setBackup(
+                    await createBackup(
+                      await readLegacyWorkspace(),
+                      true,
+                      readLegacyFile,
+                    ),
+                  );
+                  setConfirmed(false);
+                })
+              }
+            >
+              이전 브라우저 기록 확인
+            </button>
+          )}
           <button
             className={styles.primaryButton}
             disabled={!ready || pending || saving}
@@ -251,6 +275,16 @@ export function DataTransferPanel() {
               기록 유지) · 파일 원본 {backup.files.length}개
             </p>
             <p>
+              가져올 프로젝트: 회사{" "}
+              {backup.data.projects.filter((p) => p.space === "company").length}
+              개 · 개인{" "}
+              {
+                backup.data.projects.filter((p) => p.space === "personal")
+                  .length
+              }
+              개
+            </p>
+            <p>
               {backup.includesFiles
                 ? "원본 포함 백업"
                 : "원본 제외 백업입니다. 파일 연결 정보만 복원합니다."}
@@ -273,89 +307,94 @@ export function DataTransferPanel() {
           </div>
         )}
       </section>
-      <section
-        className={styles.settingsCard}
-        aria-label="서버 저장과 기기 간 연결"
-      >
-        <h2>서버 저장 · 기기 간 연결</h2>
-        <p>
-          {cloud.available
-            ? "인증된 계정의 회사·개인 자료를 서버에서 각각 보관합니다. 자동 덮어쓰기 대신 검토·병합 후 저장합니다."
-            : cloud.reason}
-        </p>
-        <p className={styles.settingsNote}>
-          현재 기본 저장은 이 브라우저입니다. 운영 계정·저장 스키마가
-          승인·연결되기 전에는 다른 기기에서 같은 자료가 자동으로 나타나지
-          않습니다.
-        </p>
-        <div className={styles.projectActions}>
-          <button
-            className={styles.secondaryButton}
-            disabled={pending}
-            onClick={() => void run(async () => setCloud(await cloudStatus()))}
-          >
-            서버 연결 확인
-          </button>
-          <button
-            className={styles.secondaryButton}
-            disabled={!cloud.available || pending || saving}
-            onClick={() => void reviewServer()}
-          >
-            현재 영역의 서버 자료 검토
-          </button>
-          <button
-            className={styles.primaryButton}
-            disabled={
-              !cloud.available ||
-              !revision ||
-              revision.space !== space ||
-              pending ||
-              saving
-            }
-            onClick={() => void publish()}
-          >
-            현재 영역을 서버에 저장
-          </button>
-        </div>
-        {remotePreview && remote && (
-          <div className={styles.transferPreview}>
-            <h3>
-              {spaceLabels[space]} 서버 버전 {remote.revision}
-            </h3>
-            <p>
-              새 항목 {remotePreview.added}개 · 충돌 {remotePreview.conflicts}개
-            </p>
-            <label className={styles.confirmation}>
-              <input
-                type="checkbox"
-                checked={useRemote}
-                onChange={(e) => setUseRemote(e.target.checked)}
-              />{" "}
-              충돌한 같은 ID의 항목은 서버 내용을 사용(해제 시 이 기기 내용
-              유지)
-            </label>
-            <details>
-              <summary>서버 자료 상세 확인</summary>
-              <pre>{JSON.stringify(remote.data, null, 2)}</pre>
-            </details>
-            <label className={styles.confirmation}>
-              <input
-                type="checkbox"
-                checked={cloudConfirmed}
-                onChange={(e) => setCloudConfirmed(e.target.checked)}
-              />{" "}
-              병합 기준을 확인했습니다. 저장 전 백업을 권장합니다.
-            </label>
+      {!account?.enabled && (
+        <section
+          className={styles.settingsCard}
+          aria-label="서버 저장과 기기 간 연결"
+        >
+          <h2>서버 저장 · 기기 간 연결</h2>
+          <p>
+            {cloud.available
+              ? "인증된 계정의 회사·개인 자료를 서버에서 각각 보관합니다. 자동 덮어쓰기 대신 검토·병합 후 저장합니다."
+              : cloud.reason}
+          </p>
+          <p className={styles.settingsNote}>
+            현재 기본 저장은 이 브라우저입니다. 운영 계정·저장 스키마가
+            승인·연결되기 전에는 다른 기기에서 같은 자료가 자동으로 나타나지
+            않습니다.
+          </p>
+          <div className={styles.projectActions}>
+            <button
+              className={styles.secondaryButton}
+              disabled={pending}
+              onClick={() =>
+                void run(async () => setCloud(await cloudStatus()))
+              }
+            >
+              서버 연결 확인
+            </button>
+            <button
+              className={styles.secondaryButton}
+              disabled={!cloud.available || pending || saving}
+              onClick={() => void reviewServer()}
+            >
+              현재 영역의 서버 자료 검토
+            </button>
             <button
               className={styles.primaryButton}
-              disabled={!cloudConfirmed || pending || saving}
-              onClick={() => void mergeServer()}
+              disabled={
+                !cloud.available ||
+                !revision ||
+                revision.space !== space ||
+                pending ||
+                saving
+              }
+              onClick={() => void publish()}
             >
-              검토한 기준으로 병합
+              현재 영역을 서버에 저장
             </button>
           </div>
-        )}
-      </section>
+          {remotePreview && remote && (
+            <div className={styles.transferPreview}>
+              <h3>
+                {spaceLabels[space]} 서버 버전 {remote.revision}
+              </h3>
+              <p>
+                새 항목 {remotePreview.added}개 · 충돌 {remotePreview.conflicts}
+                개
+              </p>
+              <label className={styles.confirmation}>
+                <input
+                  type="checkbox"
+                  checked={useRemote}
+                  onChange={(e) => setUseRemote(e.target.checked)}
+                />{" "}
+                충돌한 같은 ID의 항목은 서버 내용을 사용(해제 시 이 기기 내용
+                유지)
+              </label>
+              <details>
+                <summary>서버 자료 상세 확인</summary>
+                <pre>{JSON.stringify(remote.data, null, 2)}</pre>
+              </details>
+              <label className={styles.confirmation}>
+                <input
+                  type="checkbox"
+                  checked={cloudConfirmed}
+                  onChange={(e) => setCloudConfirmed(e.target.checked)}
+                />{" "}
+                병합 기준을 확인했습니다. 저장 전 백업을 권장합니다.
+              </label>
+              <button
+                className={styles.primaryButton}
+                disabled={!cloudConfirmed || pending || saving}
+                onClick={() => void mergeServer()}
+              >
+                검토한 기준으로 병합
+              </button>
+            </div>
+          )}
+        </section>
+      )}
       {error && (
         <p className={styles.errorBanner} role="alert">
           {error}

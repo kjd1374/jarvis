@@ -111,10 +111,16 @@ export async function readJson(
     throw new CloudError(400, "invalid_json", "요청 형식이 올바르지 않습니다.");
   }
 }
-export function checkOrigin(request: Request) {
-  if (request.headers.get("authorization")?.startsWith("Bearer ")) return;
+export function checkOrigin(request: Request, allowBearer = true) {
+  if (
+    allowBearer &&
+    request.headers.get("authorization")?.startsWith("Bearer ")
+  )
+    return;
   const origin = request.headers.get("origin");
-  if (!origin || origin !== new URL(request.url).origin)
+  const expectedOrigin =
+    process.env.JARVIS_APP_ORIGIN || new URL(request.url).origin;
+  if (!origin || origin !== expectedOrigin)
     throw new CloudError(403, "origin_denied", "같은 앱에서 요청해주세요.");
 }
 export async function authorize(request: Request) {
@@ -151,9 +157,18 @@ export async function authorize(request: Request) {
     throw new CloudError(
       401,
       "authentication_required",
-      "앱 계정 연결이 필요합니다. Vercel 미리보기 로그인과 업무 데이터 계정은 별개입니다.",
+      "이 기기의 서버 연결이 필요합니다. 설정에서 기기 확인을 진행해주세요.",
     );
-  return { client, ownerId: data.user.id };
+  const { data: device, error: deviceError } = await client.rpc(
+    "jarvis_device_status",
+  );
+  if (deviceError || !device?.owner_id)
+    throw new CloudError(
+      403,
+      "device_required",
+      "이 브라우저를 내 기기로 확인해야 서버 기록에 접근할 수 있습니다.",
+    );
+  return { client, ownerId: device.owner_id as string, deviceId: data.user.id };
 }
 export function scopedPayload(input: unknown, space: Space): WorkspaceData {
   let value: WorkspaceData;

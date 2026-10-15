@@ -2,8 +2,45 @@ import type { Space, WorkspaceData } from "../workspace/types";
 import { scopeWorkspace } from "../workspace/transfer";
 async function json(response: Response) {
   const body = await response.json();
-  if (!response.ok) throw new Error(body.error ?? "서버 연결을 확인해주세요.");
+  if (!response.ok)
+    throw new CloudRequestError(
+      response.status,
+      body.code,
+      body.error ?? "서버 연결을 확인해주세요.",
+    );
   return body;
+}
+export class CloudRequestError extends Error {
+  constructor(
+    public status: number,
+    public code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+export type AccountStatus = {
+  enabled: boolean;
+  configured: boolean;
+  authenticated: boolean;
+  accountId?: string;
+  deviceId?: string;
+  pairingCode?: string;
+};
+export async function accountStatus(): Promise<AccountStatus> {
+  return json(await fetch("/api/account", { cache: "no-store" }));
+}
+export async function accountAction(
+  action: "device" | "logout",
+  body: Record<string, string> = {},
+) {
+  return json(
+    await fetch(`/api/account/${action}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
 }
 export async function cloudStatus() {
   return json(await fetch("/api/workspace/status", { cache: "no-store" }));

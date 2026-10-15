@@ -1,11 +1,28 @@
 import { type WorkspaceData } from "./types";
 import { normalizeWorkspace } from "./validation";
+import { scopeWorkspace } from "./transfer";
+import { canonical, emptySync, type SyncState } from "../cloud/records";
 
-let database: Promise<IDBDatabase> | undefined;
-function open(): Promise<IDBDatabase> {
+const databases = new Map<string, Promise<IDBDatabase>>();
+let storageAccount: string | null = null;
+export function setStorageAccount(accountId: string | null) {
+  if (accountId !== null && !/^[a-zA-Z0-9-]{1,100}$/.test(accountId))
+    throw new Error("계정 식별 정보를 확인해주세요.");
+  storageAccount = accountId;
+}
+function storageName() {
+  return storageAccount
+    ? `jarvis-workspace-owner-${storageAccount}`
+    : "jarvis-workspace";
+}
+function accountName(accountId?: string) {
+  return accountId ? `jarvis-workspace-owner-${accountId}` : storageName();
+}
+function open(name = storageName()): Promise<IDBDatabase> {
+  let database = databases.get(name);
   if (!database)
     database = new Promise((resolve, reject) => {
-      const request = indexedDB.open("jarvis-workspace", 1);
+      const request = indexedDB.open(name, 1);
       request.onupgradeneeded = () => {
         request.result.createObjectStore("workspace");
         request.result.createObjectStore("files");
@@ -14,19 +31,21 @@ function open(): Promise<IDBDatabase> {
         const db = request.result;
         db.onversionchange = () => {
           db.close();
-          database = undefined;
+          databases.delete(name);
         };
+        db.onclose = () => databases.delete(name);
         resolve(db);
       };
       request.onerror = () => {
-        database = undefined;
+        databases.delete(name);
         reject(new Error("브라우저 저장 공간을 열 수 없습니다."));
       };
       request.onblocked = () => {
-        database = undefined;
+        databases.delete(name);
         reject(new Error("다른 Jarvis 탭을 닫고 다시 열어주세요."));
       };
     });
+  databases.set(name, database);
   return database;
 }
 
@@ -67,8 +86,10 @@ function readCurrent(
     fail(new Error("저장된 업무 맥락을 읽을 수 없습니다."));
 }
 
-export async function readWorkspace(): Promise<WorkspaceData> {
-  const db = await open();
+export async function readWorkspace(
+  accountId?: string,
+): Promise<WorkspaceData> {
+  const db = await open(accountName(accountId));
   return new Promise((resolve, reject) => {
     const tx = db.transaction("workspace", "readonly");
     let result: WorkspaceData;
@@ -85,12 +106,78 @@ export async function readWorkspace(): Promise<WorkspaceData> {
   });
 }
 
+export async function readCloudLocal(
+  accountId?: string,
+): Promise<{ data: WorkspaceData; sync: SyncState; hasSnapshot: boolean }> {
+  const db = await open(accountName(accountId));
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("workspace", "readonly");
+    const store = tx.objectStore("workspace");
+    const sync = store.get("cloud-sync");
+    const saved = store.get("current");
+    let data: WorkspaceData;
+    readCurrent(
+      store,
+      (value) => {
+        data = value;
+      },
+      reject,
+    );
+    tx.oncomplete = () =>
+      resolve({
+        data,
+        sync: sync.result ?? emptySync(),
+        hasSnapshot: saved.result !== undefined,
+      });
+    tx.onabort = () =>
+      reject(new Error("서버 저장 대기 기록을 읽지 못했습니다."));
+  });
+}
+
+export async function readLegacyWorkspace(): Promise<WorkspaceData> {
+  const db = await open("jarvis-workspace");
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("workspace", "readonly");
+    let result: WorkspaceData;
+    readCurrent(
+      tx.objectStore("workspace"),
+      (value) => {
+        result = value;
+      },
+      reject,
+    );
+    tx.oncomplete = () => resolve(result);
+    tx.onabort = () =>
+      reject(new Error("이전 브라우저 기록을 읽지 못했습니다."));
+  });
+}
+
+export async function readLegacyFile(id: string): Promise<Blob> {
+  const db = await open("jarvis-workspace");
+  return new Promise((resolve, reject) => {
+    const read = db.transaction("files").objectStore("files").get(id);
+    read.onsuccess = () =>
+      read.result instanceof Blob
+        ? resolve(read.result)
+        : reject(new Error("이전 기록의 파일 원본을 찾지 못했습니다."));
+    read.onerror = () => reject(new Error("이전 파일을 읽지 못했습니다."));
+  });
+}
+
 // Read and update in one transaction, including blobs, so tabs cannot overwrite each other's changes.
 export async function commitWorkspace(
   transform: (data: WorkspaceData) => WorkspaceData,
   files: { id: string; blob: Blob; preventOverwrite?: boolean }[] = [],
+  options?: {
+    accountId?: string;
+    trackCloud?: boolean;
+    cloudUpdate?: (
+      data: WorkspaceData,
+      sync: SyncState,
+    ) => { data: WorkspaceData; sync: SyncState };
+  },
 ): Promise<WorkspaceData> {
-  const db = await open();
+  const db = await open(accountName(options?.accountId));
   return new Promise((resolve, reject) => {
     const tx = db.transaction(["workspace", "files"], "readwrite", {
       durability: "strict",
@@ -98,11 +185,28 @@ export async function commitWorkspace(
     let result: WorkspaceData;
     let failure: unknown;
     const store = tx.objectStore("workspace");
+    const syncRead = options ? store.get("cloud-sync") : null;
     readCurrent(
       store,
       (current) => {
         try {
-          result = normalizeWorkspace(transform(current));
+          let sync: SyncState = syncRead?.result ?? emptySync();
+          const update = options?.cloudUpdate?.(current, sync);
+          result = normalizeWorkspace(
+            update ? update.data : transform(current),
+          );
+          if (update) sync = update.sync;
+          if (options?.trackCloud) {
+            sync = structuredClone(sync);
+            for (const space of ["company", "personal"] as const) {
+              if (
+                canonical(scopeWorkspace(current, space)) !==
+                canonical(scopeWorkspace(result, space))
+              )
+                sync.dirty[space] = ++sync.sequence;
+            }
+          }
+          if (options) store.put(sync, "cloud-sync");
           store.put(result, "current");
           store.put(
             { data: result, savedAt: new Date().toISOString() },
@@ -234,17 +338,39 @@ export async function restoreStorageRecovery(): Promise<void> {
   });
 }
 
-export async function readFile(fileId: string): Promise<Blob> {
-  const db = await open();
-  return new Promise((resolve, reject) => {
+export async function readFile(
+  fileId: string,
+  accountId?: string,
+): Promise<Blob> {
+  const db = await open(accountName(accountId));
+  const account = accountId ?? storageAccount;
+  const local = await new Promise<Blob | undefined>((resolve, reject) => {
     const request = db
       .transaction("files", "readonly")
       .objectStore("files")
       .get(fileId);
     request.onsuccess = () =>
-      request.result instanceof Blob
-        ? resolve(request.result)
-        : reject(new Error("파일 원본을 찾을 수 없습니다."));
+      resolve(request.result instanceof Blob ? request.result : undefined);
     request.onerror = () => reject(new Error("파일을 읽을 수 없습니다."));
   });
+  if (local) return local;
+  if (account) {
+    const data = await readWorkspace(account);
+    const record = data.documents.find((r) => r.id === fileId && !r.sourceUrl);
+    if (record) {
+      const { downloadCloudFile } = await import("../cloud/client");
+      const blob = await downloadCloudFile(record.space, fileId);
+      if (blob.size !== record.size)
+        throw new Error("서버 파일 크기가 기록과 다릅니다.");
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction("files", "readwrite");
+        tx.objectStore("files").put(blob, fileId);
+        tx.oncomplete = () => resolve();
+        tx.onabort = () =>
+          reject(new Error("파일을 이 기기에 보관하지 못했습니다."));
+      });
+      return blob;
+    }
+  }
+  throw new Error("파일 원본을 찾을 수 없습니다.");
 }

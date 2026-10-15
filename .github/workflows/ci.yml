@@ -19,6 +19,7 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - run: npm run test:deploy
+      - run: npm run test:devices
       - run: npm run test:domain
       - run: npm run check
         env:

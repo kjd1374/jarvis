@@ -19,6 +19,7 @@ function base64(buffer: ArrayBuffer): string {
 export async function createBackup(
   data: WorkspaceData,
   includesFiles = true,
+  readOriginal = readFile,
 ): Promise<Backup> {
   const value = normalizeWorkspace(data);
   const files: Backup["files"] = [];
@@ -26,7 +27,7 @@ export async function createBackup(
   if (includesFiles)
     for (const record of value.documents) {
       if (record.sourceUrl) continue;
-      const file = await readFile(record.id);
+      const file = await readOriginal(record.id);
       size += file.size;
       if (size > 45 * 1024 * 1024)
         throw new Error(

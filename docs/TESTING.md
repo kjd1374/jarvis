@@ -117,3 +117,14 @@ npm run test:storage -- --grep '원본 포함 백업'
 - 운영 주소의 수정 전 별도 합성 프로필에서는 프로젝트 생성→화면 이동→새로고침 3회→브라우저 재시작이 통과했다. 이는 사용자 브라우저의 원인 확인이나 기존 번역 기록 복구 증거가 아니다.
 - 진단 화면: `test-results/artifacts/ui-저장-진단*/storage-diagnostics.png`. 실패 로그/trace는 위의 기존 경로와 `npm run test:report`로 확인한다. 재시작 테스트의 임시 브라우저 프로필은 `/tmp`에만 생성하고 종료 후 삭제하며 Git/artifact에 포함하지 않는다.
 - 미검증: 사용자의 실제 브라우저 저장 공간·소실 원인·기존 번역 기록 복구, 물리 기기 2대, Safari/Firefox, 운영 서버 저장/인증, 서버 파일 API(storage-api 없는 로컬 slim 스택), 실제 외부 연동. GitHub CI와 정식 배포 결과는 해당 PR/Issue #4에서 SHA와 함께 별도로 기록한다.
+
+### 2026-10-15 로그인 없는 기기 연결·서버 자동 보관 (Issue #6)
+
+- 사용자 정정에 따라 이메일/로그인/가입 UI는 제외했다. 합성 테스트는 실제 구현한 기기 상태/서버 API 계약을 모킹하고 외부 네트워크·운영 DB·유료 AI를 사용하지 않는다.
+- `npm run test:all` **52/52 통과**(desktop 19 / mobile 19 / 기존 실제 IndexedDB storage 14). 기존 v1 기록/파일/백업/복구/브라우저 재시작 검증을 유지했다. 새 10건은 미등록 기기 차단, 서버 자동 저장과 영역 분리, 실패 후 새로고침/재시도, 응답 유실 중복 방지, 충돌 확인/병합과 명시적 레거시 이관을 검증한다.
+- `npm run test:domain` **6/6**, `npm run test:deploy` **4/4**, `npm run test:devices` **4/4** 통과. 기기 관리 검증은 실제 관리 API를 호출하지 않고 잘못된 대상/인자/무자격 요청·SQL 삽입·불일치 승인을 차단하는지 확인한다.
+- `npm run check`: lint/TypeScript/production build 통과. 새 의존성 없음.
+- 별도 `npm run test:server`: 실제 로컬 Supabase에서 기기 세션/승인 목록/RLS/자동 저장/회사·개인 분리/revision 충돌, 실제 사설 원본 업로드·동일 원본 재시도·다른 원본 덮어쓰기 거부·새 브라우저 다운로드, 연결 해제 즉시 차단, 기존 HttpOnly 쿠키를 가진 새 빈 캐시의 자동 복원을 검증했다. 테스트용 storage-api를 포함하도록 로컬 시작 명령을 보강했다. 운영 호출·실제 v4/시트·유료 모델 0, 물리 기기 2대/Safari/Firefox는 미검증이다.
+- 실제 브라우저 등록 첫 시도에서 Origin 검사 실패를 재현했다. 프록시 내부 URL로 추정하는 대신 `JARVIS_APP_ORIGIN`의 명시적 정식 주소로 검사하도록 고친 뒤 실제 등록/파일/해제 검증이 통과했다. 기기 생성/해제는 위조한 Authorization 헤더가 있어도 브라우저 Origin 검증을 생략하지 않는다.
+- 서버 테스트는 임시 세션/원본/업무 행만 정리한다. 쿠키/토큰을 화면·로그·Git/artifact에 저장하지 않는다. 복원용 cookie state는 메모리에만 보관한다. 실패 시 `test-results/device-registration-failure.png`와 합성 화면/기기 상태를 기록하며, 일반 실패 trace·browser.log 위치는 기존 안내와 같다.
+- 운영 스키마 적용·익명 기기 세션 설정·정식 배포·실제 사용자 기기 확인 결과는 해당 PR/Issue #6에 별도로 기록한다. 로컬 검증 결과만으로 운영 사용자 기록 저장이 완료됐다고 주장하지 않는다. 과거 프로젝트 소실 원인과 복구는 Issue #4에서 계속 구분한다.

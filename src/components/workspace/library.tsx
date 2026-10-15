@@ -28,7 +28,7 @@ export function Library() {
 }
 
 function LibraryView() {
-  const { data, ready, saving, mutate } = useWorkspace();
+  const { data, ready, saving, mutate, account } = useWorkspace();
   const space = data.activeSpace;
   const projectId = data.activeProjects[space];
   const projects = data.projects.filter((p) => p.space === space);
@@ -390,8 +390,9 @@ function LibraryView() {
       </section>
       <p className={styles.storageNote}>
         <Icon name="memory" size={14} />
-        기본 저장은 이 브라우저입니다. 원본 링크는 내용을 복제하지 않습니다.
-        설정에서 백업·이관과 서버 연결 상태를 확인하세요.
+        {account?.enabled
+          ? "등록된 기기의 파일 원본은 비공개 서버 저장소에 보관합니다. 원본 링크는 내용을 복제하지 않습니다. 서버 전송 실패는 저장 대기로 표시합니다."
+          : "기본 저장은 이 브라우저입니다. 원본 링크는 내용을 복제하지 않습니다. 설정에서 백업·이관과 서버 연결 상태를 확인하세요."}
       </p>
       {referenceOpen && (
         <Modal

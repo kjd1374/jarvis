@@ -9,7 +9,7 @@
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
     "check": "npm run lint && npm run typecheck && npm run build",
-    "db:start": "supabase start --exclude studio,realtime,storage-api,imgproxy,mailpit,postgres-meta,edge-runtime,logflare,vector,supavisor",
+    "db:start": "supabase start --exclude studio,realtime,imgproxy,mailpit,postgres-meta,edge-runtime,logflare,vector,supavisor",
     "db:stop": "supabase stop",
     "db:status": "supabase status",
     "db:reset": "supabase db reset --local",
@@ -23,7 +23,8 @@
     "test:server": "node scripts/test-server-storage.mjs",
     "deploy:preview:plan": "node scripts/deploy-preview.mjs --dry-run",
     "deploy:preview:resume": "node --use-env-proxy scripts/deploy-preview.mjs --resume",
-    "test:deploy": "node --test tests/deploy-preview.test.mjs"
+    "test:deploy": "node --test tests/deploy-preview.test.mjs",
+    "test:devices": "node --test tests/devices.test.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.7",
