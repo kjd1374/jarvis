@@ -12,11 +12,12 @@ import {
   type Project,
 } from "@/lib/workspace/types";
 import { projectHref } from "@/lib/workspace/project-links";
+import { projectQuickLinks } from "@/lib/workspace/project-connections";
 import { ContextEditor, Modal, WorkspaceControls } from "./workspace-controls";
 import { useWorkspace } from "./workspace-provider";
 import { Icon } from "./icon";
 import { NotesPanel } from "./notes-panel";
-import { ServicesPanel } from "./services-panel";
+import { ServiceRegistrationButton, ServicesPanel } from "./services-panel";
 import { RequestsPanel } from "./requests-panel";
 import { SourceResults, SourcesPanel } from "./sources-panel";
 import styles from "./studio.module.css";
@@ -67,6 +68,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 function ProjectView({ project }: { project: Project }) {
   const { data, saving, mutate } = useWorkspace();
   const router = useRouter();
+  const links = projectQuickLinks(data.services, project);
   const [editing, setEditing] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
   const [notice, setNotice] = useState("");
@@ -172,6 +174,20 @@ function ProjectView({ project }: { project: Project }) {
           </button>
         </div>
       </header>
+      <section className={styles.projectQuickLinks} aria-label="프로젝트 바로가기">
+        <div className={styles.projectActions}>
+          {links.web.map(link => <a key={link.href} className={styles.primaryButton} href={link.href} target="_blank" rel="noopener noreferrer" title={link.href}>
+            <Icon name="arrow" size={16} />{links.web.length === 1 ? "웹 화면 열기" : `${link.name} 화면 열기`}
+          </a>)}
+          {links.github.map(link => <a key={link.href} className={styles.secondaryButton} href={link.href} target="_blank" rel="noopener noreferrer" title={link.href}>
+            <Icon name="link" size={16} />{links.github.length === 1 ? "GitHub 열기" : `GitHub · ${link.name}`}
+          </a>)}
+          <ServiceRegistrationButton preset="custom" projectId={project.id}><Icon name="plus" size={15} />{links.web.length ? "웹 주소 추가" : "웹 화면 연결"}</ServiceRegistrationButton>
+          {!links.github.length && <ServiceRegistrationButton preset="github" projectId={project.id}>GitHub 연결</ServiceRegistrationButton>}
+          <a className={styles.textButton} href="#project-change-requests">수정 요청 남기기 →</a>
+        </div>
+        <p>{links.web.length ? "새 탭에서 실제 화면을 확인하고, 바꿀 내용을 수정 요청으로 남기세요." : "배포된 웹 주소를 연결하면 실제 화면을 여기서 바로 열 수 있습니다. GitHub는 저장소 화면을 엽니다."}</p>
+      </section>
       {notice && (
         <p className={styles.errorBanner} role="alert">
           {notice}
