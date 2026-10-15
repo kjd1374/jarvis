@@ -1,3 +1,4 @@
+import { unifyProjectConnections } from "./project-connections";
 import { emptyWorkspace, type WorkspaceData, type Space } from "./types";
 
 export const collections = [
@@ -138,6 +139,7 @@ export function normalizeWorkspace(value: unknown): WorkspaceData {
   }
   for (const project of data.projects)
     if (
+      (project.connectionsUnified !== undefined && project.connectionsUnified !== true) ||
       !text(project.name, 160) ||
       !project.name.trim() ||
       !text(project.description, 10000)
@@ -305,5 +307,5 @@ export function normalizeWorkspace(value: unknown): WorkspaceData {
       row.received < 0
     )
       throw new Error("동기화 기록의 범위를 확인해주세요.");
-  return data;
+  return unifyProjectConnections(data);
 }

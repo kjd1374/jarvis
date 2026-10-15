@@ -827,18 +827,6 @@ test("프로젝트 수정 오류는 입력과 기존 연결을 보존하고 영�
   await editor
     .getByLabel("프로젝트 이름", { exact: true })
     .fill("합성 수정 후 프로젝트");
-  await editor
-    .getByLabel("GitHub 저장소", { exact: true })
-    .fill("javascript:alert(1)");
-  await editor.getByRole("button", { name: "변경 저장", exact: true }).click();
-  await expect(editor.getByRole("alert")).toContainText("http/https");
-  expect((await state(page))!.projects[0]).toEqual(original);
-  await editor
-    .getByLabel("GitHub 저장소", { exact: true })
-    .fill("https://github.com/example/synthetic-repository");
-  await editor
-    .getByLabel("서비스 주소", { exact: true })
-    .fill("http://localhost:8765");
   await page.evaluate(() => {
     const put = IDBObjectStore.prototype.put;
     IDBObjectStore.prototype.put = function () {
@@ -856,16 +844,33 @@ test("프로젝트 수정 오류는 입력과 기존 연결을 보존하고 영�
   expect((await state(page))!.projects[0]).toEqual(original);
   await editor.getByRole("button", { name: "변경 저장", exact: true }).click();
   await expect(editor).not.toBeVisible();
+  await page.getByRole("button", { name: "서비스 등록", exact: true }).click();
+  const connection = page.getByRole("dialog", { name: "서비스 등록", exact: true });
+  await connection.getByLabel("서비스 이름", { exact: true }).fill("합성 수정 서비스");
+  await connection.getByLabel("서비스 웹 주소", { exact: true }).fill("http://localhost:8765");
+  await connection.getByLabel("서비스 저장소 주소", { exact: true }).fill("javascript:alert(1)");
+  await connection.getByRole("button", { name: "서비스 저장", exact: true }).click();
+  await expect(connection.getByRole("alert")).toContainText("http/https");
+  expect((await state(page))!.services).toHaveLength(0);
+  await connection.getByLabel("서비스 저장소 주소", { exact: true }).fill("https://github.com/example/synthetic-repository");
+  await page.evaluate(() => {
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function () {
+      IDBObjectStore.prototype.put = put;
+      throw new DOMException("합성 연결 저장 실패", "QuotaExceededError");
+    };
+  });
+  await connection.getByRole("button", { name: "서비스 저장", exact: true }).click();
+  await expect(connection.getByRole("alert")).toContainText("합성 연결 저장 실패");
+  await expect(connection.getByLabel("서비스 저장소 주소", { exact: true })).toHaveValue("https://github.com/example/synthetic-repository");
+  expect((await state(page))!.services).toHaveLength(0);
+  await connection.getByRole("button", { name: "서비스 저장", exact: true }).click();
+  await expect(connection).not.toBeVisible();
   await page.reload();
   await expect(page.locator("h1")).toHaveText("합성 수정 후 프로젝트");
-  await expect(
-    page.getByRole("link", { name: "서비스 열기", exact: true }),
-  ).toHaveAttribute("href", "http://localhost:8765/");
-  expect((await state(page))!.projects[0]).toMatchObject({
-    id: original.id,
-    repositoryUrl: "https://github.com/example/synthetic-repository",
-    serviceUrl: "http://localhost:8765/",
-  });
+  await expect(page.getByRole("link", { name: "합성 수정 서비스 서비스 열기", exact: true })).toHaveAttribute("href", "http://localhost:8765/");
+  expect((await state(page))!.projects[0]).toMatchObject({ id: original.id, name: "합성 수정 후 프로젝트" });
+  expect((await state(page))!.services[0]).toMatchObject({ projectId: original.id, repositoryUrl: "https://github.com/example/synthetic-repository", webUrl: "http://localhost:8765/" });
   await page.getByRole("button", { name: "개인", exact: true }).click();
   await expect(page).toHaveURL("/projects");
   await page.goto(`/projects/${original.id}`);
@@ -879,7 +884,7 @@ test("프로젝트 수정 오류는 입력과 기존 연결을 보존하고 영�
     page.getByRole("heading", { name: "합성 수정 후 프로젝트", exact: true }),
   ).toHaveCount(0);
   await expect(
-    page.getByRole("link", { name: "GitHub 저장소 열기", exact: true }),
+    page.getByRole("link", { name: "합성 수정 서비스 서비스 열기", exact: true }),
   ).toHaveCount(0);
   await page.goto("/projects/missing-synthetic-id");
   await expect(

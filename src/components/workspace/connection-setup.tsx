@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { githubConnectionUrl } from "@/lib/workspace/project-connections";
 import { matchesPreset } from "@/lib/integrations/catalog";
 import { spaceLabels } from "@/lib/workspace/types";
 import { projectHref } from "@/lib/workspace/project-links";
@@ -35,9 +36,17 @@ export function ConnectionSetup() {
       title: "GitHub",
       action: "GitHub 저장소 등록",
       description:
-        "이슈에 목적과 완료 조건을 남기고, PR·테스트·배포 결과를 연결해 개발 진행을 확인합니다.",
-      pending: "자동 조회·AI 판정 연결 필요",
+        "진행 상황을 확인할 프로젝트의 GitHub 저장소를 등록하세요. 이슈·PR·검증·배포 자동 조회는 연결 준비 중입니다.",
+      pending: "자동 조회·AI 판정 미연결",
       next: "저장소별 조회 범위와 접근 권한을 정한 뒤 자동 수집을 연결합니다. 회사·개인 저장소는 따로 등록합니다.",
+    },
+    {
+      preset: "custom" as const,
+      title: "웹 서비스",
+      action: "웹 서비스 등록",
+      description: "프로젝트에 사용하는 웹 주소를 등록하고 엽니다. 프로젝트 상세와 같은 연결을 관리합니다.",
+      pending: "바로가기 등록 · 자동 연동 미연결",
+      next: "웹 주소와 선택적인 GitHub 저장소를 함께 등록할 수 있습니다. 소속 프로젝트를 선택하거나 영역 공통으로 관리하세요.",
     },
     {
       preset: "sheets" as const,
@@ -70,12 +79,14 @@ export function ConnectionSetup() {
       </div>
       <p>
         오늘 할 일과 최신 결과를 확인하고 → 원본 서비스에서 작업하고 → 결과를
-        모아 다음 행동을 정합니다. 주소 등록과 자동 연동은 별도 단계입니다.
+        모아 다음 행동을 정합니다. 프로젝트와 같은 연결 목록을 사용하므로 한 번만 등록하면 됩니다. 주소 등록과 자동 연동은 별도 단계입니다.
       </p>
       <div className={styles.setupGrid}>
         {cards.map((card) => {
           const registered = services.filter((service) =>
-            matchesPreset(service, card.preset),
+            card.preset === "custom"
+              ? !(["v4", "github", "sheets"] as const).some((preset) => matchesPreset(service, preset))
+              : matchesPreset(service, card.preset),
           );
           return (
             <article
@@ -101,9 +112,9 @@ export function ConnectionSetup() {
                 <ul className={styles.setupLinks}>
                   {registered.map((service) => (
                     <li key={service.id}>
-                      {projectHref(service.webUrl) && (
+                      {projectHref(card.preset === "github" ? githubConnectionUrl(service) ?? service.webUrl : service.webUrl) && (
                         <a
-                          href={projectHref(service.webUrl)!}
+                          href={projectHref(card.preset === "github" ? githubConnectionUrl(service) ?? service.webUrl : service.webUrl)!}
                           target="_blank"
                           rel="noopener noreferrer"
                           aria-label={`${service.name} 서비스 열기`}
@@ -111,6 +122,13 @@ export function ConnectionSetup() {
                           {service.name} <Icon name="arrow" size={14} />
                         </a>
                       )}
+                      {card.preset === "github" && githubConnectionUrl(service) !== service.webUrl && projectHref(service.webUrl) && (
+                        <a href={projectHref(service.webUrl)!} target="_blank" rel="noopener noreferrer" aria-label={`${service.name} 웹 서비스 열기`}>
+                          웹 서비스 열기 <Icon name="arrow" size={14} />
+                        </a>
+                      )}
+                      <span>{spaceLabels[service.space]} · {service.projectId ? data.projects.find((p) => p.id === service.projectId)?.name : "영역 공통"}</span>
+                      <ServiceRegistrationButton preset="custom" service={service}>등록 정보 수정</ServiceRegistrationButton>
                       <span>
                         주소 등록됨 ·{" "}
                         {service.lastSuccessAt

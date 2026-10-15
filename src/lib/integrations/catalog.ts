@@ -1,3 +1,4 @@
+import { githubConnectionUrl } from "../workspace/project-connections";
 import type { Service, Space } from "../workspace/types";
 
 // Registration defaults only. These entries never enable a connector or fetch data.
@@ -62,11 +63,10 @@ export function matchesPreset(
       (service.connector === "v4" ||
         service.webUrl === new URL(servicePresets.v4.webUrl).href)
     );
+  if (preset === "github") return githubConnectionUrl(service) !== null;
   try {
     const url = new URL(service.webUrl);
-    return preset === "github"
-      ? url.hostname === "github.com"
-      : url.hostname === "docs.google.com" &&
+    return url.hostname === "docs.google.com" &&
           url.pathname.startsWith("/spreadsheets/");
   } catch {
     return false;

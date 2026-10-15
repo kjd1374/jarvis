@@ -58,9 +58,7 @@ test("연결 준비에서 v4·GitHub·시트를 등록하고 자동화 상태를
   await editor
     .getByLabel("서비스 웹 주소", { exact: true })
     .fill("https://github.com/example/synthetic-project");
-  await editor
-    .getByLabel("서비스 저장소 주소", { exact: true })
-    .fill("https://github.com/example/synthetic-project");
+  await expect(editor.getByLabel("서비스 저장소 주소", { exact: true })).toHaveCount(0);
   await editor
     .getByRole("button", { name: "서비스 저장", exact: true })
     .click();
@@ -93,7 +91,7 @@ test("연결 준비에서 v4·GitHub·시트를 등록하고 자동화 상태를
   ).toBe(true);
   await expect(
     setup.getByRole("article", { name: "GitHub", exact: true }),
-  ).toContainText("자동 조회·AI 판정 연결 필요");
+  ).toContainText("자동 조회·AI 판정 미연결");
   await expect(
     setup.getByRole("article", { name: "구글 시트", exact: true }),
   ).toContainText("읽기·입력 전송 연결 필요");
@@ -482,4 +480,111 @@ test("메모 저장 실패·연속 제출을 처리하고 연결 실패는 데�
     .getByRole("button", { name: "서버 연결 확인", exact: true })
     .click();
   expect((await state(page))!.notes).toHaveLength(1);
+});
+
+test("기존 프로젝트 주소가 설정과 프로젝트의 같은 연결 목록으로 이어진다", async ({ page }) => {
+  const legacy = emptyWorkspace();
+  legacy.projects.push({
+    id: "synthetic-legacy-links", space: "company", name: "합성 기존 번역",
+    description: "이전 프로젝트 주소 보존", createdAt: stamp,
+    repositoryUrl: "https://github.com/example/synthetic-translation",
+    serviceUrl: "http://127.0.0.1:4317/api/health",
+  });
+  await seed(page, legacy);
+  await page.goto("/settings#connections");
+  const github = page.getByRole("region", { name: "연결 준비", exact: true }).getByRole("article", { name: "GitHub", exact: true });
+  await expect(github.getByRole("link").filter({ hasText: "합성 기존 번역" })).toHaveCount(1);
+  await page.goto("/projects/synthetic-legacy-links");
+  const connections = page.getByRole("region", { name: "연결 서비스", exact: true });
+  await expect(connections.getByRole("heading", { name: "합성 기존 번역 · GitHub", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "프로젝트 수정", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "프로젝트 수정", exact: true });
+  await expect(editor.getByLabel("GitHub 저장소", { exact: true })).toHaveCount(0);
+  await expect(editor).toContainText("연결 서비스");
+});
+
+test("프로젝트와 설정이 같은 연결을 등록·수정하고 중복과 영역 혼합을 막는다", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.goto("/projects");
+  await ready(page);
+  const form = await projectForm(page, "합성 통합 연결 프로젝트");
+  await form.getByRole("button", { name: "프로젝트 저장", exact: true }).click();
+  await expect(form).not.toBeVisible();
+  const project = (await state(page))!.projects[0];
+  await page.getByRole("link", { name: `${project.name} 프로젝트 열기`, exact: true }).click();
+  await page.getByRole("button", { name: "서비스 등록", exact: true }).click();
+  let editor = page.getByRole("dialog", { name: "서비스 등록", exact: true });
+  const serviceName = "합성한국어업무진행상황과저장소연결".repeat(4);
+  await editor.getByLabel("서비스 이름", { exact: true }).fill(serviceName);
+  await editor.getByLabel("서비스 웹 주소", { exact: true }).fill("http://127.0.0.1:4317/api/health");
+  await editor.getByLabel("서비스 저장소 주소", { exact: true }).fill("https://github.com/example/synthetic-unified");
+  await editor.getByRole("button", { name: "서비스 저장", exact: true }).click();
+  await expect(editor).not.toBeVisible();
+  const saved = (await state(page))!.services[0];
+  await page.goto("/settings#connections");
+  const setup = page.getByRole("region", { name: "연결 준비", exact: true });
+  const github = setup.getByRole("article", { name: "GitHub", exact: true });
+  await expect(github.getByRole("link").filter({ hasText: serviceName })).toHaveAttribute("href", saved.repositoryUrl);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await expect(github).toContainText(project.name);
+  await github.getByRole("button", { name: "등록 정보 수정", exact: true }).click();
+  editor = page.getByRole("dialog", { name: "서비스 수정", exact: true });
+  await editor.getByLabel("서비스 저장소 주소", { exact: true }).fill("https://github.com/example/synthetic-updated");
+  await editor.getByRole("button", { name: "서비스 저장", exact: true }).click();
+  await expect(editor).not.toBeVisible();
+  await page.reload();
+  await ready(page);
+  expect((await state(page))!.services).toHaveLength(1);
+  expect((await state(page))!.services[0]).toMatchObject({ id: saved.id, projectId: project.id, repositoryUrl: "https://github.com/example/synthetic-updated" });
+  await github.getByRole("button", { name: "GitHub 저장소 등록", exact: true }).click();
+  editor = page.getByRole("dialog", { name: "서비스 등록", exact: true });
+  await editor.getByLabel("서비스 웹 주소", { exact: true }).fill("https://github.com/EXAMPLE/synthetic-updated.git/");
+  await editor.getByRole("button", { name: "서비스 저장", exact: true }).click();
+  await expect(editor.getByRole("alert")).toContainText("이미 등록된 주소");
+  expect((await state(page))!.services).toHaveLength(1);
+  await editor.getByRole("button", { name: "취소", exact: true }).click();
+  await page.goto(`/projects/${project.id}`);
+  const connections = page.getByRole("region", { name: "연결 서비스", exact: true });
+  await expect(connections.getByRole("link", { name: "GitHub 기록 열기", exact: true })).toHaveAttribute("href", "https://github.com/example/synthetic-updated");
+  await connections.getByRole("button", { name: "등록 정보 수정", exact: true }).click();
+  editor = page.getByRole("dialog", { name: "서비스 수정", exact: true });
+  await editor.getByLabel("서비스 이름", { exact: true }).fill("합성 같은 연결 수정됨");
+  await editor.getByRole("button", { name: "서비스 저장", exact: true }).click();
+  await expect(editor).not.toBeVisible();
+  await page.goto("/settings#connections");
+  await expect(github).toContainText("합성 같은 연결 수정됨");
+  await page.setViewportSize({ width: 320, height: 800 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await testInfo.attach("shared-connections-320", { body: await github.screenshot(), contentType: "image/png" });
+  await page.getByRole("button", { name: "개인", exact: true }).click();
+  await expect(github).not.toContainText("합성 같은 연결 수정됨");
+  expect((await state(page))!.services).toHaveLength(1);
+});
+
+test("웹 주소만 등록해도 설정과 프로젝트에서 같은 연결을 관리한다", async ({ page }) => {
+  const data = emptyWorkspace();
+  data.projects.push({ id: "web-only", space: "personal", name: "합성 웹 전용", description: "주소 통합", createdAt: stamp });
+  data.activeSpace = "personal";
+  await seed(page, data);
+  await page.goto("/settings#connections");
+  const web = page.getByRole("region", { name: "연결 준비", exact: true }).getByRole("article", { name: "웹 서비스", exact: true });
+  await web.getByRole("button", { name: "웹 서비스 등록", exact: true }).click();
+  let editor = page.getByRole("dialog", { name: "서비스 등록", exact: true });
+  await editor.getByLabel("서비스 이름", { exact: true }).fill("합성 저장소 없는 서비스");
+  await editor.getByLabel("서비스 프로젝트", { exact: true }).selectOption("web-only");
+  await editor.getByLabel("서비스 웹 주소", { exact: true }).fill("http://127.0.0.1:4317/api/health");
+  await editor.getByRole("button", { name: "서비스 저장", exact: true }).click();
+  await expect(editor).not.toBeVisible();
+  await expect(web).toContainText("합성 저장소 없는 서비스");
+  const original = (await state(page))!.services[0];
+  await page.goto("/projects/web-only");
+  await page.getByRole("button", { name: "등록 정보 수정", exact: true }).click();
+  editor = page.getByRole("dialog", { name: "서비스 수정", exact: true });
+  await editor.getByLabel("서비스 이름", { exact: true }).fill("합성 공통 수정됨");
+  await editor.getByRole("button", { name: "서비스 저장", exact: true }).click();
+  await expect(editor).not.toBeVisible();
+  await page.goto("/settings#connections");
+  await page.reload();
+  await expect(web).toContainText("합성 공통 수정됨");
+  expect((await state(page))!.services).toEqual([{ ...original, name: "합성 공통 수정됨" }]);
 });

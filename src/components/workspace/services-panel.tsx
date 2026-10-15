@@ -8,6 +8,7 @@ import {
   type Service,
 } from "@/lib/workspace/types";
 import { projectUrl, projectHref } from "@/lib/workspace/project-links";
+import { duplicateConnection, repositoryKey } from "@/lib/workspace/project-connections";
 import { normalizeWorkspace } from "@/lib/workspace/validation";
 import { applySync } from "@/lib/integrations/sync";
 import {
@@ -24,13 +25,15 @@ import { useWorkspaceClock } from "./use-workspace-clock";
 export function ServiceRegistrationButton({
   preset,
   children,
+  service,
 }: {
+  service?: Service;
   preset: ServicePreset;
   children: React.ReactNode;
 }) {
   const { data } = useWorkspace();
   return (
-    <ScopedRegistration key={data.activeSpace} preset={preset}>
+    <ScopedRegistration key={`${data.activeSpace}:${service?.id ?? "new"}`} preset={preset} service={service}>
       {children}
     </ScopedRegistration>
   );
@@ -39,7 +42,9 @@ export function ServiceRegistrationButton({
 function ScopedRegistration({
   preset,
   children,
+  service,
 }: {
+  service?: Service;
   preset: ServicePreset;
   children: React.ReactNode;
 }) {
@@ -58,7 +63,8 @@ function ScopedRegistration({
       {open && (
         <ServiceEditor
           preset={preset}
-          projectId={data.activeProjects[data.activeSpace] ?? undefined}
+          service={service}
+          projectId={service ? undefined : data.activeProjects[data.activeSpace] ?? undefined}
           onClose={() => setOpen(false)}
         />
       )}
@@ -69,9 +75,11 @@ function ScopedRegistration({
 export function ServicesPanel({
   projectId,
   favoritesOnly = false,
+  children,
 }: {
   projectId?: string;
   favoritesOnly?: boolean;
+  children?: React.ReactNode;
 }) {
   const { data } = useWorkspace();
   return (
@@ -79,15 +87,17 @@ export function ServicesPanel({
       key={`${data.activeSpace}:${projectId ?? "all"}`}
       projectId={projectId}
       favoritesOnly={favoritesOnly}
-    />
+    >{children}</ServicesView>
   );
 }
 function ServicesView({
   projectId,
   favoritesOnly,
+  children,
 }: {
   projectId?: string;
   favoritesOnly: boolean;
+  children?: React.ReactNode;
 }) {
   const clock = useWorkspaceClock();
   const { data, ready, saving, mutate } = useWorkspace();
@@ -211,6 +221,9 @@ function ServicesView({
           서비스 등록 <Icon name="plus" size={14} />
         </button>
       </div>
+      <p className={styles.detailFootnote}>
+        프로젝트와 설정에서 같은 연결을 관리합니다. 주소 등록은 자동 조회·AI 연결과 별개입니다.
+      </p>
       {error && (
         <p className={styles.formError} role="alert">
           {error}
@@ -285,7 +298,7 @@ function ServicesView({
                       서비스 열기 <Icon name="arrow" size={14} />
                     </a>
                   )}
-                  {projectHref(service.repositoryUrl) && (
+                  {projectHref(service.repositoryUrl) && service.repositoryUrl !== service.webUrl && (
                     <a
                       className={styles.secondaryButton}
                       href={projectHref(service.repositoryUrl)!}
@@ -357,6 +370,7 @@ function ServicesView({
           </p>
         </div>
       )}
+      {children}
       {editing && (
         <ServiceEditor
           service={editing === "new" ? undefined : editing}
@@ -380,7 +394,9 @@ function ServiceEditor({
 }) {
   const { data, saving, mutate } = useWorkspace();
   const space = data.activeSpace;
-  const initialPreset = presetAllowed(preset, space) ? preset : "custom";
+  const initialPreset = service
+    ? repositoryKey(service.webUrl) && (!service.repositoryUrl || service.repositoryUrl === service.webUrl) ? "github" : "custom"
+    : presetAllowed(preset, space) ? preset : "custom";
   const [template, setTemplate] = useState(initialPreset);
   const [name, setName] = useState(
     service?.name ?? servicePresets[initialPreset].name,
@@ -410,12 +426,12 @@ function ServiceEditor({
     pending.current = true;
     try {
       const urls = {
-        webUrl: projectUrl(webUrl),
-        repositoryUrl: projectUrl(repositoryUrl, true),
+        webUrl: projectUrl(webUrl, template === "github"),
+        repositoryUrl: projectUrl(template === "github" ? webUrl : repositoryUrl, true),
       };
       if (!urls.webUrl) throw new Error("서비스 웹 주소를 입력해주세요.");
       const changed =
-        service?.connector !== connector || service.webUrl !== urls.webUrl;
+        service?.connector !== connector || service.webUrl !== urls.webUrl || service.repositoryUrl !== urls.repositoryUrl;
       const record: Service = {
         id: service?.id ?? id(),
         space,
@@ -442,9 +458,7 @@ function ServiceEditor({
           d.services.some(
             (s) =>
               s.id !== record.id &&
-              s.space === space &&
-              s.projectId === record.projectId &&
-              s.webUrl === record.webUrl,
+              duplicateConnection(s, record),
           )
         )
           throw new Error(
@@ -535,7 +549,7 @@ function ServiceEditor({
           </select>
         </label>
         <label className={styles.field}>
-          웹 주소
+          {template === "github" ? "GitHub 저장소 주소" : "웹 주소"}
           <input
             aria-label="서비스 웹 주소"
             type="url"
@@ -546,7 +560,7 @@ function ServiceEditor({
             placeholder="https://서비스-주소"
           />
         </label>
-        <label className={styles.field}>
+        {template !== "github" && <label className={styles.field}>
           GitHub 저장소(선택)
           <input
             aria-label="서비스 저장소 주소"
@@ -556,7 +570,7 @@ function ServiceEditor({
             onChange={(e) => setRepositoryUrl(e.target.value)}
             placeholder="https://github.com/소유자/저장소"
           />
-        </label>
+        </label>}
         <label className={styles.field}>
           연결 방식
           <select

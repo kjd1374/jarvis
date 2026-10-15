@@ -11,7 +11,7 @@ import {
   statusLabels,
   type Project,
 } from "@/lib/workspace/types";
-import { projectHref, projectUrl } from "@/lib/workspace/project-links";
+import { projectHref } from "@/lib/workspace/project-links";
 import { ContextEditor, Modal, WorkspaceControls } from "./workspace-controls";
 import { useWorkspace } from "./workspace-provider";
 import { Icon } from "./icon";
@@ -94,8 +94,6 @@ function ProjectView({ project }: { project: Project }) {
     ...tasks.filter((t) => t.status === "in_progress"),
     ...tasks.filter((t) => t.status === "todo"),
   ];
-  const repositoryUrl = projectHref(project.repositoryUrl);
-  const serviceUrl = projectHref(project.serviceUrl);
 
   async function openWorkspace(path: string, conversationId?: string) {
     if (saving || navigating.current) return;
@@ -241,60 +239,17 @@ function ProjectView({ project }: { project: Project }) {
             </div>
           </dl>
         </section>
-        <section className={styles.detailSection} aria-label="프로젝트 연결">
-          <div className={styles.detailHeading}>
-            <h2>
-              <Icon name="link" size={17} /> 프로젝트 연결
-            </h2>
-          </div>
-          <div className={styles.projectConnections}>
-            {repositoryUrl ? (
-              <a
-                href={repositoryUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="GitHub 저장소 열기"
-              >
-                <Icon name="folder" size={18} />
-                <div>
-                  <strong>GitHub 저장소</strong>
-                  <span>{repositoryUrl}</span>
-                </div>
-                <Icon name="arrow" size={16} />
-              </a>
-            ) : (
-              <p>GitHub 저장소를 아직 등록하지 않았습니다.</p>
-            )}
-            {serviceUrl ? (
-              <a
-                href={serviceUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="서비스 열기"
-              >
-                <Icon name="link" size={18} />
-                <div>
-                  <strong>서비스 열기</strong>
-                  <span>{serviceUrl}</span>
-                </div>
-                <Icon name="arrow" size={16} />
-              </a>
-            ) : (
-              <p>실행 중인 서비스 주소를 등록할 수 있습니다.</p>
-            )}
-          </div>
-          <button
-            className={styles.textButton}
-            disabled={saving}
-            onClick={() => setEditing(true)}
-          >
-            연결 주소 수정 <Icon name="plus" size={14} />
-          </button>
-          <p className={styles.detailFootnote}>
-            등록한 주소를 새 탭으로 엽니다. 코드와 데이터의 자동 동기화는 아직
-            연결되지 않았습니다.
-          </p>
-        </section>
+        <ServicesPanel projectId={project.id}>
+          {project.connectionsUnified && (project.repositoryUrl || project.serviceUrl) && (
+            <details className={styles.revisionDetails}>
+              <summary>이전 프로젝트 주소 보관본</summary>
+              <p>통합 전 주소를 보존한 기록입니다. 현재 주소는 위 연결 서비스에서 관리합니다.</p>
+              {project.repositoryUrl && <p>GitHub: {projectHref(project.repositoryUrl) ?? "유효한 주소가 아니므로 표시하지 않습니다. 백업에 원본을 보존합니다."}</p>}
+              {project.serviceUrl && <p>웹 서비스: {projectHref(project.serviceUrl) ?? "유효한 주소가 아니므로 표시하지 않습니다. 백업에 원본을 보존합니다."}</p>}
+              <p>목록에 없는 잘못된 주소는 확인 후 서비스로 다시 등록해주세요.</p>
+            </details>
+          )}
+        </ServicesPanel>
         <SourceResults projectId={project.id} />
         <section className={styles.detailSection} aria-label="프로젝트 업무">
           <div className={styles.detailHeading}>
@@ -480,9 +435,6 @@ function ProjectView({ project }: { project: Project }) {
         </section>
       </div>
       <div className={styles.homeSection}>
-        <ServicesPanel projectId={project.id} />
-      </div>
-      <div className={styles.homeSection}>
         <RequestsPanel projectId={project.id} />
       </div>
       <div className={styles.homeSection}>
@@ -519,10 +471,6 @@ function ProjectEditor({
     project.currentStatus ?? "",
   );
   const [nextAction, setNextAction] = useState(project.nextAction ?? "");
-  const [repositoryUrl, setRepositoryUrl] = useState(
-    project.repositoryUrl ?? "",
-  );
-  const [serviceUrl, setServiceUrl] = useState(project.serviceUrl ?? "");
   const [error, setError] = useState("");
   const pending = useRef(false);
   async function save(event: React.FormEvent) {
@@ -531,10 +479,6 @@ function ProjectEditor({
     pending.current = true;
     setError("");
     try {
-      const links = {
-        repositoryUrl: projectUrl(repositoryUrl, true),
-        serviceUrl: projectUrl(serviceUrl),
-      };
       await mutate((d) => {
         assertLinks(d, project.space, project.id);
         return {
@@ -547,7 +491,6 @@ function ProjectEditor({
                   description: description.trim(),
                   currentStatus: currentStatus.trim(),
                   nextAction: nextAction.trim(),
-                  ...links,
                 }
               : p,
           ),
@@ -614,32 +557,8 @@ function ProjectEditor({
             onChange={(event) => setNextAction(event.target.value)}
           />
         </label>
-        <label className={styles.field}>
-          GitHub 저장소
-          <input
-            aria-label="GitHub 저장소"
-            type="url"
-            maxLength={2048}
-            value={repositoryUrl}
-            disabled={saving}
-            onChange={(event) => setRepositoryUrl(event.target.value)}
-            placeholder="https://github.com/소유자/저장소"
-          />
-        </label>
-        <label className={styles.field}>
-          서비스 주소
-          <input
-            aria-label="서비스 주소"
-            type="url"
-            maxLength={2048}
-            value={serviceUrl}
-            disabled={saving}
-            onChange={(event) => setServiceUrl(event.target.value)}
-            placeholder="https://서비스-주소"
-          />
-        </label>
         <p className={styles.modalDescription}>
-          주소만 보관합니다. API 키나 비밀번호를 입력하지 마세요.
+          GitHub·웹 주소는 프로젝트의 연결 서비스에서 관리합니다. 설정에도 같은 정보가 표시됩니다.
         </p>
         {error && (
           <p className={styles.formError} role="alert">
