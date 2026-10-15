@@ -43,7 +43,7 @@ function WorkItemsView({
   initialView: "tasks" | "requests";
 }) {
   const router = useRouter();
-  const { data, ready, saving, mutate } = useWorkspace();
+  const { data, ready, saving, error: storageError, mutate } = useWorkspace();
   const space = data.activeSpace;
   const projects = data.projects.filter((p) => p.space === space);
   const projectId = data.activeProjects[space];
@@ -150,7 +150,28 @@ function WorkItemsView({
           </button>
         </div>
       )}
-      {kind === "tasks" && view === "requests" ? (
+      {!ready ? (
+        <section className={styles.emptyState} aria-busy={!storageError}>
+          <h2>
+            {storageError
+              ? `${label}를 불러오지 못했습니다`
+              : `${label}를 불러오는 중입니다`}
+          </h2>
+          <p>
+            {storageError
+              ? "빈 목록으로 처리하거나 기존 기록을 덮어쓰지 않았습니다. 다시 불러오거나 설정에서 저장 상태를 확인하세요."
+              : "저장된 기록을 확인하고 있습니다. 잠시만 기다려주세요."}
+          </p>
+          {storageError && (
+            <Link
+              className={styles.secondaryButton}
+              href="/settings#storage-recovery"
+            >
+              저장 상태 확인
+            </Link>
+          )}
+        </section>
+      ) : kind === "tasks" && view === "requests" ? (
         <RequestsPanel projectId={projectId ?? undefined} />
       ) : (
         <>

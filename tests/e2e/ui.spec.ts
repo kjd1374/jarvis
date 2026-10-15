@@ -1,4 +1,4 @@
-import { test, expect, ready } from "../support/fixtures";
+import { test, expect, ready, state, projectForm } from "../support/fixtures";
 
 const routes = [
   ["업무실", "/"],
@@ -174,6 +174,90 @@ test("읽기 오류를 데이터 초기화 없이 다시 불러온다", async ({
       .getByLabel("대화 기록", { exact: true })
       .getByText("다시 불러와도 유지할 합성 기록", { exact: true }),
   ).toBeVisible();
+});
+
+for (const [path, label, emptyTitle] of [
+  ["/projects", "프로젝트", "업무에 하나의 흐름을 만들어주세요"],
+  ["/tasks", "업무", "다음 할 일을 적어주세요"],
+]) {
+  test(`${label} 읽기 실패는 빈 목록으로 표시하지 않고 재시도한다`, async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      const get = IDBObjectStore.prototype.get;
+      IDBObjectStore.prototype.get = function (key) {
+        if (this.name === "workspace") {
+          IDBObjectStore.prototype.get = get;
+          throw new Error("합성 프로젝트 읽기 실패");
+        }
+        return get.call(this, key);
+      };
+    });
+    await page.goto(path);
+    await expect(
+      page.getByRole("alert").filter({ hasText: "합성 프로젝트 읽기 실패" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: emptyTitle, exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("heading", {
+        name: `${label}를 불러오지 못했습니다`,
+        exact: true,
+      }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "다시 불러오기", exact: true })
+      .click();
+    await ready(page);
+    await expect(
+      page.getByRole("heading", { name: emptyTitle, exact: true }),
+    ).toBeVisible();
+  });
+}
+
+test("저장 진단은 기존 기록을 변경하지 않고 모바일에서도 확인할 수 있다", async ({
+  page,
+  isMobile,
+}, testInfo) => {
+  await page.goto("/projects");
+  await ready(page);
+  const form = await projectForm(page, "합성 저장 상태 프로젝트");
+  await form
+    .getByRole("button", { name: "프로젝트 저장", exact: true })
+    .click();
+  await expect(form).not.toBeVisible();
+  const original = await state(page);
+  await page.goto("/settings#storage-recovery");
+  await ready(page);
+  if (isMobile) await page.setViewportSize({ width: 320, height: 740 });
+  const recovery = page.getByRole("region", {
+    name: "브라우저 저장 진단과 복구",
+    exact: true,
+  });
+  await recovery
+    .getByRole("button", { name: "이 브라우저 저장 상태 확인", exact: true })
+    .click();
+  await expect(recovery).toContainText("정상적으로 읽을 수 있음");
+  await expect(recovery).toContainText(
+    "복구본의 프로젝트: 회사 1개 · 개인 0개",
+  );
+  await expect(
+    recovery.getByRole("button", {
+      name: "마지막 정상 저장본 복구",
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  expect(await state(page)).toEqual(original);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: testInfo.outputPath("storage-diagnostics.png"),
+    fullPage: true,
+  });
 });
 
 test("긴 한국어, 줄바꿈, IME 입력과 모바일 전송", async ({
