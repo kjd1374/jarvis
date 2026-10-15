@@ -1,4 +1,4 @@
-import { projectUrl } from "./project-links";
+import { projectHref, projectUrl } from "./project-links";
 import type { Project, Service, WorkspaceData } from "./types";
 
 export function repositoryKey(value: string): string | null {
@@ -14,6 +14,20 @@ export function githubConnectionUrl(service: Service): string | null {
   return [service.repositoryUrl, service.webUrl].find((url) =>
     repositoryKey(url),
   ) ?? null;
+}
+export function projectQuickLinks(services: Service[], project: Project) {
+  const web = new Map<string, { name: string; href: string }>();
+  const github = new Map<string, { name: string; href: string }>();
+  const scoped = services.filter(s => s.space === project.space && s.projectId === project.id)
+    .sort((a, b) => Number(b.favorite) - Number(a.favorite));
+  for (const service of scoped) {
+    const href = projectHref(service.webUrl);
+    if (href && !repositoryKey(href) && !web.has(href)) web.set(href, { name: service.name, href });
+    const repository = githubConnectionUrl(service);
+    const key = repository && repositoryKey(repository);
+    if (key && !github.has(key)) github.set(key, { name: key, href: `https://github.com/${key}` });
+  }
+  return { web: [...web.values()], github: [...github.values()] };
 }
 function sameWeb(a: string, b: string) {
   try {

@@ -588,3 +588,66 @@ test("웹 주소만 등록해도 설정과 프로젝트에서 같은 연결을 �
   await expect(web).toContainText("합성 공통 수정됨");
   expect((await state(page))!.services).toEqual([{ ...original, name: "합성 공통 수정됨" }]);
 });
+
+test("상단 바로가기는 현재 프로젝트만 열고 웹 등록·설정 수정·화면 개선 요청을 이어간다", async ({ page, context }, testInfo) => {
+  const data = emptyWorkspace();
+  data.projects.push(
+    { id: "quick-project", space: "company", name: "합성 화면 개선", description: "화면을 보며 개선", createdAt: stamp, connectionsUnified: true, serviceUrl: "https://archived.example.test/", repositoryUrl: "https://github.com/example/archived" },
+    { id: "other-project", space: "company", name: "합성 다른 프로젝트", description: "범위 확인", createdAt: stamp },
+    { id: "private-project", space: "personal", name: "합성 개인 프로젝트", description: "개인 범위", createdAt: stamp },
+  );
+  data.activeProjects.company = "other-project";
+  const baseService = { connector: "shortcut" as const, favorite: true, createdAt: stamp, lastSuccessAt: null, lastAttemptAt: null, connectionStatus: "shortcut" as const, error: null, failures: 0, nextRetryAt: null, repositoryUrl: "" };
+  data.services.push(
+    { ...baseService, id: "quick-repo", space: "company", projectId: "quick-project", name: "합성 개발 기록", webUrl: "https://github.com/example/top-links" },
+    { ...baseService, id: "quick-alias", space: "company", projectId: "quick-project", name: "합성 같은 저장소", webUrl: "https://github.com/EXAMPLE/top-links.git/" },
+    { ...baseService, id: "other-web", space: "company", projectId: "other-project", name: "합성 다른 화면", webUrl: "https://other.example.test/" },
+    { ...baseService, id: "common-web", space: "company", projectId: null, name: "합성 영역 공통", webUrl: "https://common.example.test/" },
+    { ...baseService, id: "private-web", space: "personal", projectId: "private-project", name: "합성 개인 화면", webUrl: "https://private.example.test/" },
+  );
+  await context.route("https://github.com/example/top-links", route => route.fulfill({ contentType: "text/html", body: "<h1>Synthetic repository</h1>" }));
+  await context.route("**/synthetic-live-screen*", route => route.fulfill({ contentType: "text/html; charset=utf-8", body: "<h1>합성 실제 웹 화면</h1>" }));
+  await seed(page, data); await page.goto("/projects/quick-project"); await ready(page);
+  const links = page.getByRole("region", { name: "프로젝트 바로가기", exact: true });
+  const github = links.getByRole("link", { name: "GitHub 열기", exact: true });
+  await expect(github).toHaveCount(1); await expect(github).toHaveAttribute("href", "https://github.com/example/top-links");
+  await expect(github).toHaveAttribute("rel", "noopener noreferrer");
+  for (const blocked of ["other.example.test", "common.example.test", "private.example.test", "archived"]) expect(await links.innerHTML()).not.toContain(blocked);
+  const repoPopup = page.waitForEvent("popup"); await github.click(); const repo = await repoPopup;
+  await expect(repo.getByRole("heading", { name: "Synthetic repository" })).toBeVisible(); await repo.close();
+  await links.getByRole("button", { name: "웹 화면 연결", exact: true }).click();
+  let editor = page.getByRole("dialog", { name: "서비스 등록", exact: true });
+  await expect(editor.getByLabel("서비스 프로젝트", { exact: true })).toHaveValue("quick-project");
+  await editor.getByLabel("서비스 이름", { exact: true }).fill("합성 배포 화면");
+  await editor.getByLabel("서비스 웹 주소", { exact: true }).fill("http://127.0.0.1:4317/synthetic-live-screen");
+  await editor.getByRole("button", { name: "서비스 저장", exact: true }).click(); await expect(editor).not.toBeVisible();
+  const web = links.getByRole("link", { name: "웹 화면 열기", exact: true });
+  await expect(web).toHaveAttribute("href", "http://127.0.0.1:4317/synthetic-live-screen");
+  const webPopup = page.waitForEvent("popup"); await web.click(); const live = await webPopup;
+  await expect(live.getByRole("heading", { name: "합성 실제 웹 화면" })).toBeVisible(); await live.close();
+  await links.getByRole("link", { name: "수정 요청 남기기" }).click();
+  const requests = page.getByRole("region", { name: "수정 요청 관리", exact: true });
+  await expect(requests).toBeInViewport();
+  await requests.getByRole("button", { name: "수정 요청 등록", exact: true }).click();
+  const request = page.getByRole("dialog", { name: "수정 요청 등록", exact: true });
+  await request.getByLabel("요청 제목", { exact: true }).fill("합성 화면 버튼 개선");
+  await request.getByLabel("요청 내용", { exact: true }).fill("실제 화면을 보고 버튼 위치 개선을 기록합니다.");
+  await request.getByRole("button", { name: "요청 저장", exact: true }).click(); await expect(request).not.toBeVisible();
+  expect((await state(page))!.requests[0].projectId).toBe("quick-project");
+  await page.reload(); await ready(page); await expect(web).toHaveAttribute("href", /synthetic-live-screen$/);
+  const savedWeb = (await state(page))!.services.find(s => s.name === "합성 배포 화면")!;
+  // The explicit project is independent of the global active-project preference.
+  await page.goto("/settings#connections");
+  await page.getByRole("combobox", { name: "프로젝트 범위" }).selectOption("quick-project");
+  const webCard = page.getByRole("region", { name: "연결 준비", exact: true }).getByRole("article", { name: "웹 서비스", exact: true });
+  await webCard.getByRole("button", { name: "등록 정보 수정", exact: true }).click();
+  editor = page.getByRole("dialog", { name: "서비스 수정", exact: true });
+  await editor.getByLabel("서비스 웹 주소", { exact: true }).fill("http://127.0.0.1:4317/synthetic-live-screen?updated=1");
+  await editor.getByRole("button", { name: "서비스 저장", exact: true }).click(); await expect(editor).not.toBeVisible();
+  await page.goto("/projects/quick-project"); await ready(page);
+  await expect(web).toHaveAttribute("href", /updated=1$/);
+  expect((await state(page))!.services.find(s => s.id === savedWeb.id)!.projectId).toBe("quick-project");
+  await page.setViewportSize({ width: 320, height: 740 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await links.screenshot({ path: testInfo.outputPath("project-top-links.png") });
+});

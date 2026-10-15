@@ -50,7 +50,7 @@ function RequestsView({ projectId }: { projectId?: string }) {
     }
   }
   return (
-    <section className={styles.detailSection} aria-label="수정 요청 관리">
+    <section className={styles.detailSection} aria-label="수정 요청 관리" id={projectId ? "project-change-requests" : undefined}>
       <div className={styles.detailHeading}>
         <h2>
           <Icon name="check" size={17} /> 수정 요청 · 검증

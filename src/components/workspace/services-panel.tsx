@@ -28,14 +28,16 @@ export function ServiceRegistrationButton({
   preset,
   children,
   service,
+  projectId,
 }: {
   service?: Service;
+  projectId?: string;
   preset: ServicePreset;
   children: React.ReactNode;
 }) {
   const { data } = useWorkspace();
   return (
-    <ScopedRegistration key={`${data.activeSpace}:${service?.id ?? "new"}`} preset={preset} service={service}>
+    <ScopedRegistration key={`${data.activeSpace}:${projectId ?? "active"}:${service?.id ?? "new"}`} preset={preset} service={service} projectId={projectId}>
       {children}
     </ScopedRegistration>
   );
@@ -45,8 +47,10 @@ function ScopedRegistration({
   preset,
   children,
   service,
+  projectId,
 }: {
   service?: Service;
+  projectId?: string;
   preset: ServicePreset;
   children: React.ReactNode;
 }) {
@@ -66,7 +70,7 @@ function ScopedRegistration({
         <ServiceEditor
           preset={preset}
           service={service}
-          projectId={service ? undefined : data.activeProjects[data.activeSpace] ?? undefined}
+          projectId={service ? undefined : projectId ?? data.activeProjects[data.activeSpace] ?? undefined}
           onClose={() => setOpen(false)}
         />
       )}
