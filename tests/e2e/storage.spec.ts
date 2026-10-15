@@ -1,7 +1,342 @@
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { chromium, type Page } from "@playwright/test";
 import { test, expect, ready, state, projectForm } from "../support/fixtures";
 
 const message = "합성 회사 프로젝트의 다음 기획을 정리한다";
+
+async function replaceCurrent(
+  page: Page,
+  value: unknown,
+  removeCheckpoint = false,
+) {
+  await page.evaluate(
+    ({ value, removeCheckpoint }) =>
+      new Promise<void>((resolve, reject) => {
+        const open = indexedDB.open("jarvis-workspace", 1);
+        open.onsuccess = () => {
+          const db = open.result;
+          const tx = db.transaction("workspace", "readwrite");
+          const store = tx.objectStore("workspace");
+          if (value === undefined) store.delete("current");
+          else store.put(value, "current");
+          if (removeCheckpoint) store.delete("last-confirmed");
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+          tx.onabort = () => {
+            db.close();
+            reject(tx.error);
+          };
+        };
+      }),
+    { value, removeCheckpoint },
+  );
+}
+
+test("기존 v1 프로젝트는 새 컬렉션·정상 저장본이 없어도 보존하고 다음 저장에 포함한다", async ({
+  page,
+}) => {
+  await page.goto("/projects");
+  await ready(page);
+  const form = await projectForm(page, "합성 구버전 번역 프로젝트");
+  await form
+    .getByRole("button", { name: "프로젝트 저장", exact: true })
+    .click();
+  await expect(form).not.toBeVisible();
+  const original = (await state(page))!;
+  const legacy: Record<string, unknown> = { ...original };
+  for (const key of [
+    "notes",
+    "services",
+    "sourceRecords",
+    "requests",
+    "syncEvents",
+  ])
+    delete legacy[key];
+  await replaceCurrent(page, legacy, true);
+  await page.reload();
+  await ready(page);
+  await expect(
+    page.getByRole("heading", { name: original.projects[0].name, exact: true }),
+  ).toBeVisible();
+  const second = await projectForm(page, "합성 구버전 이후 프로젝트");
+  await second
+    .getByRole("button", { name: "프로젝트 저장", exact: true })
+    .click();
+  await expect(second).not.toBeVisible();
+  await page.reload();
+  await ready(page);
+  expect((await state(page))!.projects[0]).toEqual(original.projects[0]);
+  expect((await state(page))!.projects).toHaveLength(2);
+});
+
+test("복구 확인 후 다른 탭이 저장한 정상 기록을 덮어쓰지 않는다", async ({
+  page,
+}) => {
+  await page.goto("/projects");
+  await ready(page);
+  const form = await projectForm(page, "합성 복구 경쟁 프로젝트");
+  await form
+    .getByRole("button", { name: "프로젝트 저장", exact: true })
+    .click();
+  await expect(form).not.toBeVisible();
+  const original = (await state(page))!;
+  await replaceCurrent(page, undefined);
+  await page.goto("/settings");
+  const recovery = page.getByRole("region", {
+    name: "브라우저 저장 진단과 복구",
+    exact: true,
+  });
+  await recovery
+    .getByRole("button", { name: "이 브라우저 저장 상태 확인", exact: true })
+    .click();
+  await recovery
+    .getByLabel("회사·개인 기록의 복구 범위를 확인했습니다.")
+    .check();
+  const newer = structuredClone(original);
+  newer.projects[0].description = "검토 후 다른 탭에서 저장한 새 내용";
+  await replaceCurrent(page, newer);
+  await recovery
+    .getByRole("button", { name: "마지막 정상 저장본 복구", exact: true })
+    .click();
+  await expect(recovery.getByRole("alert")).toContainText(
+    "정상 기록이 있습니다",
+  );
+  expect(await state(page)).toEqual(newer);
+  await page
+    .getByRole("button", { name: "다시 불러오기", exact: true })
+    .click();
+  await ready(page);
+  expect(await state(page)).toEqual(newer);
+});
+
+test("개인 프로젝트는 화면 이동·새로고침·브라우저 완전 재시작 뒤에도 유지된다", async ({
+  baseURL,
+}) => {
+  test.setTimeout(60_000);
+  const profile = await mkdtemp(join(tmpdir(), "jarvis-persistence-test-"));
+  const failures: string[] = [];
+  const launch = async () => {
+    const context = await chromium.launchPersistentContext(profile, {
+      headless: true,
+      serviceWorkers: "block",
+      executablePath:
+        process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
+    });
+    await context.route("**/*", (route) => {
+      if (new URL(route.request().url()).origin === new URL(baseURL!).origin)
+        return route.continue();
+      failures.push("Unexpected external request");
+      return route.abort();
+    });
+    context.on("page", (page) =>
+      page.on("pageerror", (error) => failures.push(error.message)),
+    );
+    return context;
+  };
+  let context = await launch();
+  try {
+    let page = await context.newPage();
+    await page.goto(`${baseURL}/projects`);
+    await ready(page);
+    await page.getByRole("button", { name: "개인", exact: true }).click();
+    await ready(page);
+    const form = await projectForm(page, "합성 재시작 번역 프로젝트");
+    await form
+      .getByRole("button", { name: "프로젝트 저장", exact: true })
+      .click();
+    await expect(form).not.toBeVisible();
+    const original = (await state(page))!.projects;
+    for (const path of ["/", "/assistant", "/settings", "/projects"]) {
+      await page.goto(`${baseURL}${path}`);
+      await ready(page);
+    }
+    await page.reload();
+    await ready(page);
+    expect((await state(page))!.projects).toEqual(original);
+    await context.close();
+    context = await launch();
+    page = await context.newPage();
+    await page.goto(`${baseURL}/projects`);
+    await ready(page);
+    await expect(
+      page.getByRole("heading", { name: original[0].name, exact: true }),
+    ).toBeVisible();
+    expect((await state(page))!.projects).toEqual(original);
+    await page.getByRole("button", { name: "회사", exact: true }).click();
+    await ready(page);
+    await expect(
+      page.getByRole("heading", { name: original[0].name, exact: true }),
+    ).toHaveCount(0);
+    expect((await state(page))!.projects).toEqual(original);
+    expect(failures).toEqual([]);
+  } finally {
+    await context.close();
+    await rm(profile, { recursive: true, force: true });
+  }
+});
+
+for (const damage of ["missing", "unreadable"] as const) {
+  test(`${damage} 현재 기록은 빈 목록으로 덮어쓰지 않고 확인 후 정상본과 파일을 복구한다`, async ({
+    page,
+  }) => {
+    await page.goto("/projects");
+    await ready(page);
+    const form = await projectForm(page, "합성 복구 번역 프로젝트");
+    await form
+      .getByRole("button", { name: "프로젝트 저장", exact: true })
+      .click();
+    await expect(form).not.toBeVisible();
+    await page.goto("/library");
+    await ready(page);
+    const bytes = Buffer.from("복구 후에도 유지할 합성 파일 원본");
+    await page
+      .getByLabel("자료 파일 선택")
+      .setInputFiles({
+        name: "합성-복구.txt",
+        mimeType: "text/plain",
+        buffer: bytes,
+      });
+    await expect(
+      page.getByText("합성-복구.txt", { exact: true }),
+    ).toBeVisible();
+    const original = (await state(page))!;
+    await page.evaluate(
+      (damage) =>
+        new Promise<void>((resolve, reject) => {
+          const open = indexedDB.open("jarvis-workspace", 1);
+          open.onsuccess = () => {
+            const db = open.result;
+            const tx = db.transaction("workspace", "readwrite");
+            const store = tx.objectStore("workspace");
+            if (damage === "missing") store.delete("current");
+            else
+              store.put(
+                { version: 999, retained: "합성 손상 기록" },
+                "current",
+              );
+            tx.oncomplete = () => {
+              db.close();
+              resolve();
+            };
+            tx.onabort = () => {
+              db.close();
+              reject(tx.error);
+            };
+          };
+        }),
+      damage,
+    );
+    await page.goto("/projects");
+    await expect(
+      page.getByRole("heading", {
+        name: "프로젝트를 불러오지 못했습니다",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "프로젝트 만들기", exact: true }),
+    ).toBeDisabled();
+    await page
+      .getByRole("link", { name: "저장 상태 확인", exact: true })
+      .click();
+    const recovery = page.getByRole("region", {
+      name: "브라우저 저장 진단과 복구",
+      exact: true,
+    });
+    await recovery
+      .getByRole("button", { name: "이 브라우저 저장 상태 확인", exact: true })
+      .click();
+    const restore = recovery.getByRole("button", {
+      name: "마지막 정상 저장본 복구",
+      exact: true,
+    });
+    await expect(restore).toBeDisabled();
+    expect(await state(page)).not.toEqual(original);
+    await recovery
+      .getByLabel("회사·개인 기록의 복구 범위를 확인했습니다.")
+      .check();
+    await restore.click();
+    await expect(recovery.getByRole("status")).toContainText(
+      "정상 저장본을 복구했습니다",
+    );
+    await ready(page);
+    expect(await state(page)).toEqual(original);
+    if (damage === "unreadable") {
+      const retained = await page.evaluate(
+        () =>
+          new Promise<unknown[]>((resolve) => {
+            const open = indexedDB.open("jarvis-workspace", 1);
+            open.onsuccess = () => {
+              const db = open.result;
+              const read = db
+                .transaction("workspace")
+                .objectStore("workspace")
+                .getAll();
+              read.onsuccess = () => {
+                db.close();
+                resolve(read.result);
+              };
+            };
+          }),
+      );
+      expect(retained).toContainEqual({
+        version: 999,
+        retained: "합성 손상 기록",
+      });
+    }
+    await page.goto("/projects");
+    await ready(page);
+    await expect(
+      page.getByRole("heading", {
+        name: original.projects[0].name,
+        exact: true,
+      }),
+    ).toBeVisible();
+    await page.goto("/library");
+    const downloaded = page.waitForEvent("download");
+    await page
+      .getByRole("button", { name: "합성-복구.txt 다운로드", exact: true })
+      .click();
+    expect(await readFile((await (await downloaded).path())!)).toEqual(bytes);
+  });
+}
+
+test("정상 저장본 쓰기 실패는 프로젝트 추가 전체를 롤백하고 재시도한다", async ({
+  page,
+}) => {
+  await page.goto("/projects");
+  await ready(page);
+  await page.evaluate(() => {
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (value, key) {
+      if (this.name === "workspace" && key === "last-confirmed") {
+        IDBObjectStore.prototype.put = put;
+        throw new DOMException("합성 정상본 저장 실패", "QuotaExceededError");
+      }
+      return put.call(this, value, key!);
+    };
+  });
+  const form = await projectForm(page, "합성 원자적 프로젝트");
+  await form
+    .getByRole("button", { name: "프로젝트 저장", exact: true })
+    .click();
+  await expect(form.getByRole("alert")).toContainText("합성 정상본 저장 실패");
+  expect((await state(page))?.projects ?? []).toHaveLength(0);
+  await expect(form.getByLabel("프로젝트 이름")).toHaveValue(
+    "합성 원자적 프로젝트",
+  );
+  await form
+    .getByRole("button", { name: "프로젝트 저장", exact: true })
+    .click();
+  await expect(form).not.toBeVisible();
+  await page.reload();
+  await ready(page);
+  expect((await state(page))!.projects).toHaveLength(1);
+});
 
 test("대화·맥락 이력·업무 저장, 새로고침, 중복 업무 방지와 영역 분리", async ({
   page,
@@ -180,13 +515,11 @@ test("파일 원본과 프로젝트·업무 연결, 연결 변경과 대화 첨�
   const original = Buffer.from(
     "회귀 테스트 전용 합성 문서\n실제 고객 자료 없음",
   );
-  await page
-    .getByLabel("자료 파일 선택")
-    .setInputFiles({
-      name: "합성-기획.txt",
-      mimeType: "text/plain",
-      buffer: original,
-    });
+  await page.getByLabel("자료 파일 선택").setInputFiles({
+    name: "합성-기획.txt",
+    mimeType: "text/plain",
+    buffer: original,
+  });
   await expect(page.getByText("합성-기획.txt", { exact: true })).toBeVisible();
   await page.reload();
   await ready(page);
@@ -258,13 +591,11 @@ test("파일 저장 실패는 메타데이터도 롤백하고 재업로드는 �
 }) => {
   await page.goto("/library");
   await ready(page);
-  await page
-    .getByLabel("자료 파일 선택")
-    .setInputFiles({
-      name: "기존-합성.txt",
-      mimeType: "text/plain",
-      buffer: Buffer.from("기존 합성 자료 보존"),
-    });
+  await page.getByLabel("자료 파일 선택").setInputFiles({
+    name: "기존-합성.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("기존 합성 자료 보존"),
+  });
   await expect(page.getByText("기존-합성.txt", { exact: true })).toBeVisible();
   const existing = (await state(page))!.documents[0];
   await page.evaluate(() => {
@@ -578,13 +909,11 @@ test("원본 포함 백업을 새 브라우저로 이관하고 재가져오기·
   await page.goto("/library");
   await ready(page);
   const original = Buffer.from("원본 파일 이관 검증용 합성 데이터");
-  await page
-    .getByLabel("자료 파일 선택")
-    .setInputFiles({
-      name: "합성-이관.txt",
-      mimeType: "text/plain",
-      buffer: original,
-    });
+  await page.getByLabel("자료 파일 선택").setInputFiles({
+    name: "합성-이관.txt",
+    mimeType: "text/plain",
+    buffer: original,
+  });
   await expect(page.getByText("합성-이관.txt", { exact: true })).toBeVisible();
   await page
     .getByRole("button", { name: "원본 링크 등록", exact: true })

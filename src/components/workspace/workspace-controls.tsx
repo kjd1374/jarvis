@@ -26,7 +26,9 @@ export function WorkspaceControls({
               aria-pressed={space === value}
               onClick={() =>
                 void mutate((d) => ({ ...d, activeSpace: value }))
-                  .then(() => onScopeChange?.(data.activeProjects[value], value))
+                  .then(() =>
+                    onScopeChange?.(data.activeProjects[value], value),
+                  )
                   .catch(() => {})
               }
             >
@@ -81,11 +83,13 @@ export function WorkspaceControls({
       {error && (
         <div className={styles.errorBanner} role="alert">
           <p>{error}</p>
-          {!ready && (
-            <button className={styles.retryButton} onClick={retryLoad}>
-              다시 불러오기
-            </button>
-          )}
+          <button
+            className={styles.retryButton}
+            disabled={saving}
+            onClick={retryLoad}
+          >
+            다시 불러오기
+          </button>
         </div>
       )}
     </div>
