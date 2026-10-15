@@ -6,16 +6,20 @@ import { tmpdir } from "node:os";
 import { executeProjectWork, runCodexWork, runCommand, allowedWorkPath } from "../public/jarvis-runner.mjs";
 const modelResult = { blocked: false, reply: "합성 화면 수정", summary: "합성 결과", currentStatus: "검증 준비", nextAction: "확인", followUps: [] };
 const job = { id: "11111111-1111-4111-8111-111111111111", repository: "example/synthetic", projectId: "project", space: "personal", mode: "change", publish: "pr", request: "PRIVATE REQUEST NEVER PUBLISH", leaseToken: "test-lease", attempt: 1 };
-async function fixture({ ci = "success", deliveryFails = false, publish = "pr", failPush = false, blocked = false, cancelAtPublish = false } = {}) {
+async function fixture({ ci = "success", deliveryFails = false, publish = "pr", failPush = false, blocked = false, cancelAtPublish = false, npmProject = false, npmFailure = false } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "jarvis-work-test-")), source = join(dir, "source"), remote = join(dir, "remote.git");
   await mkdir(source); await runCommand("git", ["init", "-b", "main", source]);
   await writeFile(join(source, "page.js"), "export const title = 'before';\n");
   await writeFile(join(source, ".env.local"), "PRIVATE_FIXTURE_DO_NOT_READ=yes\n");
+  if (npmProject) {
+    await writeFile(join(source, "package.json"), JSON.stringify({ name: "synthetic-no-dependencies", version: "1.0.0", private: true, scripts: { preinstall: "node -e 'process.exit(42)'" } }));
+    await writeFile(join(source, "package-lock.json"), JSON.stringify({ name: "synthetic-no-dependencies", version: "1.0.0", lockfileVersion: 3, packages: { "": { name: "synthetic-no-dependencies", version: "1.0.0", hasInstallScript: true } } }));
+  }
   await runCommand("git", ["add", "."], { cwd: source });
   await runCommand("git", ["-c", "user.name=Synthetic", "-c", "user.email=test@invalid.test", "commit", "-m", "synthetic"], { cwd: source });
   await runCommand("git", ["clone", "--bare", source, remote]);
   const baseSha = (await runCommand("git", ["rev-parse", "HEAD"], { cwd: source })).out.trim();
-  let headSha, pr, merged = false, modelCalls = 0, deliveries = 0, pushes = 0; const reports = [], ghCalls = [];
+  let headSha, pr, merged = false, modelCalls = 0, deliveries = 0, pushes = 0; const reports = [], ghCalls = [], npmCalls = [], modelJobs = [];
   const get = async path => {
     if (path === "repos/example/synthetic") return { full_name: "example/synthetic", default_branch: "main" };
     if (path.endsWith("/commits/main")) return { sha: baseSha };
@@ -28,6 +32,11 @@ async function fixture({ ci = "success", deliveryFails = false, publish = "pr", 
     assert.fail(`Unexpected GitHub path ${path}`);
   };
   const run = async (bin, args, opts) => {
+    if (bin === "npm") {
+      npmCalls.push({ args, env: opts.env });
+      if (npmFailure) return { code: 1, out: "", err: "npm error code EAI_AGAIN\nPRIVATE_FIXTURE_TOKEN=never-publish /private/user/.npmrc" };
+      return runCommand(bin, args, { ...opts, env: { ...opts.env, NPM_CONFIG_CACHE: join(dir, "npm-cache") } });
+    }
     if (bin === "git") {
       args = args.map(a => a === "protocol.file.allow=never" ? "protocol.file.allow=always" : a);
       if (args.includes("clone")) { args = args.map(a => a === "protocol.file.allow=never" ? "protocol.file.allow=always" : a === "https://github.com/example/synthetic.git" ? remote : a); }
@@ -44,7 +53,7 @@ async function fixture({ ci = "success", deliveryFails = false, publish = "pr", 
     }
     assert(args.includes("PUT")); assert(args.includes(`sha=${headSha}`)); merged = true; return { code: 0, out: "{}", err: "" };
   };
-  const model = async (_job, cwd) => { modelCalls++; await assert.rejects(readFile(join(cwd, ".env.local")), /ENOENT/); await writeFile(join(cwd, "page.js"), "export const title = 'after';\n"); return { ...modelResult, blocked }; };
+  const model = async (_job, cwd) => { modelCalls++; modelJobs.push(_job); await assert.rejects(readFile(join(cwd, ".env.local")), /ENOENT/); await writeFile(join(cwd, "page.js"), "export const title = 'after';\n"); return { ...modelResult, blocked }; };
   const client = { request: async (path, body) => {
     assert.equal(path, "/api/automation/work"); reports.push(body);
     if (cancelAtPublish && body.phase === "heartbeat" && body.progress === "publishing") throw Object.assign(new Error("cancelled"), { code: "stale_job" });
@@ -53,8 +62,37 @@ async function fixture({ ci = "success", deliveryFails = false, publish = "pr", 
   } };
   const options = { stateDir: join(dir, "state"), run, get, model, delay: async () => {}, log: () => {} };
   const execute = () => executeProjectWork(client, { ...job, publish }, options);
-  return { dir, execute, reports, ghCalls, counts: () => ({ modelCalls, deliveries, pushes, merged }) };
+  return { dir, execute, reports, ghCalls, npmCalls, modelJobs, counts: () => ({ modelCalls, deliveries, pushes, merged }) };
 }
+test("real npm prepares a locked dependency-free project without running install hooks, including redelivery", async () => {
+  const f = await fixture({ npmProject: true, deliveryFails: true });
+  try {
+    await f.execute(); await f.execute();
+    const result = f.reports.find(r => r.phase === "result")?.result;
+    assert.equal(result?.checks.find(c => c.name === "의존성 준비")?.status, "passed");
+    assert.equal(f.npmCalls.length, 1);
+    const { env, args } = f.npmCalls[0];
+    assert(args.includes("--ignore-scripts"));
+    assert.notEqual(env.NPM_CONFIG_USERCONFIG, env.NPM_CONFIG_GLOBALCONFIG);
+    assert.equal(await readFile(env.NPM_CONFIG_USERCONFIG, "utf8"), "");
+    assert.equal(await readFile(env.NPM_CONFIG_GLOBALCONFIG, "utf8"), "");
+    assert.equal(f.modelJobs[0].context.runnerPreparation.checks[0].status, "passed");
+  } finally { await rm(f.dir, { recursive: true, force: true }); }
+});
+test("npm failure is explained without exposing logs, informs the model and prevents merge", async () => {
+  const f = await fixture({ npmProject: true, npmFailure: true, publish: "merge" });
+  try {
+    await f.execute();
+    const result = f.reports.find(r => r.phase === "result")?.result;
+    const check = result?.checks.find(c => c.name === "의존성 준비");
+    assert.equal(check?.status, "failed");
+    assert.match(check.detail, /EAI_AGAIN/);
+    assert(!JSON.stringify(result).includes("PRIVATE_FIXTURE_TOKEN"));
+    assert(!JSON.stringify(f.modelJobs).includes("/private/user"));
+    assert.deepEqual(f.modelJobs[0].context.runnerPreparation.checks, [check]);
+    assert.equal(f.counts().merged, false);
+  } finally { await rm(f.dir, { recursive: true, force: true }); }
+});
 test("CLI work edits a real isolated fixture, commits/pushes once and redelivers without another model call", async () => {
   const f = await fixture({ deliveryFails: true });
   try {
