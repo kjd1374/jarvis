@@ -2,13 +2,24 @@
 
 2026-10-15 이후의 기본 방침: 사용자는 앞으로 개발 작업을 GitHub를 통해 진행하기로 했다. 작업 브랜치/PR과 검증 기록을 남기고 GitHub에 기록된 소스 revision에 배포 결과를 연결한다. 아래 working-tree 배포는 이전 배포 문제를 해결한 경로이며, 이후 미커밋 작업을 GitHub 기록 없이 배포하는 기본 절차로 사용하지 않는다. 코드가 GitHub에 있는 것과 실제 배포에 반영된 것은 별도로 확인한다.
 
+## 현재 개발 배포 방침
+
+2026-10-15 사용자가 작업 브랜치 push/미리보기에 이어 main 병합과 프로덕션 배포도 명시적으로 승인했다. 개발 중인 합의된 코드 변경은 관련 검증 → GitHub PR → main 병합 → 기존 Vercel 자동 production 배포까지 이어서 처리한다. 이 일상적인 코드 게시 단계를 매번 재승인받지 않는다. 새로운 비용·권한 확대·DB 활성화/마이그레이션·원본 업무 데이터 수정은 별도 범위다.
+
+- 작업 PR의 최신 SHA와 CI 결과를 확인한 뒤 해당 revision만 병합한다. main merge commit과 Vercel production 소스 SHA가 같은지 확인한다.
+- 자동으로 시작한 배포를 조회한다. READY 전에는 완료라고 보고하지 않으며 동일 소스의 수동 빌드를 중복 생성하지 않는다.
+- 정식 주소는 https://jarvis-zeta-three-77.vercel.app 이다. 프로젝트의 production target 및 이 주소의 대상 deployment ID를 확인한다. preview는 기존 https://jarvis-preview-ai-report.vercel.app 을 유지한다.
+- 현재 운영 저장은 비활성이고 기본 저장은 주소별 IndexedDB다. 같은 정식 주소의 기존 자료는 보존한다. 미리보기에서 만든 자료는 정식 주소로 자동 복사되지 않으므로 설정에서 백업→미리보기→병합으로 이관한다. 기존 자료를 삭제하거나 덮어쓰지 않는다.
+- 기존 Vercel 보호와 운영 환경 변수·인증·DB를 변경하지 않는다. 보호 때문에 원격 화면/health 확인이 로그인으로 이동하면 앱 성공으로 오인하지 않고 한계를 기록한다.
+- 실제 merge SHA·Vercel deployment ID·READY·CI·주소 확인 결과는 [PR #2](https://github.com/kjd1374/jarvis/pull/2)와 [Issue #1](https://github.com/kjd1374/jarvis/issues/1)에서 확인한다. 아래 ID들은 이전 배포의 이력이다.
+
 ## 2026-10-14 진단
 
 Vercel 배포 이력은 모두 READY였고 최신 실패 기록은 없었다. 고정 미리보기는 이전 프로젝트 상세 버전(dpl_419SEhwyPWE4NEGCw3kfqBZQ7DWE)을 가리켰다. 최신 통합 업무실 변경은 로컬 미커밋 상태이고 origin/main도 caeb78a였다. 이전 작업의 배포 보류와 Git 소스 전용 헬퍼의 커밋·push 요구 때문에 최신 코드가 배포 대상에 포함되지 않았다.
 
 클라우드 토큰은 이미 주입되어 있고 Vercel 프로젝트 읽기 요청이 성공했다. 새 토큰이나 권한 확대가 필요하지 않았다. Node 24의 공식 `--use-env-proxy` 옵션과 Vercel REST API를 사용해 기존 바인딩을 재사용한다. 실제 앱 빌드 오류와 배포되지 않은 상태를 구분한다.
 
-## 현재 소스 배포
+## 이전 working-tree 미리보기 배포 경로
 
 ```sh
 # 클라우드 환경에서 필요한 경우 먼저:

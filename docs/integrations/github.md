@@ -22,4 +22,4 @@ AI 모델, GitHub App, webhook, scheduler는 이번에 추가하지 않는다. �
 
 ## 이번 변경의 GitHub 반영 경계
 
-기존 Vercel 프로젝트가 이 저장소에 연결되어 있고 Git push 시 배포 생성이 활성화되어 있다. 처음에는 사용자의 배포 유발 push 금지 조건에 따라 로컬 브랜치와 [Issue #1](https://github.com/kjd1374/jarvis/issues/1)까지만 준비했다. 이후 2026-10-15 사용자가 push와 그에 따른 미리보기 진행을 승인해 `codex/workroom-connection-preparation`을 올리고 [PR #2](https://github.com/kjd1374/jarvis/pull/2)를 생성했다. 같은 작업의 필요한 수정과 재검증도 이 범위에서 진행한다. 운영 main merge/프로덕션 배포·인증/DB 활성화는 포함하지 않는다. 배포와 CI의 최종 SHA/결과는 PR/Issue 기록에서 확인한다.
+기존 Vercel 프로젝트가 이 저장소에 연결되어 있고 Git push 시 배포 생성이 활성화되어 있다. 처음에는 push를 보류하고 [Issue #1](https://github.com/kjd1374/jarvis/issues/1)을 기록했다. 이후 2026-10-15 사용자가 push/미리보기를 승인해 `codex/workroom-connection-preparation`과 [PR #2](https://github.com/kjd1374/jarvis/pull/2)를 만들었으며, 다음 요청에서 **main 병합과 프로덕션 배포까지 명시적으로 승인**했다. 현재 개발 범위의 합의된 코드 변경은 검증·push·PR·병합·정식 배포까지 진행하고 결과를 각각 확인한다. 인증/접근 확대·운영 DB 활성화·업무 원본 쓰기는 코드 배포 승인에 포함하지 않는다. 최종 SHA와 실제 배포/CI 결과는 PR/Issue 기록에서 확인한다.

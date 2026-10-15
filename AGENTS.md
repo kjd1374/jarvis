@@ -30,7 +30,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - Run real persistence checks separately with `npm run test:storage` in the disposable test environment. Keep company/personal isolation, reload recovery, atomic file writes, and duplicate-submit protection covered. See `docs/TESTING.md` for commands and artifacts.
 - Run existing checks and relevant regression tests; report skipped checks and reasons. Preserve the current UI design unless the user explicitly requests a redesign. Introduce shadcn/ui only where it fits and delivers a concrete benefit.
 - Mastra, LangGraph, Codex App Server, TTS, and a separate analytics server are deferred until a demonstrated need justifies a new comparison and decision.
-- For the current regression/UI task, leave reversible local code changes. Do not push, merge, deploy, or change production settings, authentication, or data.
+- The earlier regression/UI task initially held push/merge/deployment. The user's explicit development publishing authorization below supersedes that hold. Do not infer permission to change authentication, activate production storage, expand access, or modify source business data from a code deployment request.
 
 ## Explicitly requested preview deployments
 
@@ -48,4 +48,10 @@ The working-tree preview commands in `docs/DEPLOYMENT.md` were used for the expl
 
 ### Authorized branch push and preview
 
-On 2026-10-15 the user explicitly approved pushing the prepared work after being told this triggers Vercel preview deployment. Push `codex/workroom-connection-preparation`, keep its PR and CI results traceable, and update the existing protected preview alias after verifying the deployment's project, branch and SHA. Necessary fixes in this scope may be pushed and reverified without asking again. This supersedes the earlier push/preview hold for this work; main merge, production deployment, authentication changes, DB activation and source business-data changes remain outside scope.
+On 2026-10-15 the user first approved pushing the prepared work and its preview. `codex/workroom-connection-preparation` is tracked in PR #2 with CI and preview results. This preview-only scope was subsequently expanded by the authorization below.
+
+### Authorized main merge and production deployment
+
+The user explicitly requested main merge and production deployment on 2026-10-15 and explained that Jarvis is still under development, so requested code changes can be completed together. During this development work, carry agreed code changes through relevant verification, GitHub push/PR, main merge and production deployment without repeatedly asking to approve those routine publishing steps. Keep GitHub revision, CI results and actual deployment state traceable; verify the existing project's production target and stable URL, and reuse an automatic deployment instead of creating duplicates. Follow any narrower limits in later user requests.
+
+This authorizes publishing the current Jarvis code, not unrelated work, new paid services, authentication/access expansion, production DB activation/migrations, destructive changes, or writes to v4/Sheets business originals. Preserve existing data and protection settings. The previously requested v4 changes must still be described before implementing them.
