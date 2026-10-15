@@ -1,0 +1,43 @@
+export type WorkCheck = { name: string; status: "passed" | "failed" | "not_run"; detail: string };
+export type WorkResult = {
+  reply: string;
+  summary: string;
+  currentStatus: string;
+  nextAction: string;
+  changes: string[];
+  checks: WorkCheck[];
+  followUps: { title: string; reason: string; kind: "todo" | "decision" }[];
+  outcome: "answered" | "no_changes" | "pr_open" | "merged" | "deployed" | "blocked";
+  branch: string | null;
+  baseSha: string | null;
+  headSha: string | null;
+  prUrl: string | null;
+  deployment: { state: "not_configured" | "pending" | "success" | "failure"; url: string | null; sha: string | null };
+};
+export type ProjectTurn = {
+  id: string;
+  serviceId: string;
+  repository: string;
+  request: string;
+  mode: "ask" | "change";
+  publish: "pr" | "merge";
+  status: "queued" | "running" | "completed" | "failed" | "interrupted" | "cancelled";
+  phase: "queued" | "preparing" | "coding" | "testing" | "publishing" | "reporting";
+  createdAt: string;
+  updatedAt: string;
+  attempt: number;
+  executionDevice?: string;
+  leaseOwner?: string;
+  leaseToken?: string;
+  leaseUntil?: string;
+  error?: string;
+  result?: WorkResult;
+};
+export type ProjectAutomation = { turns: ProjectTurn[] };
+export type DiscoveredWebLink = {
+  url: string;
+  kind: "homepage" | "deployment" | "pages" | "readme";
+  environment: string;
+  sourceUrl: string;
+  observedAt: string;
+};

@@ -1,6 +1,6 @@
 // Opt-in integration test: local Supabase only, real Auth/RLS and two isolated browsers.
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { readFile, mkdir, mkdtemp, rm } from "node:fs/promises";
@@ -874,6 +874,40 @@ try {
   assert.equal(failedService.monitoring.error, "github_unavailable");
   assert(afterFailure.body.data.sourceRecords.some(f => f.id === sourceId && !f.deletedAt));
   recordCheck("CLI queue is durable and device-fenced; concurrent claims dedupe; scoped facts/citations and human edits survive; unchanged evidence skips AI (synthetic transports)");
+  // Project chat work uses the same real owner/device/CAS storage, without external execution.
+  const workSnapshot = await api("/api/workspace?space=company", a.token);
+  const workId = randomUUID(), projectId = "synthetic-work-project", workServiceId = "synthetic-work-service";
+  workSnapshot.body.data.projects.push({ id: projectId, space: "company", name: "합성 실행 프로젝트", description: "합성 목표", createdAt: autoStamp,
+    automation: { turns: [{ id: workId, serviceId: workServiceId, repository: "example/synthetic", request: "합성 버튼 수정", mode: "change", publish: "pr", status: "queued", phase: "queued", attempt: 0, createdAt: autoStamp, updatedAt: autoStamp }] } });
+  workSnapshot.body.data.services.push({ ...autoService, id: workServiceId, projectId, monitoring: { ...autoService.monitoring, job: null } });
+  workSnapshot.body.data.tasks.push({ id: `work-${workId}`, sourceMessageId: workId, space: "company", projectId, title: "합성 버튼 수정", status: "todo", dueDate: "", createdAt: autoStamp });
+  assert.equal((await api("/api/workspace", a.token, "PUT", { space: "company", data: workSnapshot.body.data, revision: workSnapshot.body.revision })).status, 200);
+  const workClaim = { space: "company", projectIds: [projectId], provider: "codex", workVersion: 1 };
+  assert.equal((await api("/api/automation/claim", b.token, "POST", workClaim)).status, 403);
+  assert.equal((await api("/api/automation/claim", a.token, "POST", { ...workClaim, space: "personal" })).status, 400);
+  assert.equal((await api("/api/automation/claim", a.token, "POST", { ...workClaim, workVersion: undefined })).body.job, null);
+  const workClaims = await Promise.all([api("/api/automation/claim", a.token, "POST", workClaim), api("/api/automation/claim", a.secondToken, "POST", workClaim)]);
+  assert(workClaims.every(c => c.status === 200)); assert.equal(workClaims.filter(c => c.body.job?.kind === "work").length, 1);
+  const workWinner = workClaims[0].body.job ? a.token : a.secondToken, workLoser = workWinner === a.token ? a.secondToken : a.token;
+  const workJob = workClaims.find(c => c.body.job)?.body.job;
+  assert.equal(workJob.request, "합성 버튼 수정"); assert.equal(workJob.publish, "pr");
+  const workIdentity = { space: "company", projectId, jobId: workId, leaseToken: workJob.leaseToken };
+  assert.equal((await api("/api/automation/work", workLoser, "POST", { ...workIdentity, phase: "heartbeat" })).status, 409);
+  assert.equal((await api("/api/automation/work", workWinner, "POST", { ...workIdentity, phase: "heartbeat", progress: "coding" })).status, 200);
+  const workResult = { reply: "합성 수정 결과", summary: "합성 화면 수정", currentStatus: "PR 검토", nextAction: "검증 범위 확장", changes: ["src/page.tsx"], checks: [{ name: "CI", status: "passed", detail: "합성 검증" }],
+    followUps: [{ title: "합성 태블릿 회귀 확인", reason: "추가 범위", kind: "todo" }], outcome: "pr_open", branch: `jarvis/work-${workId}`, baseSha: "a".repeat(40), headSha: "b".repeat(40), prUrl: "https://github.com/example/synthetic/pull/10", deployment: { state: "not_configured", url: null, sha: null } };
+  assert.equal((await api("/api/automation/work", workWinner, "POST", { ...workIdentity, phase: "result", result: { ...workResult, prUrl: "https://github.com/other/private/pull/1" } })).status, 400);
+  const humanDuringWork = await api("/api/workspace?space=company", a.token);
+  humanDuringWork.body.data.notes.push({ id: "human-during-work", space: "company", projectId, content: "실행 중 작성한 합성 메모", createdAt: autoStamp, updatedAt: autoStamp });
+  assert.equal((await api("/api/workspace", a.token, "PUT", { space: "company", data: humanDuringWork.body.data, revision: humanDuringWork.body.revision })).status, 200);
+  for (let i = 0; i < 2; i++) assert.equal((await api("/api/automation/work", workWinner, "POST", { ...workIdentity, phase: "result", result: workResult })).status, 200);
+  const workSaved = await api("/api/workspace?space=company", a.secondToken);
+  assert.equal(workSaved.body.data.projects.find(p => p.id === projectId).automation.turns[0].result.prUrl, workResult.prUrl);
+  assert.equal(workSaved.body.data.tasks.filter(t => t.title === "합성 태블릿 회귀 확인").length, 1);
+  assert.equal(workSaved.body.data.tasks.find(t => t.id === `work-${workId}`).status, "decision");
+  assert(workSaved.body.data.notes.some(n => n.id === "human-during-work"));
+  assert(!(await api("/api/workspace?space=personal", a.token)).body.data.projects.some(p => p.id === projectId));
+  recordCheck("project chat queue and automatic follow-ups persist atomically; old runners skip work; device/token/scope fencing and duplicate result recovery hold (synthetic execution)");
   console.log(
     JSON.stringify(
       {

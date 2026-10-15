@@ -403,22 +403,8 @@ test("프로젝트 카드는 상세 화면을 열고 프로젝트 대화에서 �
       ),
     ).toBe(true);
   }
-  await page
-    .getByRole("button", { name: "이 프로젝트에서 대화", exact: true })
-    .click();
-  await expect(page).toHaveURL("/assistant");
-  await expect(
-    page.getByRole("link", {
-      name: "합성 한국어 회화 프로젝트로 돌아가기",
-      exact: true,
-    }),
-  ).toBeVisible();
-  await page
-    .getByRole("link", {
-      name: "합성 한국어 회화 프로젝트로 돌아가기",
-      exact: true,
-    })
-    .click();
+  await page.getByRole("button", { name: "AI에게 작업 요청", exact: true }).click();
+  await expect(page.getByLabel("AI에게 요청", { exact: true })).toBeFocused();
   await expect(page).toHaveURL(detailUrl);
   await expect(page.locator("h1")).toHaveText("합성 한국어 회화 프로젝트");
   await page.getByRole("link", { name: "프로젝트 목록", exact: true }).click();

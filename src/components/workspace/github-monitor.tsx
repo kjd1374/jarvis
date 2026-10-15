@@ -84,7 +84,7 @@ export function GitHubMonitor({ service }: { service: Service }) {
             <button className={styles.textButton} disabled={saving} onClick={() => void run(async () => { await mutate(d => actOnSuggestion(d, service.space, service.id, suggestion.id, "dismiss", false, now())); })}>제안 제외</button>
           </div>
         </article>)}
-        <p className={styles.detailFootnote}>제안 채택은 Jarvis의 할 일 등록입니다. 외부 서비스 수정·코드 실행 승인을 대신하지 않습니다.</p>
+        <p className={styles.detailFootnote}>새 점검의 후속 업무는 자동 등록됩니다. 완료 판정은 근거 확인 후 기록합니다. 코드 수정은 프로젝트 상단 AI 작업실에서 요청하세요.</p>
       </div> : <p className={styles.detailFootnote}>AI 분석 결과 없음 · 구독 로그인된 CLI 실행기가 연결돼야 실제 분석이 반영됩니다.</p>}
       {inspection && <details className={styles.revisionDetails}><summary>조회 범위·미확인 항목</summary>
         <p>파일 구조 응답: {inspection.treeComplete ? "완전 응답" : "일부 응답 · 전체 구조 미확인"}. 모든 파일을 읽거나 코드를 실행한 것은 아닙니다.</p>
@@ -110,12 +110,12 @@ export function CliRunnerSetup() {
   const hasRepository = data.services.some(s => s.space === space && (!projectId || s.projectId === projectId) && repositoryFor(s));
   return <section className={styles.settingsCard} id="cli-runner" aria-label="구독 CLI 실행기">
     <h2>구독 CLI 실행기</h2>
-    <p>ChatGPT 구독으로 로그인한 공식 Codex CLI가 읽기 전용 점검·분석을 수행합니다. API 결제나 구독 인증값의 웹 복사는 필요하지 않습니다. 구독 사용 한도는 적용됩니다.</p>
+    <p>ChatGPT 구독으로 로그인한 공식 Codex CLI가 저장소 점검·웹 주소 발견과 프로젝트 대화의 수정 요청을 처리합니다. API 결제나 구독 인증값의 웹 복사는 필요하지 않습니다. 구독 사용 한도는 적용됩니다.</p>
     <p>{spaceLabels[space]} · {projectId ? data.projects.find(p => p.id === projectId)?.name : "현재 등록된 프로젝트"}만 실행기에 연결합니다.</p>
     <ol><li>실행할 PC에 Node 24+, GitHub CLI, Codex CLI를 준비합니다.</li><li>터미널에서 <code>gh auth login</code>과 <code>codex login</code>을 확인합니다. Codex는 ChatGPT 로그인 방식을 사용합니다.</li>
       <li>아래 실행기와 설정 파일을 같은 폴더에 받습니다. 설정 파일에는 토큰이 없습니다.</li><li><code>node jarvis-runner.mjs --config jarvis-runner.json</code>을 실행하고, 표시되는 12자리 번호로 최초 기기 등록을 진행합니다.</li></ol>
     <div className={styles.projectActions}><a className={styles.secondaryButton} href="/jarvis-runner.mjs" download>실행기 파일 받기</a>
       <button className={styles.secondaryButton} disabled={!ready || !hasRepository} onClick={download}>현재 범위의 실행기 설정 받기</button></div>
-    <p className={styles.detailFootnote}>macOS·Linux·WSL에서 사용합니다. PC와 실행기가 켜져 있어야 자동 조회됩니다. 중단 시 서버의 대기 작업·마지막 정상 자료는 유지합니다. 외부 코드 변경은 실행하지 않습니다.</p>
+    <p className={styles.detailFootnote}>macOS·Linux·WSL에서 사용합니다. PC와 실행기가 켜져 있어야 자동 조회됩니다. 중단 시 서버의 대기 작업·마지막 정상 자료는 유지합니다. 프로젝트 대화에서 보낸 수정 요청은 별도 작업 폴더에서 코드 수정·PR 작성 및 선택한 범위의 반영으로 이어집니다. 실행기를 이미 사용 중이면 새 파일로 교체한 뒤 다시 시작해주세요.</p>
   </section>;
 }

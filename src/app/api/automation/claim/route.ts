@@ -1,5 +1,6 @@
 import { checkOrigin, CloudError, failure, readJson, reply, spaceParam } from "@/lib/cloud/server";
 import { changeWorkspace } from "@/lib/automation/server";
+import { claimProjectWork } from "@/lib/automation/work";
 import { claimInspection } from "@/lib/automation/state";
 export const runtime = "nodejs";
 export async function POST(request: Request) {
@@ -16,13 +17,22 @@ export async function POST(request: Request) {
     const result = await changeWorkspace(request, space, (data, deviceId) => {
       if (projects.some(id => id !== null && !data.projects.some(p => p.id === id && p.space === space)))
         throw new CloudError(400, "mixed_scope", "이 영역의 프로젝트만 실행기에 연결할 수 있습니다.");
+      const original = data;
+      const supportsWork = body.workVersion === 1 && provider === "codex";
+      if (supportsWork) {
+        data = { ...data, services: data.services.map(s => s.space === space && projects.includes(s.projectId) && s.monitoring &&
+          (!s.monitoring.runnerSeenAt || Date.parse(stamp) - Date.parse(s.monitoring.runnerSeenAt) >= 60_000) ? { ...s, monitoring: { ...s.monitoring, runnerSeenAt: stamp, runnerVersion: "2.0.0" } } : s) };
+        const work = claimProjectWork(data, { space, projectIds: projects, deviceId }, stamp);
+        data = work.data;
+        if (work.job) return { data, result: { job: work.job } };
+      }
       const claimed = claimInspection(data, { space, projectIds: projects, provider, deviceId }, stamp);
-      if (!claimed) return { data, result: { job: null } };
+      if (!claimed) return { data: JSON.stringify(data) === JSON.stringify(original) ? original : data, result: { job: null } };
       const s = claimed.service;
       return { data: claimed.data, result: { job: {
         id: s.monitoring!.job!.id, serviceId: s.id, space, projectId: s.projectId,
         repository: s.monitoring!.repository, provider,
-        previousInspection: s.monitoring!.inspection,
+        previousInspection: s.monitoring!.inspection, previousWebLinks: s.monitoring!.webLinks ?? [],
         previousSourceIds: data.sourceRecords.filter(r => r.serviceId === s.id && r.space === space && !r.deletedAt).map(r => r.externalId).slice(0, 5000),
       } } };
     });

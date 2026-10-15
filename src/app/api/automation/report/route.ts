@@ -1,6 +1,6 @@
 import { applySync } from "@/lib/integrations/sync";
 import { acceptFacts, analysisInput, parseAnalysis, preservePrimaryConnection } from "@/lib/automation/facts";
-import { applyAnalysis, requireLease } from "@/lib/automation/state";
+import { actOnSuggestion, applyAnalysis, requireLease } from "@/lib/automation/state";
 import { changeWorkspace } from "@/lib/automation/server";
 import { checkOrigin, CloudError, failure, readJson, reply, spaceParam } from "@/lib/cloud/server";
 export const runtime = "nodejs";
@@ -35,7 +35,12 @@ export async function POST(request: Request) {
         let updated;
         try { updated = applyAnalysis(service, parseAnalysis(current, service, body.result, stamp)); }
         catch { throw new CloudError(400, "invalid_analysis", "근거와 범위를 확인할 수 없는 분석입니다. 이전 분석은 유지합니다."); }
-        return { data: { ...current, services: current.services.map(s => s.id === service.id ? updated : s) }, result: { accepted: true } };
+        let data = { ...current, services: current.services.map(s => s.id === service.id ? updated : s) };
+        for (const suggestion of updated.monitoring!.analysis!.suggestions) {
+          if (suggestion.state === "proposed" && suggestion.kind !== "completion")
+            data = actOnSuggestion(data, space, service.id, suggestion.id, "adopt", false, stamp);
+        }
+        return { data, result: { accepted: true } };
       }
       const codes = ["github_auth_required", "github_rate_limited", "github_unavailable", "cli_login_required", "cli_limit", "cli_unavailable", "invalid_analysis"];
       const code = typeof body.code === "string" && codes.includes(body.code) ? body.code : "cli_unavailable";

@@ -14,6 +14,9 @@ export function requestInspection(service: Service, stamp: string): Service {
       (prior.job?.status === "queued" || prior.job?.status === "running" && Date.parse(prior.job.leaseUntil ?? "") > Date.parse(stamp)))
     return service;
   const monitoring: GitHubMonitoring = {
+    webLinks: prior?.repository === repository ? prior.webLinks : [],
+    runnerSeenAt: prior?.runnerSeenAt,
+    runnerVersion: prior?.runnerVersion,
     lastSuccessAt: prior?.repository === repository ? prior.lastSuccessAt : null,
     lastAttemptAt: prior?.repository === repository ? prior.lastAttemptAt : null,
     error: prior?.repository === repository ? prior.error : null,

@@ -193,7 +193,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     };
   }, [loadAttempt, retryCloud]);
 
-  const monitoringActive = data.services.some(s => s.monitoring?.enabled);
+  const monitoringActive = data.services.some(s => s.monitoring?.enabled) || data.projects.some(p => p.automation?.turns.some(t => t.status === "queued" || t.status === "running"));
   useEffect(() => {
     if (!account?.authenticated || !monitoringActive) return;
     const timer = setInterval(() => {

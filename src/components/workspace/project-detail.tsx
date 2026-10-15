@@ -12,10 +12,11 @@ import {
   type Project,
 } from "@/lib/workspace/types";
 import { projectHref } from "@/lib/workspace/project-links";
-import { projectQuickLinks } from "@/lib/workspace/project-connections";
+import { githubConnectionUrl, repositoryKey, projectQuickLinks } from "@/lib/workspace/project-connections";
 import { ContextEditor, Modal, WorkspaceControls } from "./workspace-controls";
 import { useWorkspace } from "./workspace-provider";
 import { Icon } from "./icon";
+import { ProjectAgent, ProjectAutomaticResults } from "./project-agent";
 import { NotesPanel } from "./notes-panel";
 import { ServiceRegistrationButton, ServicesPanel } from "./services-panel";
 import { RequestsPanel } from "./requests-panel";
@@ -154,7 +155,7 @@ function ProjectView({ project }: { project: Project }) {
               {spaceLabels[project.space]} 프로젝트
             </p>
             <h1>{project.name}</h1>
-            <p>목표와 기록을 모으고, 다음 할 일을 이어가세요.</p>
+            <p>화면을 확인하고 요청하세요. AI가 작업하고 결과를 정리합니다.</p>
           </div>
         </div>
         <div className={styles.projectActions}>
@@ -168,9 +169,9 @@ function ProjectView({ project }: { project: Project }) {
           <button
             className={styles.primaryButton}
             disabled={saving}
-            onClick={() => void openWorkspace("/assistant")}
+            onClick={() => document.getElementById("project-agent-message")?.focus()}
           >
-            <Icon name="message" size={16} /> 이 프로젝트에서 대화
+            <Icon name="message" size={16} /> AI에게 작업 요청
           </button>
         </div>
       </header>
@@ -182,17 +183,24 @@ function ProjectView({ project }: { project: Project }) {
           {links.github.map(link => <a key={link.href} className={styles.secondaryButton} href={link.href} target="_blank" rel="noopener noreferrer" title={link.href}>
             <Icon name="link" size={16} />{links.github.length === 1 ? "GitHub 열기" : `GitHub · ${link.name}`}
           </a>)}
-          <ServiceRegistrationButton preset="custom" projectId={project.id}><Icon name="plus" size={15} />{links.web.length ? "웹 주소 추가" : "웹 화면 연결"}</ServiceRegistrationButton>
+          <ServiceRegistrationButton preset="custom" projectId={project.id}><Icon name="plus" size={15} />{links.web.length ? "웹 주소 추가" : "웹 주소 직접 보완"}</ServiceRegistrationButton>
           {!links.github.length && <ServiceRegistrationButton preset="github" projectId={project.id}>GitHub 연결</ServiceRegistrationButton>}
-          <a className={styles.textButton} href="#project-change-requests">수정 요청 남기기 →</a>
+          <a className={styles.textButton} href="#project-ai">AI에 수정 요청 →</a>
         </div>
-        <p>{links.web.length ? "새 탭에서 실제 화면을 확인하고, 바꿀 내용을 수정 요청으로 남기세요." : "배포된 웹 주소를 연결하면 실제 화면을 여기서 바로 열 수 있습니다. GitHub는 저장소 화면을 엽니다."}</p>
+        <p>{links.web.length ? "실제 화면을 새 탭에서 확인하고 바로 아래 AI에게 요청하세요. GitHub에서 발견한 웹 주소도 자동으로 표시됩니다." : links.github.length ? "연결된 CLI가 GitHub 홈페이지·배포 기록에서 웹 주소를 자동으로 찾습니다. 주소가 발견되면 여기에 표시됩니다." : "GitHub를 연결하면 실행기가 웹 주소와 프로젝트 내용을 확인합니다."}</p>
+        {data.services.some(s => s.space === project.space && s.projectId === project.id && s.monitoring?.webLinks?.length) &&
+          <details className={styles.revisionDetails}><summary>자동으로 찾은 웹 주소의 출처</summary>
+            {data.services.filter(s => s.space === project.space && s.projectId === project.id && s.monitoring?.repository === repositoryKey(githubConnectionUrl(s) ?? "")).flatMap(s => s.monitoring?.webLinks ?? []).map((link, index) =>
+              <p key={`${link.url}:${index}`}><a href={link.sourceUrl} target="_blank" rel="noopener noreferrer">{link.environment || link.kind} · GitHub 출처 ↗</a> · {dateLabel(link.observedAt)}<br />{link.url}</p>)}
+          </details>}
       </section>
       {notice && (
         <p className={styles.errorBanner} role="alert">
           {notice}
         </p>
       )}
+      <ProjectAgent project={project} />
+      <ProjectAutomaticResults project={project} />
       <div className={styles.projectDetailGrid}>
         <section
           className={`${styles.detailSection} ${styles.projectOverview}`}

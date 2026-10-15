@@ -1,3 +1,4 @@
+import { parseWebLinks } from "./web-links";
 import { createHash } from "node:crypto";
 import { canonical } from "../cloud/records";
 import { applySync, type ConnectorItem } from "../integrations/sync";
@@ -65,7 +66,7 @@ export function acceptFacts(data: WorkspaceData, service: Service, raw: unknown,
   const fingerprint = hash({
     facts: currentRepositoryRecords(updated, service).map(s => ({ id: s.externalId, title: s.title, content: s.content, status: s.status, updatedAt: s.sourceUpdatedAt })).sort((a, b) => a.id.localeCompare(b.id)),
     project: project ? [project.name, project.description, project.currentStatus ?? "", project.nextAction ?? ""] : null,
-    tasks: data.tasks.filter(t => t.space === service.space && t.projectId === service.projectId).map(t => [t.id, t.title, t.status]).sort((a, b) => a[0].localeCompare(b[0])),
+    tasks: data.tasks.filter(t => t.space === service.space && t.projectId === service.projectId && (!t.sourceSuggestionId || t.status === "done")).map(t => [t.id, t.title, t.status]).sort((a, b) => a[0].localeCompare(b[0])),
   });
   const inspection: RepositoryInspection = {
     repository, branch: meta.branch, headSha: meta.headSha, inspectedAt: stamp,
@@ -74,7 +75,7 @@ export function acceptFacts(data: WorkspaceData, service: Service, raw: unknown,
   };
   updated.syncEvents = updated.syncEvents.map(e => e.serviceId === service.id && e.attemptedAt === stamp && e.code === "ok" ? { ...e, code: "github_ok" } : e);
   updated.services = updated.services.map(s => s.id === service.id ? { ...s, ...preservePrimaryConnection(service), monitoring: {
-    ...s.monitoring!, inspection, lastSuccessAt: stamp, lastAttemptAt: stamp, error: null, nextRetryAt: null,
+    ...s.monitoring!, ...(raw.webLinks === undefined ? {} : { webLinks: parseWebLinks(raw.webLinks, repository, stamp) }), inspection, lastSuccessAt: stamp, lastAttemptAt: stamp, error: null, nextRetryAt: null,
     job: { ...s.monitoring!.job!, phase: "analyze", leaseUntil: new Date(Date.parse(stamp) + 10 * 60_000).toISOString() },
   } } : s);
   return updated;

@@ -23,9 +23,16 @@ export function projectQuickLinks(services: Service[], project: Project) {
   for (const service of scoped) {
     const href = projectHref(service.webUrl);
     if (href && !repositoryKey(href) && !web.has(href)) web.set(href, { name: service.name, href });
+    if (service.monitoring?.repository === repositoryKey(githubConnectionUrl(service) ?? "")) {
+      for (const link of service.monitoring?.webLinks ?? []) if (!web.has(link.url)) web.set(link.url, { name: link.environment || service.name, href: link.url });
+    }
     const repository = githubConnectionUrl(service);
     const key = repository && repositoryKey(repository);
     if (key && !github.has(key)) github.set(key, { name: key, href: `https://github.com/${key}` });
+  }
+  for (const turn of [...(project.automation?.turns ?? [])].reverse()) {
+    const href = turn.result?.deployment.state === "success" && projectHref(turn.result.deployment.url ?? "");
+    if (href && github.has(turn.repository) && !web.has(href)) web.set(href, { name: "반영된 웹 화면", href });
   }
   return { web: [...web.values()], github: [...github.values()] };
 }

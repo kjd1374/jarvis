@@ -92,6 +92,9 @@ export function parseBackup(text: string): Backup {
     throw new Error(
       "원본 포함 백업에 빠진 파일이 있습니다. 원본 제외 백업 여부를 확인해주세요.",
     );
+  // Restoring a record is not permission to replay a previous external code change.
+  data.projects = data.projects.map(p => p.automation ? { ...p, automation: { turns: p.automation.turns.map(t =>
+    ["queued", "running"].includes(t.status) ? { ...t, status: "interrupted" as const, error: "imported_request_review", leaseOwner: undefined, leaseToken: undefined, leaseUntil: undefined } : t) } } : p);
   return { ...value, data };
 }
 export async function backupFiles(backup: Backup) {

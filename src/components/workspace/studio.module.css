@@ -2363,3 +2363,31 @@
 }
 
 .jsonPreview { max-height: 22rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 14px 0; font-size: 12px; line-height: 1.7; }
+
+.projectAgent { margin: 24px 0; border-color: rgba(139, 141, 255, .45); }
+.agentConnection { padding: 12px 16px; border: 1px solid var(--line, #33435d); border-radius: 10px; font-size: 13px; line-height: 1.8; }
+.agentConnection a { color: #b5baff; white-space: nowrap; }
+.agentMessages { display: grid; gap: 18px; max-height: 560px; overflow-y: auto; margin: 22px 0; }
+.agentTurn { border-bottom: 1px solid #28354b; padding-bottom: 18px; min-width: 0; }
+.agentText { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
+.agentReply { background: #0f192a; border-left: 3px solid #7976eb; border-radius: 8px; padding: 18px; margin-top: 12px; line-height: 1.7; }
+.agentReply a { display: inline-block; margin: 8px 20px 0 0; color: #b5baff; }
+.agentComposer { display: grid; gap: 12px; margin-top: 22px; }
+.agentComposer > label { font-size: 13px; color: #c2cce1; }
+.agentComposer textarea { width: 100%; box-sizing: border-box; resize: vertical; padding: 16px; border: 1px solid #465575; border-radius: 12px; background: #0d1625; color: #eef2ff; font: inherit; line-height: 1.6; }
+.agentComposer textarea:focus { outline: 2px solid #8b8dff; outline-offset: 2px; }
+.agentComposerActions { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.agentComposerActions label { display: grid; gap: 6px; max-width: 100%; min-width: 0; font-size: 12px; color: #bac8df; }
+.agentComposerActions select { max-width: 100%; min-width: 0; border: 1px solid #3c4c68; border-radius: 8px; background: #162138; color: #eef2ff; padding: 11px; font: inherit; }
+.agentComposerActions button { margin-left: auto; }
+.automaticResults { margin: 28px 0 38px; }
+.automaticResults h3 { margin: 0 0 16px; font-size: 16px; }
+.automaticResults p, .automaticResults li { line-height: 1.8; overflow-wrap: anywhere; }
+.automaticResults ul { padding-left: 20px; }
+.automaticResults a { color: #b5baff; }
+@media (max-width: 600px) {
+  .agentComposerActions { align-items: stretch; }
+  .agentComposerActions label { flex: 1 1 100%; }
+  .agentComposerActions button { width: 100%; margin-left: 0; }
+  .agentReply { padding: 12px; }
+}

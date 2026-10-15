@@ -187,7 +187,7 @@ test("프로젝트에 서비스·메모·할 일·요청을 저장하고 실제 
   await expect(
     services.getByText("바로가기만 등록됨", { exact: true }),
   ).toBeVisible();
-  await expect(services.getByText(/작업 실행 연결 없음/)).toBeVisible();
+  await expect(services.getByText(/서비스 열기는 웹 주소를 엽니다/)).toBeVisible();
   const popupPromise = page.waitForEvent("popup");
   await services
     .getByRole("link", { name: "합성 로컬 웹 서비스 서비스 열기", exact: true })
@@ -615,7 +615,7 @@ test("상단 바로가기는 현재 프로젝트만 열고 웹 등록·설정 �
   for (const blocked of ["other.example.test", "common.example.test", "private.example.test", "archived"]) expect(await links.innerHTML()).not.toContain(blocked);
   const repoPopup = page.waitForEvent("popup"); await github.click(); const repo = await repoPopup;
   await expect(repo.getByRole("heading", { name: "Synthetic repository" })).toBeVisible(); await repo.close();
-  await links.getByRole("button", { name: "웹 화면 연결", exact: true }).click();
+  await links.getByRole("button", { name: "웹 주소 직접 보완", exact: true }).click();
   let editor = page.getByRole("dialog", { name: "서비스 등록", exact: true });
   await expect(editor.getByLabel("서비스 프로젝트", { exact: true })).toHaveValue("quick-project");
   await editor.getByLabel("서비스 이름", { exact: true }).fill("합성 배포 화면");
@@ -625,15 +625,13 @@ test("상단 바로가기는 현재 프로젝트만 열고 웹 등록·설정 �
   await expect(web).toHaveAttribute("href", "http://127.0.0.1:4317/synthetic-live-screen");
   const webPopup = page.waitForEvent("popup"); await web.click(); const live = await webPopup;
   await expect(live.getByRole("heading", { name: "합성 실제 웹 화면" })).toBeVisible(); await live.close();
-  await links.getByRole("link", { name: "수정 요청 남기기" }).click();
-  const requests = page.getByRole("region", { name: "수정 요청 관리", exact: true });
-  await expect(requests).toBeInViewport();
-  await requests.getByRole("button", { name: "수정 요청 등록", exact: true }).click();
-  const request = page.getByRole("dialog", { name: "수정 요청 등록", exact: true });
-  await request.getByLabel("요청 제목", { exact: true }).fill("합성 화면 버튼 개선");
-  await request.getByLabel("요청 내용", { exact: true }).fill("실제 화면을 보고 버튼 위치 개선을 기록합니다.");
-  await request.getByRole("button", { name: "요청 저장", exact: true }).click(); await expect(request).not.toBeVisible();
-  expect((await state(page))!.requests[0].projectId).toBe("quick-project");
+  await links.getByRole("link", { name: "AI에 수정 요청" }).click();
+  const agent = page.getByRole("region", { name: "프로젝트 AI 작업실", exact: true });
+  await agent.getByLabel("AI에게 요청", { exact: true }).fill("합성 화면 버튼 개선");
+  await agent.getByLabel("반영 범위", { exact: true }).selectOption("pr");
+  await agent.getByRole("button", { name: "요청 보내기", exact: true }).click();
+  await expect(agent).toContainText("실행 대기");
+  expect((await state(page))!.projects.find(p => p.id === "quick-project")!.automation!.turns[0].request).toBe("합성 화면 버튼 개선");
   await page.reload(); await ready(page); await expect(web).toHaveAttribute("href", /synthetic-live-screen$/);
   const savedWeb = (await state(page))!.services.find(s => s.name === "합성 배포 화면")!;
   // The explicit project is independent of the global active-project preference.
