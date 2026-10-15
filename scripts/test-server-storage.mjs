@@ -172,6 +172,12 @@ try {
   recordCheck("real authentication required; explicit server scope required");
   const company = payload("company", "합성 회사 결과와 다음 행동");
   const stamp = new Date().toISOString();
+  company.projects.push({
+    id: "synthetic-legacy-project", space: "company", name: "합성 기존 프로젝트",
+    description: "기존 주소의 공통 연결 보관", createdAt: stamp,
+    repositoryUrl: "https://github.com/example/synthetic-legacy",
+    serviceUrl: "https://legacy.example.test/",
+  });
   company.services.push({
     id: "v4-synthetic",
     name: "합성 v4",
@@ -238,6 +244,13 @@ try {
   assert.equal(fromSecond.status, 200);
   assert.equal(fromSecond.body.data.notes[0].content, company.notes[0].content);
   assert(!JSON.stringify(fromSecond.body).includes("개인 전용 비밀"));
+  const unified = fromSecond.body.data;
+  assert.equal(unified.projects[0].connectionsUnified, true);
+  assert.equal(unified.projects[0].repositoryUrl, company.projects[0].repositoryUrl);
+  assert.equal(unified.services.filter((service) => service.projectId === "synthetic-legacy-project").length, 2);
+  assert.equal(sql(`select jsonb_array_length(data->'services') from public.jarvis_spaces where owner_id='${workspaceId}' and space='company'`), "3");
+  assert.equal((await api("/api/workspace?space=company", a.token)).body.data.services[1].id, unified.services[1].id);
+  recordCheck("legacy project addresses persist as the same scoped connections across real server sessions without deleting original references");
   const fromOther = await api("/api/workspace?space=company", b.token);
   assert.equal(fromOther.status, 403);
   const unapproved = b.client;

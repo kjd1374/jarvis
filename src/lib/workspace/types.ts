@@ -5,6 +5,8 @@ export type Project = {
   space: Space;
   name: string;
   description: string;
+  // Legacy addresses are retained for backup compatibility; edit services instead.
+  connectionsUnified?: true;
   repositoryUrl?: string;
   serviceUrl?: string;
   currentStatus?: string;

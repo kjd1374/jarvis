@@ -370,22 +370,23 @@ test("프로젝트 카드는 상세 화면을 열고 프로젝트 대화에서 �
     .fill(
       "긴 한국어 목표와 다음 행동을 프로젝트 안에서 관리합니다. ".repeat(8),
     );
-  await editor
-    .getByLabel("GitHub 저장소", { exact: true })
-    .fill("https://github.com/example/synthetic-project");
-  await editor
-    .getByLabel("서비스 주소", { exact: true })
-    .fill("https://synthetic.example.com");
   await editor.getByRole("button", { name: "변경 저장", exact: true }).click();
   await expect(editor).not.toBeVisible();
   await expect(page).toHaveURL(detailUrl);
   await expect(page.locator("h1")).toHaveText("합성 한국어 회화 프로젝트");
+  await page.getByRole("button", { name: "서비스 등록", exact: true }).click();
+  const connection = page.getByRole("dialog", { name: "서비스 등록", exact: true });
+  await connection.getByLabel("서비스 이름", { exact: true }).fill("합성 회화 서비스");
+  await connection.getByLabel("서비스 웹 주소", { exact: true }).fill("https://synthetic.example.com");
+  await connection.getByLabel("서비스 저장소 주소", { exact: true }).fill("https://github.com/example/synthetic-project");
+  await connection.getByRole("button", { name: "서비스 저장", exact: true }).click();
+  await expect(connection).not.toBeVisible();
   await expect(
-    page.getByRole("link", { name: "GitHub 저장소 열기", exact: true }),
+    page.getByRole("link", { name: "GitHub 기록 열기", exact: true }),
   ).toHaveAttribute("href", "https://github.com/example/synthetic-project");
   await page.reload();
   await expect(
-    page.getByRole("link", { name: "서비스 열기", exact: true }),
+    page.getByRole("link", { name: "합성 회화 서비스 서비스 열기", exact: true }),
   ).toHaveAttribute("href", "https://synthetic.example.com/");
   await expect(page.getByLabel("프로젝트 범위")).toHaveValue(
     detailUrl.split("/").at(-1)!,
