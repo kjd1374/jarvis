@@ -77,5 +77,6 @@ jobs:
             test-results/server.log
             test-results/device-*.png
             test-results/other-owner.png
+            test-results/large-transfer-failure.png
           retention-days: 7
           if-no-files-found: warn

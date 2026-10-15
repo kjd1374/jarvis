@@ -9,8 +9,8 @@
 - 작업 PR의 최신 SHA와 CI 결과를 확인한 뒤 해당 revision만 병합한다. main merge commit과 Vercel production 소스 SHA가 같은지 확인한다.
 - 자동으로 시작한 배포를 조회한다. READY 전에는 완료라고 보고하지 않으며 동일 소스의 수동 빌드를 중복 생성하지 않는다.
 - 정식 주소는 https://jarvis-zeta-three-77.vercel.app 이다. 프로젝트의 production target 및 이 주소의 대상 deployment ID를 확인한다. preview는 기존 https://jarvis-preview-ai-report.vercel.app 을 유지한다.
-- 현재 운영 저장은 비활성이고 기본 저장은 주소별 IndexedDB다. 같은 정식 주소의 기존 자료는 보존한다. 미리보기에서 만든 자료는 정식 주소로 자동 복사되지 않으므로 설정에서 백업→미리보기→병합으로 이관한다. 기존 자료를 삭제하거나 덮어쓰지 않는다.
-- 기존 Vercel 보호와 운영 환경 변수·인증·DB를 변경하지 않는다. 보호 때문에 원격 화면/health 확인이 로그인으로 이동하면 앱 성공으로 오인하지 않고 한계를 기록한다.
+- 2026-10-15 별도 승인으로 기존 Supabase의 비공개 서버 저장과 로그인 화면 없는 기기 연결을 운영에서 활성화했다(PR #7, Issue #6). 승인된 기기만 같은 업무실을 조회하며 회사/개인 요청은 분리한다. 기존 주소별 IndexedDB v1 자료는 보존하고 설정에서 확인·명시적 가져오기 후에만 이관한다. 기기 등록 전에는 서버 기록 접근을 허용하지 않는다. 현재 운영 사용자 기기 확인은 대기 중이다.
+- 기존 Vercel 배포 보호는 유지한다. 서버 저장 활성화에 한해 사용자 승인으로 스키마/내부 기기 세션 및 production의 저장 플래그·정식 Origin을 설정했다. 그 외 권한 확대나 원본 업무 변경은 포함하지 않는다. 보호 때문에 원격 화면/health 확인이 로그인으로 이동하면 앱 성공으로 오인하지 않고 한계를 기록한다.
 - 실제 merge SHA·Vercel deployment ID·READY·CI·주소 확인 결과는 [PR #2](https://github.com/kjd1374/jarvis/pull/2)와 [Issue #1](https://github.com/kjd1374/jarvis/issues/1)에서 확인한다. 아래 ID들은 이전 배포의 이력이다.
 
 ## 2026-10-14 진단
@@ -57,3 +57,7 @@ npm run deploy:preview:resume
 검증 결과: 고정 주소의 deploymentId와 새 배포 ID가 일치하고, 배포 metadata의 소스 해시도 일치했다. 기존 production ID `dpl_Cw56Za6YTJhjYC11c3A2Ym7ju4z6`는 그대로다. 보호 설정은 유지되고 서버 저장 활성화 플래그도 추가하지 않았다. resume 명령을 재실행해 같은 배포를 조회·검증했으며 중복 빌드를 만들지 않았다.
 
 비로그인 상태에서 고정 주소의 `/api/health` 요청은 Vercel 로그인으로 이동했다(최종 호스트 vercel.com). 이 200은 앱의 health 응답이 아니다. 실제 보호된 원격 화면의 기능 조작은 로그인 세션이 없어 미검증이며, Vercel의 원격 READY/소스/주소 확인과 로컬 기능 검증을 구분한다. 보호를 해제하거나 새 우회 키를 만들지 않았다.
+
+## 2026-10-15 로그인 없는 비공개 서버 저장 배포
+
+PR #7의 main `79479e8064c74f2e4b901c5953b62ba13e6ccb03`에 대한 자동 production 배포 `dpl_FTpR5DryTQhpULqqpw4eHodGG2hA`가 READY이고 정식 주소에 연결됨을 확인했다. PR/main CI 4개 작업이 모두 성공했다. 별도 합성 운영 브라우저의 health, 이메일/로그인 입력 부재, 미등록 기기의 회사/개인 접근 거부, 보안 쿠키, 320px 화면을 확인하고 테스트 기기는 해제했다. 운영 업무 기록은 쓰지 않았다. 실제 사용자 기기 승인/저장과 과거 기록 복구는 별도 확인 항목이다. 후속 사설 파일 직접 전송은 PR #8에서 Vercel 4.5 MB 제한을 보완하며 추가 스키마/인증 변경이 없다. 아래가 아닌 위 최신 승인/저장 방침을 적용하고 과거 배포 내역은 이력으로 보관한다.

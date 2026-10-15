@@ -1,5 +1,6 @@
 // Opt-in integration test: local Supabase only, real Auth/RLS and two isolated browsers.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { readFile, mkdir } from "node:fs/promises";
@@ -397,14 +398,127 @@ try {
   recordCheck(
     "actual private file API upload/read, idempotent retry, overwrite rejection and scope/device isolation",
   );
+  const largeBytes = Buffer.alloc(6 * 1024 * 1024, 71);
+  const largeHash = createHash("sha256").update(largeBytes).digest("hex");
+  const largeId = "synthetic-large-file";
+  const largeSnapshot = await api("/api/workspace?space=company", a.token);
+  largeSnapshot.body.data.documents.push({
+    id: largeId,
+    space: "company",
+    projectId: null,
+    taskId: null,
+    name: "합성-대형원본.bin",
+    mime: "application/octet-stream",
+    size: largeBytes.length,
+    createdAt: stamp,
+  });
+  assert.equal(
+    (
+      await api("/api/workspace", a.token, "PUT", {
+        space: "company",
+        revision: largeSnapshot.body.revision,
+        data: largeSnapshot.body.data,
+      })
+    ).status,
+    200,
+  );
+  const transferPath = `/api/workspace/files?space=company&id=${largeId}`;
+  assert.equal(
+    (
+      await api(transferPath, b.token, "POST", {
+        action: "upload",
+        sha256: largeHash,
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await fetch(base + transferPath, {
+        method: "PUT",
+        headers: fileHeaders,
+        body: largeBytes,
+      })
+    ).status,
+    413,
+  );
+  const signed = await api(transferPath, a.token, "POST", {
+    action: "upload",
+    sha256: largeHash,
+  });
+  assert.equal(signed.status, 200);
+  assert.equal(signed.body.stored, false);
+  const transferClient = createClient(info.API_URL, info.ANON_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  assert.ifError(
+    (
+      await transferClient.storage
+        .from("jarvis-workspace-files")
+        .uploadToSignedUrl(signed.body.path, signed.body.token, largeBytes, {
+          contentType: "application/octet-stream",
+          upsert: false,
+        })
+    ).error,
+  );
+  assert.equal(
+    (
+      await api(transferPath, a.token, "POST", {
+        action: "verify",
+        sha256: largeHash,
+      })
+    ).body.stored,
+    true,
+  );
+  assert.equal(
+    (
+      await api(transferPath, a.token, "POST", {
+        action: "upload",
+        sha256: largeHash,
+      })
+    ).body.stored,
+    true,
+  );
+  assert.equal(
+    (
+      await api(transferPath, a.token, "POST", {
+        action: "verify",
+        sha256: "0".repeat(64),
+      })
+    ).status,
+    409,
+  );
+  assert.equal((await api(transferPath, a.token)).status, 413);
+  const signedDownload = await api(
+    transferPath + "&transfer=download",
+    a.token,
+  );
+  assert.equal(new URL(signedDownload.body.url).origin, info.API_URL);
+  assert.deepEqual(
+    Buffer.from(await (await fetch(signedDownload.body.url)).arrayBuffer()),
+    largeBytes,
+  );
+  recordCheck(
+    "6 MB originals use scoped signed transfers; function bodies stay small and original SHA-256 is verified",
+  );
+  const allowStorage = (route) => {
+    const url = new URL(route.request().url());
+    if (url.origin === base) {
+      const body = route.request().postDataBuffer();
+      assert(
+        !body || body.length < 4 * 1024 * 1024,
+        "No large file body may travel through the function",
+      );
+      return route.continue();
+    }
+    if (url.origin === info.API_URL && url.pathname.startsWith("/storage/v1/"))
+      return route.continue();
+    return route.abort();
+  };
   browser = await chromium.launch();
   for (const label of ["device-a", "device-b", "other-owner"]) {
     const context = await browser.newContext();
-    await context.route("**/*", (route) =>
-      new URL(route.request().url()).origin === base
-        ? route.continue()
-        : route.abort(),
-    );
+    await context.route("**/*", allowStorage);
     const page = await context.newPage();
     await page.goto(base + "/settings");
     await page
@@ -493,14 +607,94 @@ try {
         recordCheck(
           "real browser device session automatically saves records visible from a separate approved device",
         );
+        await page.goto(base + "/library");
+        await page
+          .getByRole("button", { name: "자료 추가", exact: true })
+          .waitFor();
+        await page.waitForFunction(() => {
+          const buttons = Array.from(document.querySelectorAll("button"));
+          return buttons.some((button) => button.textContent?.trim() === "자료 추가" && !button.disabled);
+        });
+        const transferDiagnostics = [];
+        page.on("response", (response) => {
+          const url = new URL(response.url());
+          if (
+            url.pathname.includes("/storage/v1/") ||
+            url.pathname === "/api/workspace/files"
+          )
+            transferDiagnostics.push({
+              status: response.status(),
+              origin: url.origin,
+              path: url.pathname,
+            });
+        });
+        page.on("requestfailed", (request) => {
+          const url = new URL(request.url());
+          transferDiagnostics.push({
+            failed: request.failure()?.errorText,
+            origin: url.origin,
+            path: url.pathname,
+          });
+        });
+        const verifiedUpload = page.waitForResponse(
+          (response) =>
+            response.request().method() === "POST" &&
+            new URL(response.url()).pathname === "/api/workspace/files" &&
+            response.request().postDataJSON()?.action === "verify" &&
+            response.request().postDataJSON()?.sha256 === largeHash &&
+            response.status() === 200,
+        );
+        await page.getByLabel("자료 파일 선택").setInputFiles({
+          name: "합성-브라우저대형.bin",
+          mimeType: "application/octet-stream",
+          buffer: largeBytes,
+        });
+        await verifiedUpload.catch(async (error) => {
+          await page.screenshot({
+            path: new URL(
+              "../test-results/large-transfer-failure.png",
+              import.meta.url,
+            ).pathname,
+            fullPage: true,
+          });
+          console.log(
+            JSON.stringify({
+              transferDiagnostics,
+              transferPage: await page.locator("main").innerText(),
+            }),
+          );
+          throw error;
+        });
+        await page
+          .getByRole("status")
+          .filter({ hasText: "서버에 저장됨" })
+          .waitFor();
+        assert.equal(
+          await page.evaluate(
+            () =>
+              Object.keys(localStorage).filter((key) =>
+                key.includes("auth-token"),
+              ).length,
+          ),
+          0,
+        );
+        const savedMetadata = await api(
+          "/api/workspace?space=company",
+          a.token,
+        );
+        assert(
+          savedMetadata.body.data.documents.some(
+            (d) => d.name === "합성-브라우저대형.bin",
+          ),
+        );
+        assert(!JSON.stringify(savedMetadata.body.data).includes('"token":'));
+        recordCheck(
+          "real browser uploads 6 MB directly with transient capabilities, without storing auth tokens in localStorage",
+        );
         const resumed = await browser.newContext({
           storageState: await context.storageState(),
         });
-        await resumed.route("**/*", (route) =>
-          new URL(route.request().url()).origin === base
-            ? route.continue()
-            : route.abort(),
-        );
+        await resumed.route("**/*", allowStorage);
         const resumedPage = await resumed.newPage();
         await resumedPage.goto(base);
         await resumedPage
@@ -532,6 +726,17 @@ try {
           })
           .click();
         assert.deepEqual(await readFile(await (await download).path()), bytes);
+        const largeDownload = page.waitForEvent("download");
+        await page
+          .getByRole("button", {
+            name: "합성-브라우저대형.bin 다운로드",
+            exact: true,
+          })
+          .click();
+        assert.deepEqual(
+          await readFile(await (await largeDownload).path()),
+          largeBytes,
+        );
         await page.reload();
         await page.goto(base + "/settings");
         await page
@@ -604,9 +809,18 @@ try {
     new Promise((r) => setTimeout(r, 5000)),
   ]);
   log.end();
-  await admin.storage
-    .from("jarvis-workspace-files")
-    .remove([`${workspaceId}/company/synthetic-private-file`]);
+  for (const space of ["company", "personal"]) {
+    const folder = `${workspaceId}/${space}`;
+    const listed = await admin.storage
+      .from("jarvis-workspace-files")
+      .list(folder);
+    if (listed.data?.length)
+      await admin.storage
+        .from("jarvis-workspace-files")
+        .remove(
+          listed.data.filter((r) => r.id).map((r) => `${folder}/${r.name}`),
+        );
+  }
   sql(`delete from public.jarvis_spaces where owner_id='${workspaceId}'`);
   for (const user of users)
     if (/^[a-f0-9-]{36}$/.test(user)) await admin.auth.admin.deleteUser(user);
