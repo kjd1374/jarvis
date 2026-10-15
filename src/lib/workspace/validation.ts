@@ -1,3 +1,4 @@
+import { validateMonitoring } from "../automation/validation";
 import { unifyProjectConnections } from "./project-connections";
 import { emptyWorkspace, type WorkspaceData, type Space } from "./types";
 
@@ -235,6 +236,7 @@ export function normalizeWorkspace(value: unknown): WorkspaceData {
       safeUrl(raw);
     }
   }
+  for (const service of data.services) validateMonitoring(service, data);
   const sourceIds = new Set<string>();
   for (const row of data.sourceRecords) {
     const identity = JSON.stringify([row.serviceId, row.externalId]);
@@ -247,7 +249,7 @@ export function normalizeWorkspace(value: unknown): WorkspaceData {
         s.space === row.space &&
         s.projectId === row.projectId,
     );
-    if (!service || !text(row.externalId, 300) || !text(row.content, 100_000))
+    if (!service || !text(row.externalId, typeof row.externalId === "string" && row.externalId.startsWith("github:") ? 1800 : 300) || !text(row.content, 100_000))
       throw new Error("출처 자료의 서비스와 영역을 확인해주세요.");
     safeUrl(row.sourceUrl);
     if (

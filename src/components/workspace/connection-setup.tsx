@@ -7,6 +7,7 @@ import { spaceLabels } from "@/lib/workspace/types";
 import { projectHref } from "@/lib/workspace/project-links";
 import { useWorkspace } from "./workspace-provider";
 import { ServiceRegistrationButton } from "./services-panel";
+import { GitHubMonitor } from "./github-monitor";
 import { Icon } from "./icon";
 import styles from "./studio.module.css";
 
@@ -36,9 +37,9 @@ export function ConnectionSetup() {
       title: "GitHub",
       action: "GitHub 저장소 등록",
       description:
-        "진행 상황을 확인할 프로젝트의 GitHub 저장소를 등록하세요. 이슈·PR·검증·배포 자동 조회는 연결 준비 중입니다.",
-      pending: "자동 조회·AI 판정 미연결",
-      next: "저장소별 조회 범위와 접근 권한을 정한 뒤 자동 수집을 연결합니다. 회사·개인 저장소는 따로 등록합니다.",
+        "저장소를 등록하면 점검 요청을 저장합니다. 구독 CLI 실행기가 코드·이슈·PR·검증·배포 기록을 읽고 분석합니다.",
+      pending: "자동 조회·AI 판정은 CLI 실행기 연결 필요",
+      next: "아래 구독 CLI 실행기에서 현재 영역·프로젝트를 선택해 연결하세요. 사실과 AI 제안은 프로젝트의 연결 서비스에 표시합니다.",
     },
     {
       preset: "custom" as const,
@@ -131,10 +132,11 @@ export function ConnectionSetup() {
                       <ServiceRegistrationButton preset="custom" service={service}>등록 정보 수정</ServiceRegistrationButton>
                       <span>
                         주소 등록됨 ·{" "}
-                        {service.lastSuccessAt
+                        {card.preset === "github" && service.monitoring?.job?.status === "queued" ? "점검 요청 대기 · 실행기 필요" : service.lastSuccessAt || card.preset === "github" && service.monitoring?.lastSuccessAt
                           ? "수집 상태는 서비스에서 확인"
                           : "수집 기록 없음"}
                       </span>
+                      {card.preset === "github" && <GitHubMonitor service={service} />}
                     </li>
                   ))}
                 </ul>
@@ -174,8 +176,7 @@ export function ConnectionSetup() {
           </li>
         </ol>
         <p>
-          현재는 서비스 주소와 수동 업무·요청 기록을 저장합니다. GitHub 자동
-          조회·AI 판정·자동 실행은 아직 연결되지 않았습니다.
+          GitHub 자동 조회·AI 판정은 구독 CLI 실행기가 연결된 동안 수행합니다. 제안 채택은 Jarvis 할 일 등록이며 외부 코드 수정은 실행하지 않습니다.
         </p>
       </details>
       <details className={styles.setupDetails}>

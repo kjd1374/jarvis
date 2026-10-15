@@ -1,3 +1,4 @@
+import type { GitHubMonitoring } from "../automation/types";
 export type Space = "company" | "personal";
 export type TaskStatus = "todo" | "in_progress" | "decision" | "done";
 export type Project = {
@@ -14,6 +15,7 @@ export type Project = {
   createdAt: string;
 };
 export type Task = {
+  sourceSuggestionId?: string;
   sourceMessageId?: string;
   id: string;
   space: Space;
@@ -73,6 +75,7 @@ export type Note = {
   updatedAt: string;
 };
 export type Service = {
+  monitoring?: GitHubMonitoring;
   id: string;
   space: Space;
   projectId: string | null;

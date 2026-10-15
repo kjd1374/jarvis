@@ -18,6 +18,8 @@ import {
 } from "@/lib/integrations/catalog";
 import { useWorkspace } from "./workspace-provider";
 import { Modal } from "./workspace-controls";
+import { GitHubMonitor } from "./github-monitor";
+import { repositoryFor, requestInspection } from "@/lib/automation/state";
 import { Icon } from "./icon";
 import styles from "./studio.module.css";
 import { useWorkspaceClock } from "./use-workspace-clock";
@@ -251,7 +253,7 @@ function ServicesView({
                     data-status={service.connectionStatus}
                   >
                     {service.connector === "shortcut"
-                      ? "바로가기만 등록됨"
+                      ? service.monitoring?.lastSuccessAt && service.monitoring.repository === repositoryFor(service) ? "GitHub 읽기 자료 있음" : service.monitoring?.enabled ? "GitHub 점검 대기·연결 필요" : "바로가기만 등록됨"
                       : service.connectionStatus === "connected"
                         ? "마지막 읽기 수집 성공"
                         : service.connectionStatus === "error"
@@ -269,11 +271,13 @@ function ServicesView({
                 <p className={styles.detailFootnote}>
                   연결 방식:{" "}
                   {service.connector === "shortcut"
-                    ? "웹 바로가기"
+                    ? service.monitoring?.enabled ? "웹 열기 · 구독 CLI GitHub 점검" : "웹 바로가기"
                     : "v4 읽기 연동(준비 중)"}
                   <br />
-                  마지막 정상 수집:{" "}
-                  {service.lastSuccessAt
+                  {service.connector === "shortcut" && service.monitoring?.enabled ? "GitHub 마지막 정상 조회" : "업무 데이터 마지막 정상 수집"}:{" "}
+                  {service.connector === "shortcut" && service.monitoring?.enabled
+                    ? service.monitoring.lastSuccessAt ? dateLabel(service.monitoring.lastSuccessAt) : "조회 기록 없음"
+                    : service.lastSuccessAt
                     ? dateLabel(service.lastSuccessAt)
                     : "수집 기록 없음"}
                 </p>
@@ -329,6 +333,7 @@ function ServicesView({
                   작업 실행 연결 없음 · 웹 주소를 여는 기능입니다. 로컬 프로그램
                   실행은 PC 실행 연결이 필요합니다.
                 </p>
+                <GitHubMonitor service={service} />
                 <details className={styles.revisionDetails}>
                   <summary>동기화 상세 기록</summary>
                   <p>
@@ -432,7 +437,8 @@ function ServiceEditor({
       if (!urls.webUrl) throw new Error("서비스 웹 주소를 입력해주세요.");
       const changed =
         service?.connector !== connector || service.webUrl !== urls.webUrl || service.repositoryUrl !== urls.repositoryUrl;
-      const record: Service = {
+      let record: Service = {
+        ...(service?.monitoring ? { monitoring: service.monitoring } : {}),
         id: service?.id ?? id(),
         space,
         projectId: selected || null,
@@ -453,6 +459,10 @@ function ServiceEditor({
         failures: changed ? 0 : (service?.failures ?? 0),
         nextRetryAt: changed ? null : (service?.nextRetryAt ?? null),
       };
+      if (repositoryFor(record)) {
+        if (!service?.monitoring || repositoryFor(record) !== service.monitoring.repository) record = requestInspection(record, now());
+      }
+      else if (record.monitoring) record = { ...record, monitoring: { ...record.monitoring, enabled: false, job: null } };
       await mutate((d) => {
         if (
           d.services.some(

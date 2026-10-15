@@ -25,9 +25,10 @@ export function IntegratedHome() {
     (r) => matches(r) && r.status === "awaiting_review",
   );
   const services = data.services.filter(matches);
+  const proposals = services.flatMap(s => s.monitoring?.analysis?.suggestions.filter(p => p.state === "proposed").map(p => ({ ...p, service: s })) ?? []);
   const issues = services.filter(
     (s) =>
-      s.connector !== "shortcut" &&
+      s.monitoring?.enabled && (s.monitoring.error || !s.monitoring.lastSuccessAt || clock - Date.parse(s.monitoring.lastSuccessAt) > 86_400_000) || s.connector !== "shortcut" &&
       (s.connectionStatus !== "connected" ||
         !s.lastSuccessAt ||
         clock - Date.parse(s.lastSuccessAt) > 86_400_000),
@@ -98,7 +99,7 @@ export function IntegratedHome() {
               <div>
                 <span>내 결정·승인 필요</span>
                 <strong>
-                  {approvals.length +
+                  {approvals.length + proposals.length +
                     tasks.filter((t) => t.status === "decision").length}
                   <small>건</small>
                 </strong>
@@ -178,6 +179,9 @@ export function IntegratedHome() {
                   ))}
                 </div>
               )}
+              {proposals.length > 0 && <div className={styles.approvalList}><h3>AI의 작업 제안 · 검토 필요</h3>
+                {proposals.slice(0, 6).map(p => <Link key={`${p.service.id}:${p.id}`} href={p.service.projectId ? `/projects/${p.service.projectId}` : "/settings#services"}>{p.title}<span>근거 확인 후 채택</span></Link>)}
+              </div>}
               {approvals.length > 0 && (
                 <div className={styles.approvalList}>
                   <h3>검증·승인할 요청</h3>
@@ -212,7 +216,9 @@ export function IntegratedHome() {
                     <li key={s.id}>
                       <strong>{s.name}</strong>
                       <p>
-                        {s.error ||
+                        {s.monitoring?.error ? "GitHub 점검 연결을 확인해주세요." :
+                          s.monitoring?.enabled && (!s.monitoring.lastSuccessAt || clock - Date.parse(s.monitoring.lastSuccessAt) > 86_400_000) ?
+                          s.monitoring.lastSuccessAt ? "GitHub 자료가 24시간 이상 갱신되지 않았습니다." : "GitHub 점검 대기 · CLI 실행기를 연결해주세요." : s.error ||
                           (s.lastSuccessAt
                             ? "마지막 수집 이후 24시간 이상 지났습니다."
                             : "읽기 연결이 준비되지 않았습니다.")}

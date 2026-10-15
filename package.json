@@ -24,7 +24,8 @@
     "deploy:preview:plan": "node scripts/deploy-preview.mjs --dry-run",
     "deploy:preview:resume": "node --use-env-proxy scripts/deploy-preview.mjs --resume",
     "test:deploy": "node --test tests/deploy-preview.test.mjs",
-    "test:devices": "node --test tests/devices.test.mjs"
+    "test:devices": "node --test tests/devices.test.mjs",
+    "test:automation": "node --test tests/automation-runner.test.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.7",

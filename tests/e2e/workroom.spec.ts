@@ -91,7 +91,7 @@ test("연결 준비에서 v4·GitHub·시트를 등록하고 자동화 상태를
   ).toBe(true);
   await expect(
     setup.getByRole("article", { name: "GitHub", exact: true }),
-  ).toContainText("자동 조회·AI 판정 미연결");
+  ).toContainText("자동 조회·AI 판정은 CLI 실행기 연결 필요");
   await expect(
     setup.getByRole("article", { name: "구글 시트", exact: true }),
   ).toContainText("읽기·입력 전송 연결 필요");

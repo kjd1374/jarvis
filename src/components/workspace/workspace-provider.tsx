@@ -193,6 +193,15 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     };
   }, [loadAttempt, retryCloud]);
 
+  const monitoringActive = data.services.some(s => s.monitoring?.enabled);
+  useEffect(() => {
+    if (!account?.authenticated || !monitoringActive) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") setLoadAttempt(n => n + 1);
+    }, 30_000);
+    return () => clearInterval(timer);
+  }, [account?.authenticated, monitoringActive]);
+
   function retryLoad() {
     setError(null);
     setLoadAttempt((n) => n + 1);
