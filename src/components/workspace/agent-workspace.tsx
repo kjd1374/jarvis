@@ -28,7 +28,7 @@ export function AgentWorkspace() {
 }
 
 function AgentView() {
-  const { data, ready, saving, error, mutate } = useWorkspace();
+  const { data, ready, saving, error, mutate, account } = useWorkspace();
   const space = data.activeSpace;
   const projectId = data.activeProjects[space];
   const selectedProject = data.projects.find(
@@ -534,7 +534,11 @@ function AgentView() {
                   ? "저장 중입니다. 잠시만 기다려주세요."
                   : "Enter 저장 · Shift+Enter 줄바꿈"}
               </span>
-              <span>대화는 이 브라우저에 보관됩니다</span>
+              <span>
+                {account?.enabled
+                  ? "대화와 맥락은 개인 업무실 서버에 보관합니다"
+                  : "대화는 이 브라우저에 보관됩니다"}
+              </span>
             </div>
             {sendError ? (
               <div className={styles.sendError} role="alert">

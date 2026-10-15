@@ -32,6 +32,7 @@ if (process.argv.includes("--local-cloud")) {
   env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY =
     process.env.JARVIS_TEST_SUPABASE_KEY;
   env.JARVIS_CLOUD_STORAGE_ENABLED = "true";
+  env.JARVIS_APP_ORIGIN = "http://127.0.0.1:4317";
 }
 let child;
 let closing = false;

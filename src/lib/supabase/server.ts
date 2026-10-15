@@ -9,6 +9,11 @@ export async function createClient() {
   const cookieStore = await cookies();
 
   return createServerClient(url, publishableKey, {
+    cookieOptions: {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: url.startsWith("https://"),
+    },
     cookies: {
       getAll() {
         return cookieStore.getAll();

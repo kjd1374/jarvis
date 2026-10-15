@@ -1,49 +1,176 @@
 "use client";
 
-import { createContext, useContext, useEffect, useRef, useState } from "react";
-import { commitWorkspace, readWorkspace } from "@/lib/workspace/storage";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import {
+  commitWorkspace,
+  readWorkspace,
+  readCloudLocal,
+  setStorageAccount,
+} from "@/lib/workspace/storage";
 import { emptyWorkspace, type WorkspaceData } from "@/lib/workspace/types";
+import {
+  accountStatus,
+  accountAction,
+  CloudRequestError,
+  type AccountStatus,
+} from "@/lib/cloud/client";
+import {
+  hydrateCloud,
+  flushCloud,
+  CloudConflict,
+  resolveCloudConflict,
+} from "@/lib/cloud/persistence";
 
 type Workspace = {
   data: WorkspaceData;
   ready: boolean;
   saving: boolean;
   error: string | null;
+  account: AccountStatus | null;
+  syncStatus: "local" | "waiting" | "saving" | "saved" | "error" | "conflict";
+  conflict: CloudConflict | null;
   retryLoad: () => void;
+  retryCloud: () => Promise<void>;
+  resolveConflict: (preferLocal: boolean) => Promise<void>;
   mutate: (
     transform: (data: WorkspaceData) => WorkspaceData,
     files?: { id: string; blob: Blob; preventOverwrite?: boolean }[],
   ) => Promise<void>;
 };
 const Context = createContext<Workspace | null>(null);
-
 export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [data, setData] = useState(emptyWorkspace);
   const [ready, setReady] = useState(false);
   const [pending, setPending] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [account, setAccount] = useState<AccountStatus | null>(null);
+  const [syncStatus, setSyncStatus] =
+    useState<Workspace["syncStatus"]>("local");
+  const [conflict, setConflict] = useState<CloudConflict | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
+  const accountRef = useRef<AccountStatus | null>(null);
   const channel = useRef<BroadcastChannel | null>(null);
   const generation = useRef(0);
+  const syncing = useRef(false);
+
+  const retryCloud = useCallback(async function flush(): Promise<void> {
+    const accountId = accountRef.current?.accountId;
+    if (!accountId || !accountRef.current?.authenticated || syncing.current)
+      return;
+    syncing.current = true;
+    setSyncStatus("saving");
+    let failed = false;
+    try {
+      const pending = await readCloudLocal(accountId);
+      if (!Object.values(pending.sync.dirty).some((n) => n !== null)) {
+        const value = await hydrateCloud(accountId);
+        if (accountRef.current?.accountId === accountId) setData(value);
+      }
+      await flushCloud(accountId);
+      if (accountRef.current?.accountId === accountId) {
+        setSyncStatus("saved");
+        setError(null);
+        setConflict(null);
+      }
+    } catch (e) {
+      failed = true;
+      if (accountRef.current?.accountId !== accountId) return;
+      if (e instanceof CloudRequestError && [401, 403].includes(e.status)) {
+        setReady(false);
+        setData(emptyWorkspace());
+        setLoadAttempt((n) => n + 1);
+      }
+      if (e instanceof CloudConflict) {
+        setConflict(e);
+        setSyncStatus("conflict");
+      } else setSyncStatus("error");
+      setError(
+        e instanceof Error
+          ? e.message
+          : "서버에 저장하지 못했습니다. 이 기기에 보관하고 있습니다.",
+      );
+    } finally {
+      syncing.current = false;
+      if (!failed && accountRef.current?.accountId === accountId) {
+        const value = await readCloudLocal(accountId).catch(() => null);
+        if (value && Object.values(value.sync.dirty).some((n) => n !== null))
+          void flush();
+      }
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;
     async function refresh() {
       const requestGeneration = ++generation.current;
+      const current = () => active && requestGeneration === generation.current;
       try {
-        const value = await readWorkspace();
-        if (active && requestGeneration === generation.current) {
-          setData(value);
-          setReady(true);
-          setError(null);
+        let status = await accountStatus();
+        if (!current()) return;
+        accountRef.current = status;
+        setAccount(status);
+        if (
+          status.enabled &&
+          status.configured &&
+          !status.authenticated &&
+          !status.pairingCode
+        ) {
+          await accountAction("device");
+          status = await accountStatus();
         }
-      } catch (error) {
-        if (active && requestGeneration === generation.current)
+        if (!current()) return;
+        accountRef.current = status;
+        setAccount(status);
+        if (status.enabled && (!status.authenticated || !status.accountId)) {
+          setStorageAccount(null);
+          setData(emptyWorkspace());
+          setReady(false);
+          setSyncStatus("waiting");
           setError(
-            error instanceof Error
-              ? error.message
-              : "저장 공간을 사용할 수 없습니다.",
+            status.pairingCode
+              ? "처음 사용하는 기기입니다. 설정에서 기기 확인 번호를 확인해주세요."
+              : "서버와 이 기기의 연결 설정이 필요합니다.",
           );
+          return;
+        }
+        const accountId = status.enabled ? status.accountId : undefined;
+        setStorageAccount(accountId ?? null);
+        const value = accountId
+          ? await hydrateCloud(accountId)
+          : await readWorkspace();
+        if (!current()) return;
+        setData(value);
+        setReady(true);
+        setError(null);
+        if (accountId) {
+          const local = await readCloudLocal(accountId);
+          if (!current()) return;
+          const dirty = Object.values(local.sync.dirty).some((n) => n !== null);
+          setSyncStatus(dirty ? "waiting" : "saved");
+          if (dirty) void retryCloud();
+        } else setSyncStatus("local");
+      } catch (e) {
+        if (!current()) return;
+        const accountId = accountRef.current?.accountId;
+        if (accountRef.current?.authenticated && accountId) {
+          const local = await readCloudLocal(accountId).catch(() => null);
+          if (!current()) return;
+          if (local?.hasSnapshot) {
+            setData(local.data);
+            setReady(true);
+            setSyncStatus("error");
+          }
+        }
+        setError(
+          e instanceof Error ? e.message : "저장 공간을 사용할 수 없습니다.",
+        );
       }
     }
     void refresh();
@@ -51,57 +178,97 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       channel.current = new BroadcastChannel("jarvis-workspace");
       channel.current.onmessage = () => void refresh();
     }
-    function visible() {
+    const visible = () => {
       if (document.visibilityState === "visible") void refresh();
-    }
+    };
+    const online = () => setLoadAttempt((n) => n + 1);
     document.addEventListener("visibilitychange", visible);
+    window.addEventListener("online", online);
     return () => {
       active = false;
       channel.current?.close();
       channel.current = null;
       document.removeEventListener("visibilitychange", visible);
+      window.removeEventListener("online", online);
     };
-  }, [loadAttempt]);
+  }, [loadAttempt, retryCloud]);
 
   function retryLoad() {
     setError(null);
-    setLoadAttempt((attempt) => attempt + 1);
+    setLoadAttempt((n) => n + 1);
   }
-
+  async function resolveConflict(preferLocal: boolean) {
+    const accountId = accountRef.current?.accountId;
+    if (!accountId || !conflict) return;
+    try {
+      const value = await resolveCloudConflict(
+        accountId,
+        conflict,
+        preferLocal,
+      );
+      setData(value);
+      setConflict(null);
+      setError(null);
+      await retryCloud();
+    } catch (e) {
+      if (e instanceof CloudConflict) setConflict(e);
+      setError(
+        e instanceof Error ? e.message : "병합 내용을 다시 확인해주세요.",
+      );
+      throw e;
+    }
+  }
   async function mutate(
     transform: (data: WorkspaceData) => WorkspaceData,
     files: { id: string; blob: Blob; preventOverwrite?: boolean }[] = [],
   ) {
     if (!ready)
       throw new Error("저장 공간을 준비 중입니다. 잠시 후 다시 시도해주세요.");
-    setPending((count) => count + 1);
+    const accountId = accountRef.current?.accountId;
+    setPending((n) => n + 1);
     try {
-      const value = await commitWorkspace(transform, files);
+      const value = await commitWorkspace(
+        transform,
+        files,
+        accountId ? { accountId, trackCloud: true } : undefined,
+      );
+      if (accountRef.current?.accountId !== accountId) return;
       generation.current++;
       setData(value);
-      setError(null);
+      if (accountId) {
+        setSyncStatus("waiting");
+        void retryCloud();
+      } else setError(null);
       channel.current?.postMessage("updated");
-    } catch (error) {
+    } catch (e) {
       setError(
-        error instanceof Error
-          ? error.message
-          : "변경 내용을 저장하지 못했습니다.",
+        e instanceof Error ? e.message : "변경 내용을 저장하지 못했습니다.",
       );
-      throw error;
+      throw e;
     } finally {
-      setPending((count) => count - 1);
+      setPending((n) => n - 1);
     }
   }
-
   return (
     <Context.Provider
-      value={{ data, ready, saving: pending > 0, error, mutate, retryLoad }}
+      value={{
+        data,
+        ready,
+        saving: pending > 0,
+        error,
+        account,
+        syncStatus,
+        conflict,
+        retryCloud,
+        resolveConflict,
+        mutate,
+        retryLoad,
+      }}
     >
       {children}
     </Context.Provider>
   );
 }
-
 export function useWorkspace() {
   const value = useContext(Context);
   if (!value) throw new Error("WorkspaceProvider is required");

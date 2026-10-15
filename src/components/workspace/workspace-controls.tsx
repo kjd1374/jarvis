@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Icon } from "./icon";
 import { useWorkspace } from "./workspace-provider";
 import { spaceLabels, updateContext, type Space } from "@/lib/workspace/types";
@@ -13,7 +14,18 @@ export function WorkspaceControls({
   selectedProjectId?: string;
   onScopeChange?: (projectId: string | null, space: Space) => void;
 } = {}) {
-  const { data, ready, saving, error, mutate, retryLoad } = useWorkspace();
+  const {
+    data,
+    ready,
+    saving,
+    error,
+    mutate,
+    retryLoad,
+    syncStatus,
+    retryCloud,
+    conflict,
+    account,
+  } = useWorkspace();
   const space = data.activeSpace;
   return (
     <div className={styles.workspaceControls}>
@@ -78,11 +90,34 @@ export function WorkspaceControls({
             ? "불러오는 중"
             : saving
               ? "저장 중…"
-              : "이 브라우저에 저장"}
+              : syncStatus === "saved"
+                ? "서버에 저장됨"
+                : syncStatus === "saving"
+                  ? "서버 저장 중…"
+                  : syncStatus === "waiting"
+                    ? "이 기기 보관 · 서버 저장 대기"
+                    : syncStatus === "conflict"
+                      ? "서버 변경 검토 필요"
+                      : syncStatus === "error"
+                        ? "이 기기 보관 · 서버 저장 실패"
+                        : "이 브라우저에 저장"}
       </span>
       {error && (
         <div className={styles.errorBanner} role="alert">
           <p>{error}</p>
+          {conflict && (
+            <Link
+              className={styles.retryButton}
+              href="/settings#cloud-conflict"
+            >
+              서버 변경 검토
+            </Link>
+          )}
+          {account?.enabled && !account.authenticated && (
+            <Link className={styles.retryButton} href="/settings#account">
+              이 기기 연결 확인
+            </Link>
+          )}
           <button
             className={styles.retryButton}
             disabled={saving}
@@ -90,6 +125,15 @@ export function WorkspaceControls({
           >
             다시 불러오기
           </button>
+          {ready && !conflict && syncStatus === "error" && (
+            <button
+              className={styles.retryButton}
+              disabled={saving}
+              onClick={() => void retryCloud()}
+            >
+              서버 저장 다시 시도
+            </button>
+          )}
         </div>
       )}
     </div>

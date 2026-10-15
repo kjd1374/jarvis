@@ -2357,3 +2357,5 @@
   .memoList article, .serviceList article, .requestList article, .evidenceList article { padding: 14px; }
   .detailHeading h2 { font-size: 14px; }
 }
+
+.jsonPreview { max-height: 22rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 14px 0; font-size: 12px; line-height: 1.7; }
