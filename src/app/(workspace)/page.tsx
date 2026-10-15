@@ -1,5 +1,3 @@
-import { AgentWorkspace } from "@/components/workspace/agent-workspace";
+import { IntegratedHome } from "@/components/workspace/integrated-home";
 
-export default function Home() {
-  return <AgentWorkspace />;
-}
+export default function Home() { return <IntegratedHome />; }

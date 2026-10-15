@@ -6,8 +6,14 @@ import { useWorkspace } from "./workspace-provider";
 import { spaceLabels, updateContext, type Space } from "@/lib/workspace/types";
 import styles from "./studio.module.css";
 
-export function WorkspaceControls() {
-  const { data, ready, saving, error, mutate } = useWorkspace();
+export function WorkspaceControls({
+  selectedProjectId,
+  onScopeChange,
+}: {
+  selectedProjectId?: string;
+  onScopeChange?: (projectId: string | null, space: Space) => void;
+} = {}) {
+  const { data, ready, saving, error, mutate, retryLoad } = useWorkspace();
   const space = data.activeSpace;
   return (
     <div className={styles.workspaceControls}>
@@ -19,9 +25,9 @@ export function WorkspaceControls() {
               disabled={!ready || saving}
               aria-pressed={space === value}
               onClick={() =>
-                void mutate((d) => ({ ...d, activeSpace: value })).catch(
-                  () => {},
-                )
+                void mutate((d) => ({ ...d, activeSpace: value }))
+                  .then(() => onScopeChange?.(data.activeProjects[value], value))
+                  .catch(() => {})
               }
             >
               {spaceLabels[value]}
@@ -34,7 +40,7 @@ export function WorkspaceControls() {
           <select
             aria-label="프로젝트 범위"
             disabled={!ready || saving}
-            value={data.activeProjects[space] ?? ""}
+            value={selectedProjectId ?? data.activeProjects[space] ?? ""}
             onChange={(event) => {
               const projectId = event.target.value || null;
               void mutate((d) => ({
@@ -43,7 +49,9 @@ export function WorkspaceControls() {
                   ...d.activeProjects,
                   [space]: projectId,
                 },
-              })).catch(() => {});
+              }))
+                .then(() => onScopeChange?.(projectId, space))
+                .catch(() => {});
             }}
           >
             <option value="">모든 프로젝트</option>
@@ -71,9 +79,14 @@ export function WorkspaceControls() {
               : "이 브라우저에 저장"}
       </span>
       {error && (
-        <p className={styles.errorBanner} role="alert">
-          {error}
-        </p>
+        <div className={styles.errorBanner} role="alert">
+          <p>{error}</p>
+          {!ready && (
+            <button className={styles.retryButton} onClick={retryLoad}>
+              다시 불러오기
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

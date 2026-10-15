@@ -5,6 +5,10 @@ export type Project = {
   space: Space;
   name: string;
   description: string;
+  repositoryUrl?: string;
+  serviceUrl?: string;
+  currentStatus?: string;
+  nextAction?: string;
   createdAt: string;
 };
 export type Task = {
@@ -48,6 +52,7 @@ export type ContextRevision = {
   revision: number;
 };
 export type Document = {
+  sourceUrl?: string;
   id: string;
   space: Space;
   name: string;
@@ -56,6 +61,84 @@ export type Document = {
   projectId: string | null;
   taskId: string | null;
   createdAt: string;
+};
+export type Note = {
+  id: string;
+  space: Space;
+  projectId: string | null;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+};
+export type Service = {
+  id: string;
+  space: Space;
+  projectId: string | null;
+  name: string;
+  webUrl: string;
+  repositoryUrl: string;
+  connector: "shortcut" | "v4";
+  favorite: boolean;
+  createdAt: string;
+  lastSuccessAt: string | null;
+  lastAttemptAt: string | null;
+  connectionStatus: "shortcut" | "needs_connection" | "connected" | "error";
+  error: string | null;
+  failures: number;
+  nextRetryAt: string | null;
+};
+export type SourceRecord = {
+  id: string;
+  serviceId: string;
+  externalId: string;
+  space: Space;
+  projectId: string | null;
+  title: string;
+  content: string;
+  status: string;
+  sourceUrl: string;
+  sourceUpdatedAt: string;
+  collectedAt: string;
+  deletedAt: string | null;
+  taskId: string | null;
+};
+export type RequestStatus =
+  | "registered"
+  | "queued"
+  | "in_progress"
+  | "awaiting_review"
+  | "completed"
+  | "failed";
+export type ChangeRequest = {
+  id: string;
+  space: Space;
+  projectId: string | null;
+  serviceId: string | null;
+  title: string;
+  content: string;
+  status: RequestStatus;
+  approval: "not_requested" | "pending" | "approved" | "rejected";
+  verification: string;
+  verifiedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+export type SyncEvent = {
+  id: string;
+  serviceId: string;
+  space: Space;
+  attemptedAt: string;
+  status: "success" | "error";
+  code: string;
+  received: number;
+};
+export const requestLabels: Record<RequestStatus, string> = {
+  registered: "요청 등록",
+  queued: "실행 대기",
+  in_progress: "진행 중",
+  awaiting_review: "검증 대기",
+  completed: "완료",
+  failed: "실패",
 };
 export type WorkspaceData = {
   version: 1;
@@ -69,6 +152,11 @@ export type WorkspaceData = {
   contexts: ContextNote[];
   contextRevisions: ContextRevision[];
   documents: Document[];
+  notes: Note[];
+  services: Service[];
+  sourceRecords: SourceRecord[];
+  requests: ChangeRequest[];
+  syncEvents: SyncEvent[];
 };
 
 export function emptyWorkspace(): WorkspaceData {
@@ -84,6 +172,11 @@ export function emptyWorkspace(): WorkspaceData {
     contexts: [],
     contextRevisions: [],
     documents: [],
+    notes: [],
+    services: [],
+    sourceRecords: [],
+    requests: [],
+    syncEvents: [],
   };
 }
 
@@ -112,6 +205,7 @@ export function today() {
   }).format(new Date());
 }
 export function dateLabel(value: string) {
+  if (!Number.isFinite(Date.parse(value))) return "기준 시각 확인 필요";
   return new Intl.DateTimeFormat("ko-KR", {
     month: "short",
     day: "numeric",

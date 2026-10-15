@@ -3,10 +3,13 @@
 import { useWorkspace } from "./workspace-provider";
 import { WorkspaceControls } from "./workspace-controls";
 import { Icon } from "./icon";
+import { DataTransferPanel } from "./data-transfer-panel";
+import { ConnectionSetup } from "./connection-setup";
 import styles from "./studio.module.css";
 
 export function StorageSettings() {
   const { data } = useWorkspace();
+  const space = data.activeSpace;
   return (
     <div className={styles.studio}>
       <WorkspaceControls />
@@ -17,6 +20,8 @@ export function StorageSettings() {
           <p>업무실의 저장 방식과 연결 상태를 확인하세요.</p>
         </div>
       </div>
+      <ConnectionSetup />
+      <DataTransferPanel />
       <section className={styles.settingsCard}>
         <h2>
           <Icon name="memory" />
@@ -24,20 +29,32 @@ export function StorageSettings() {
         </h2>
         <p>
           대화, 업무 맥락, 파일과 연결 정보를 이 브라우저에 자동 저장합니다.
-          같은 기기와 브라우저에서 다시 열면 이어서 사용할 수 있습니다.
+          같은 주소·기기·브라우저에서 다시 열면 이어서 사용할 수 있습니다.
         </p>
         <div className={styles.settingsCounts}>
           <span>
-            대화 <strong>{data.conversations.length}</strong>
+            대화{" "}
+            <strong>
+              {data.conversations.filter((r) => r.space === space).length}
+            </strong>
           </span>
           <span>
-            맥락 <strong>{data.contexts.length}</strong>
+            맥락{" "}
+            <strong>
+              {data.contexts.filter((r) => r.space === space).length}
+            </strong>
           </span>
           <span>
-            자료 <strong>{data.documents.length}</strong>
+            자료{" "}
+            <strong>
+              {data.documents.filter((r) => r.space === space).length}
+            </strong>
           </span>
           <span>
-            업무 <strong>{data.tasks.length}</strong>
+            업무{" "}
+            <strong>
+              {data.tasks.filter((r) => r.space === space).length}
+            </strong>
           </span>
         </div>
         <p className={styles.settingsNote}>
@@ -64,18 +81,11 @@ export function StorageSettings() {
           <div>
             <strong>Supabase 업무 데이터 동기화</strong>
             <p>
-              프로젝트 기반은 준비되어 있으며 업무 기록과 파일의 서버 동기화는
-              아직 연결되지 않았습니다.
+              인증된 서버 저장 코드는 준비했습니다. 위에서 현재 계정·저장 연결
+              상태를 확인하고 검토 후 이관합니다. 운영 기본은 비활성입니다.
             </p>
           </div>
           <span>연결 대기</span>
-        </div>
-        <div className={styles.connectionRow}>
-          <div>
-            <strong>v4 · 회사 통화 / 고객관리</strong>
-            <p>회사 영역의 업무와 자료로 연결할 모듈입니다.</p>
-          </div>
-          <span>연결 예정</span>
         </div>
       </section>
     </div>

@@ -11,21 +11,21 @@ export const navigation: {
     href: "/",
     label: "업무실",
     icon: "grid",
-    description: "AI 대화와 오늘의 업무, 맥락을 한곳에서",
+    description: "오늘 할 일과 서비스 결과, 다음 행동을 한곳에서",
     color: "green",
   },
   {
     href: "/tasks",
     label: "업무",
     icon: "check",
-    description: "오늘 할 일과 다음 할 일을 정리하는 곳",
+    description: "할 일과 수정 요청, 검증·승인 상태를 관리하는 곳",
     color: "green",
   },
   {
     href: "/projects",
     label: "프로젝트",
     icon: "folder",
-    description: "작은 시작부터 큰 목표까지 모아두는 곳",
+    description: "목표·서비스·업무 결과를 프로젝트별로 관리하는 곳",
     color: "purple",
   },
   {
@@ -39,7 +39,7 @@ export const navigation: {
     href: "/notes",
     label: "맥락",
     icon: "note",
-    description: "계속 기억할 배경과 결정, 아이디어를 관리하는 곳",
+    description: "메모와 생각, 계속 기억할 기준과 결정을 관리하는 곳",
     color: "orange",
   },
   {

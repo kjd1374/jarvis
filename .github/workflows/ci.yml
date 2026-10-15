@@ -18,6 +18,63 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci --no-audit --no-fund
+      - run: npm run test:deploy
+      - run: npm run test:domain
       - run: npm run check
         env:
           NEXT_TELEMETRY_DISABLED: "1"
+
+  browser-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [e2e, storage]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      # No environment secrets: each suite builds a disposable, local-only app.
+      - run: npm run test:${{ matrix.suite }}
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() && !cancelled() }}
+        with:
+          name: playwright-${{ matrix.suite }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: warn
+
+  server-storage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      # Disposable local Docker Supabase; no production variables or secrets.
+      - run: npm run db:start
+      - run: npm run test:server
+      - run: npm run db:stop
+        if: always()
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() && !cancelled() }}
+        with:
+          name: local-server-storage
+          path: |
+            test-results/server-storage.log
+            test-results/server.log
+            test-results/device-*.png
+            test-results/other-owner.png
+          retention-days: 7
+          if-no-files-found: warn
