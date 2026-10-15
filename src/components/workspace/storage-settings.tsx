@@ -2,6 +2,7 @@
 
 import { useWorkspace } from "./workspace-provider";
 import { WorkspaceControls } from "./workspace-controls";
+import { CliRunnerSetup } from "./github-monitor";
 import { Icon } from "./icon";
 import { DataTransferPanel } from "./data-transfer-panel";
 import { ConnectionSetup } from "./connection-setup";
@@ -26,6 +27,7 @@ export function StorageSettings() {
       <AccountConnection />
       <CloudConflictReview key={conflict?.reviewId ?? "none"} />
       <ConnectionSetup />
+      <CliRunnerSetup />
       <DataTransferPanel />
       {(!account?.enabled || account.authenticated) && <StorageRecovery />}
       <section className={styles.settingsCard}>

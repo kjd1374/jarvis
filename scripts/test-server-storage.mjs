@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
-import { readFile, mkdir } from "node:fs/promises";
+import { readFile, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createAppClient } from "../public/jarvis-runner.mjs";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
@@ -798,6 +801,79 @@ try {
   recordCheck(
     "two approved login-free browser devices share one durable workspace; unapproved devices remain blocked",
   );
+  // Actual local DB/auth/CAS; GitHub and model payloads below are synthetic.
+  const autoStamp = new Date().toISOString(), autoHead = "a".repeat(40);
+  const autoSnapshot = await api("/api/workspace?space=company", a.token);
+  const autoService = {
+    id: "synthetic-auto", space: "company", projectId: null, name: "합성 CLI 점검",
+    webUrl: "https://github.com/example/synthetic", repositoryUrl: "https://github.com/example/synthetic",
+    connector: "shortcut", favorite: false, createdAt: autoStamp, connectionStatus: "shortcut",
+    lastSuccessAt: null, lastAttemptAt: null, error: null, failures: 0, nextRetryAt: null,
+    monitoring: { enabled: true, automatic: false, intervalMinutes: 15, repository: "example/synthetic",
+      lastSuccessAt: null, lastAttemptAt: null, error: null, nextRetryAt: null, inspection: null, analysis: null, previousAnalyses: [],
+      job: { id: "synthetic-job-1", repository: "example/synthetic", requestedAt: autoStamp, status: "queued", phase: "collect", attempt: 0 } },
+  };
+  autoSnapshot.body.data.services.push(autoService);
+  assert.equal((await api("/api/workspace", a.token, "PUT", { space: "company", data: autoSnapshot.body.data, revision: autoSnapshot.body.revision })).status, 200);
+  const runnerFolder = await mkdtemp(join(tmpdir(), "jarvis-local-runner-"));
+  try {
+    const runner = await createAppClient(base, join(runnerFolder, "device.json"));
+    assert.equal((await runner.request("/api/account")).authenticated, false);
+    await runner.request("/api/account/device", {});
+    const pendingRunner = await runner.request("/api/account");
+    assert(/^[A-F0-9]{12}$/.test(pendingRunner.pairingCode));
+    const runnerId = sql(`select user_id from public.jarvis_devices where request_code='${pendingRunner.pairingCode}'`);
+    assert(/^[a-f0-9-]{36}$/.test(runnerId)); users.push(runnerId);
+    sql(`update public.jarvis_devices set approved_at=now() where user_id='${runnerId}'`);
+    assert.equal((await runner.request("/api/account")).authenticated, true);
+    assert.equal((await runner.request("/api/automation/claim", { space: "personal", projectIds: [null], provider: "codex" })).job, null);
+  } finally { await rm(runnerFolder, { recursive: true, force: true }); }
+  const claimBody = { space: "company", projectIds: [null], provider: "codex" };
+  assert.equal((await api("/api/automation/claim", b.token, "POST", claimBody)).status, 403);
+  assert.equal((await api("/api/automation/claim", a.token, "POST", { ...claimBody, space: "personal" })).body.job, null);
+  const claims = await Promise.all([api("/api/automation/claim", a.token, "POST", claimBody), api("/api/automation/claim", a.secondToken, "POST", claimBody)]);
+  assert(claims.every(c => c.status === 200)); assert.equal(claims.filter(c => c.body.job).length, 1);
+  const winner = claims[0].body.job ? a.token : a.secondToken, loser = winner === a.token ? a.secondToken : a.token;
+  const identity = { space: "company", serviceId: autoService.id, jobId: "synthetic-job-1" };
+  assert.equal((await api("/api/automation/heartbeat", loser, "POST", identity)).status, 409);
+  assert.equal((await api("/api/automation/heartbeat", winner, "POST", identity)).status, 200);
+  const githubFacts = { items: [{ externalId: "github:example/synthetic:file:README.md", title: "README.md", content: "합성 검증 근거", status: "reviewed", sourceUrl: `https://github.com/example/synthetic/blob/${autoHead}/README.md`, sourceUpdatedAt: autoStamp }], deletedIds: [], unchangedIds: [],
+    inspection: { repository: "example/synthetic", branch: "main", headSha: autoHead, filesTotal: 1, treeComplete: true, excludedFiles: 0, reviewedPaths: ["README.md"], fileShas: { "README.md": autoHead }, limitations: ["합성 서버 전송 테스트"] } };
+  assert.equal((await api("/api/automation/report", winner, "POST", { ...identity, phase: "facts", result: { ...githubFacts, items: [{ ...githubFacts.items[0], sourceUrl: "https://github.com/other/private" }] } })).status, 400);
+  const prepared = await api("/api/automation/report", winner, "POST", { ...identity, phase: "facts", result: githubFacts });
+  assert.equal(prepared.status, 200); assert.equal(prepared.body.analysisRequired, true);
+  assert(prepared.body.input.facts.every(f => f.sourceUrl.startsWith("https://github.com/example/synthetic/")));
+  const sourceId = prepared.body.input.facts[0].id;
+  const modelResult = { summary: "합성 분석 결과", currentStatus: "검토 필요", nextAction: "검증 확인", sourceIds: [sourceId], suggestions: [{ kind: "task", title: "합성 검증 확인", reason: "원본 근거", sourceIds: [sourceId], taskId: null }] };
+  assert.equal((await api("/api/automation/report", winner, "POST", { ...identity, phase: "analysis", basis: prepared.body.basis, result: { ...modelResult, sourceIds: ["other-space"] } })).status, 400);
+  // A human writes while the model runs; completion must preserve that write.
+  const whileAnalyzing = await api("/api/workspace?space=company", a.token);
+  whileAnalyzing.body.data.notes.push({ id: "human-during-analysis", space: "company", projectId: null, content: "모델 실행 중 사람의 합성 메모", createdAt: autoStamp, updatedAt: autoStamp });
+  assert.equal((await api("/api/workspace", a.token, "PUT", { space: "company", data: whileAnalyzing.body.data, revision: whileAnalyzing.body.revision })).status, 200);
+  const finalReport = { ...identity, phase: "analysis", basis: prepared.body.basis, result: modelResult };
+  assert.equal((await api("/api/automation/report", winner, "POST", finalReport)).status, 200);
+  assert.equal((await api("/api/automation/report", winner, "POST", finalReport)).status, 409);
+  const afterAnalysis = await api("/api/workspace?space=company", a.secondToken);
+  assert(afterAnalysis.body.data.notes.some(n => n.id === "human-during-analysis"));
+  const analyzedService = afterAnalysis.body.data.services.find(s => s.id === autoService.id);
+  assert.equal(analyzedService.lastSuccessAt, null); assert.equal(analyzedService.monitoring.job.status, "completed");
+  assert.equal(analyzedService.monitoring.analysis.kind, "ai"); assert(analyzedService.monitoring.lastSuccessAt);
+  analyzedService.monitoring.job = { ...autoService.monitoring.job, id: "synthetic-job-2" };
+  assert.equal((await api("/api/workspace", a.token, "PUT", { space: "company", data: afterAnalysis.body.data, revision: afterAnalysis.body.revision })).status, 200);
+  const next = await api("/api/automation/claim", a.token, "POST", claimBody); assert(next.body.job);
+  const unchanged = await api("/api/automation/report", a.token, "POST", { ...identity, jobId: "synthetic-job-2", phase: "facts", result: githubFacts });
+  assert.equal(unchanged.status, 200); assert.equal(unchanged.body.analysisRequired, false);
+  const retrySnapshot = await api("/api/workspace?space=company", a.token);
+  retrySnapshot.body.data.services.find(s => s.id === autoService.id).monitoring.job = { ...autoService.monitoring.job, id: "synthetic-job-3" };
+  assert.equal((await api("/api/workspace", a.token, "PUT", { space: "company", data: retrySnapshot.body.data, revision: retrySnapshot.body.revision })).status, 200);
+  assert((await api("/api/automation/claim", a.token, "POST", claimBody)).body.job);
+  assert.equal((await api("/api/automation/report", a.token, "POST", { ...identity, jobId: "synthetic-job-3", phase: "error", code: "github_unavailable" })).status, 200);
+  const afterFailure = await api("/api/workspace?space=company", a.secondToken);
+  const failedService = afterFailure.body.data.services.find(s => s.id === autoService.id);
+  assert.equal(failedService.connectionStatus, "shortcut"); assert.equal(failedService.monitoring.analysis.summary, modelResult.summary);
+  assert.equal(failedService.monitoring.error, "github_unavailable");
+  assert(afterFailure.body.data.sourceRecords.some(f => f.id === sourceId && !f.deletedAt));
+  recordCheck("CLI queue is durable and device-fenced; concurrent claims dedupe; scoped facts/citations and human edits survive; unchanged evidence skips AI (synthetic transports)");
   console.log(
     JSON.stringify(
       {

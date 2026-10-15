@@ -1,4 +1,5 @@
 import type { Space, WorkspaceData } from "./types";
+import { repositoryFor } from "../automation/state";
 export type SearchScope = {
   space: Space;
   projectId?: string | null;
@@ -30,14 +31,16 @@ export function searchWorkspace(
     row.space === scope.space &&
     (scope.projectId === undefined || row.projectId === scope.projectId);
   const records: Evidence[] = data.sourceRecords
-    .filter((r) => allowed(r) && !r.deletedAt)
+    .filter((r) => allowed(r) && !r.deletedAt && (!r.externalId.startsWith("github:") || data.services.some(s =>
+      s.id === r.serviceId && allowed(s) && r.externalId.startsWith(`github:${repositoryFor(s)}:`))))
     .map((row) => {
       const service = data.services.find(
         (s) => s.id === row.serviceId && allowed(s),
       );
+      const connectionError = row.externalId.startsWith("github:") ? !!service?.monitoring?.error :
+        service?.connectionStatus === "error" || service?.connectionStatus === "needs_connection";
       const freshness =
-        service?.connectionStatus === "error" ||
-        service?.connectionStatus === "needs_connection"
+        connectionError
           ? "sync_error"
           : Date.parse(stamp) - Date.parse(row.collectedAt) > 86_400_000
             ? "stale"

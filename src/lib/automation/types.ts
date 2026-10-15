@@ -1,0 +1,63 @@
+export type CliProvider = "codex" | "claude";
+export type ReviewJob = {
+  id: string;
+  repository: string;
+  requestedAt: string;
+  status: "queued" | "running" | "completed" | "failed";
+  phase: "collect" | "analyze";
+  attempt: number;
+  leaseOwner?: string;
+  leaseUntil?: string;
+  provider?: CliProvider;
+  error?: string;
+};
+export type RepositoryInspection = {
+  repository: string;
+  branch: string;
+  headSha: string;
+  inspectedAt: string;
+  treeComplete: boolean;
+  filesTotal: number;
+  reviewedPaths: string[];
+  excludedFiles: number;
+  fileShas: Record<string, string>;
+  limitations: string[];
+  fingerprint: string;
+};
+export type WorkSuggestion = {
+  id: string;
+  kind: "task" | "completion" | "defer" | "review";
+  title: string;
+  reason: string;
+  sourceIds: string[];
+  taskId: string | null;
+  state: "proposed" | "adopted" | "dismissed";
+  createdAt: string;
+};
+export type ProjectAnalysis = {
+  kind: "ai";
+  provider: CliProvider;
+  summary: string;
+  currentStatus: string;
+  nextAction: string;
+  sourceIds: string[];
+  citations: { id: string; title: string; sourceUrl: string; sourceUpdatedAt: string; collectedAt: string }[];
+  basis: string;
+  headSha: string;
+  generatedAt: string;
+  suggestions: WorkSuggestion[];
+};
+export type GitHubMonitoring = {
+  lastSuccessAt: string | null;
+  lastAttemptAt: string | null;
+  error: string | null;
+  nextRetryAt: string | null;
+  enabled: boolean;
+  automatic: boolean;
+  intervalMinutes: number;
+  repository: string;
+  job: ReviewJob | null;
+  inspection: RepositoryInspection | null;
+  analysis: ProjectAnalysis | null;
+  previousAnalyses: ProjectAnalysis[];
+};

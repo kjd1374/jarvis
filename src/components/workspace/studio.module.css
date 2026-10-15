@@ -733,6 +733,7 @@
   color: var(--muted);
   font-size: 11px;
 }
+.githubMonitoring { min-width: 0; overflow-wrap: anywhere; }
 .revisionDetails summary,
 .generalContext summary {
   cursor: pointer;

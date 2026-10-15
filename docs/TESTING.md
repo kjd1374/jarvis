@@ -147,3 +147,7 @@ npm run test:storage -- --grep '원본 포함 백업'
 최종 결과: `npm run check` lint/TypeScript/production build 통과. `npm run test:all` **58/58 통과**(desktop 22/mobile 22/실제 IndexedDB storage 14), `test:domain` **12/12**, `test:deploy` **4/4**, `test:devices` **4/4** 통과. 일반 회귀 종료 후 순서대로 실행한 `test:server`는 실제 로컬 Supabase **13개 검증 그룹 통과**다. 신규 그룹에서 통합된 연결 JSON의 실제 DB 보관과 다른 승인 세션의 동일 ID 조회를 확인했다. 기존 사설 6 MB 파일 업로드/다른 기기 바이트 일치 다운로드와 기기 해제/영역 구분 검증도 유지했다. 테스트 재시도·skip 없음, 운영 DB/외부 연동/유료 AI 호출 0. 물리 기기 2대·사용자의 실제 운영 자료는 테스트하지 않았다.
 
 공통 연결 화면과 320px 화면은 합성 스크린샷으로 확인했다. 실패 화면·trace·브라우저 로그는 기존 `test-results/artifacts/` 및 `npm run test:report`에서 확인하며, 서버 검증 로그는 `test-results/server-storage.log`다. 원격 CI/main/배포 결과는 해당 PR/Issue #9에서 정확한 SHA와 함께 기록한다. 개발 환경의 추가 설치/시작 설정이나 새 비밀값은 필요하지 않다.
+
+## 구독 CLI 점검
+
+`npm run test:automation`은 외부 호출 없이 실제 runner 모듈의 고정 gh GET, SHA 고정/증분/부분 응답, 비밀 경로 제외, Codex 구독 로그인/환경 변수/읽기 전용 인자, 쿠키 파일 권한, redirect 차단, 결과 응답 유실 재전송/모델 중복 방지를 검사한다. `npm run test:domain`에는 범위·임대·출처·상태 독립성·제안 채택/완료 검토를 포함한다. `test:all`은 데스크톱/모바일 설정 다운로드·대기 보존·근거·채택·실패 UI를 검증한다. `test:server`는 실제 로컬 Supabase에서 동시 claim, 기기별 임대, 출처 거절, 분석 도중 사람 저장 보존, 동일 근거 AI 생략을 확인한다. GitHub/모델 입력은 합성이며 CI에서 실제 구독 모델을 호출하지 않는다.
