@@ -15,6 +15,7 @@ import {
 import { useWorkspace } from "./workspace-provider";
 import { ContextEditor, Modal, WorkspaceControls } from "./workspace-controls";
 import { Icon } from "./icon";
+import { SourcesPanel } from "./sources-panel";
 import styles from "./studio.module.css";
 
 export function AgentWorkspace() {
@@ -27,9 +28,12 @@ export function AgentWorkspace() {
 }
 
 function AgentView() {
-  const { data, ready, saving, mutate } = useWorkspace();
+  const { data, ready, saving, error, mutate } = useWorkspace();
   const space = data.activeSpace;
   const projectId = data.activeProjects[space];
+  const selectedProject = data.projects.find(
+    (p) => p.id === projectId && p.space === space,
+  );
   const conversations = data.conversations
     .filter(
       (c) => c.space === space && (!projectId || c.projectId === projectId),
@@ -72,12 +76,16 @@ function AgentView() {
     null,
   );
   const [notice, setNotice] = useState("");
+  const [sendError, setSendError] = useState(false);
+  const submitting = useRef(false);
   const composer = useRef<HTMLTextAreaElement>(null);
   const log = useRef<HTMLDivElement>(null);
   useEffect(() => {
     log.current?.scrollTo({
       top: log.current.scrollHeight,
-      behavior: "smooth",
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "instant"
+        : "smooth",
     });
   }, [messages.length]);
   const scopedAttachments = attachmentIds.filter((fileId) =>
@@ -87,7 +95,9 @@ function AgentView() {
   async function submit(event?: React.FormEvent) {
     event?.preventDefault();
     const content = draft.trim();
-    if (!content || saving || !ready) return;
+    if (!content || saving || !ready || submitting.current) return;
+    submitting.current = true;
+    setSendError(false);
     const stamp = now();
     const value: Conversation = conversation ?? {
       id: id(),
@@ -120,10 +130,14 @@ function AgentView() {
       setAttachmentIds([]);
       setNewConversation(false);
       setNotice("");
+      requestAnimationFrame(() => composer.current?.focus());
     } catch (error) {
+      setSendError(true);
       setNotice(
         error instanceof Error ? error.message : "대화를 저장하지 못했습니다.",
       );
+    } finally {
+      submitting.current = false;
     }
   }
 
@@ -181,11 +195,25 @@ function AgentView() {
   return (
     <div className={styles.studio}>
       <WorkspaceControls />
+      <SourcesPanel projectId={projectId ?? undefined} />
       <div className={styles.pageHeading}>
         <div>
-          <p className={styles.eyebrow}>YOUR WORK, IN CONTEXT</p>
-          <h1>업무실</h1>
-          <p>생각을 나누고, 맥락을 쌓고, 다음 일을 이어가는 공간.</p>
+          <p className={styles.eyebrow}>YOUR PERSONAL COMMAND CENTER</p>
+          <h1>자료 검색 · AI 질문</h1>
+          <p>
+            자료 검색 결과를 먼저 확인하세요. 아래 입력은 질문 기록이며 AI
+            답변·실행은 연결이 필요합니다.
+          </p>
+          {selectedProject && (
+            <Link
+              className={styles.projectReturn}
+              href={`/projects/${selectedProject.id}`}
+            >
+              <Icon name="folder" size={15} />
+              {selectedProject.name}로 돌아가기
+              <Icon name="arrow" size={14} />
+            </Link>
+          )}
         </div>
         <span className={styles.headingMark}>
           <Icon name="spark" size={18} />
@@ -216,13 +244,16 @@ function AgentView() {
           },
         ].map((item) => (
           <Link href="/tasks" key={item.label} className={styles.summaryCard}>
+            <span className={styles.summaryArrow} aria-hidden="true">
+              <Icon name="arrow" size={16} />
+            </span>
             <span className={styles.summaryIcon}>
               <Icon name={item.icon} size={20} />
             </span>
             <div>
               <span>{item.label}</span>
               <strong>
-                {item.value}
+                {ready ? item.value : "—"}
                 <small>건</small>
               </strong>
             </div>
@@ -258,7 +289,9 @@ function AgentView() {
                 <h2 id="chat-title">Jarvis와 대화</h2>
                 <span>
                   {conversation?.title ??
-                    `${spaceLabels[space]} 업무의 새 대화`}
+                    (selectedProject
+                      ? `${selectedProject.name}의 새 대화`
+                      : `${spaceLabels[space]} 업무의 새 대화`)}
                 </span>
               </div>
             </div>
@@ -269,17 +302,20 @@ function AgentView() {
               </span>
               <button
                 aria-label="이전 대화"
+                disabled={!ready || saving}
                 onClick={() => setModal("history")}
               >
                 <Icon name="clock" size={18} />
               </button>
               <button
                 aria-label="새 대화"
+                disabled={!ready || saving}
                 onClick={() => {
                   setNewConversation(true);
                   setDraft("");
                   setAttachmentIds([]);
                   setNotice("");
+                  setSendError(false);
                   composer.current?.focus();
                 }}
               >
@@ -287,20 +323,39 @@ function AgentView() {
               </button>
             </div>
           </div>
-          <div className={styles.chatLog} ref={log} aria-label="대화 기록">
-            {messages.length === 0 ? (
+          <div
+            className={styles.chatLog}
+            ref={log}
+            aria-label="대화 기록"
+            aria-busy={!ready && !error}
+          >
+            {!ready ? (
+              <div className={styles.loadState} role="status">
+                <Icon name={error ? "help" : "clock"} size={28} />
+                <h3>
+                  {error
+                    ? "기록을 불러오지 못했습니다"
+                    : "업무실을 준비하고 있어요"}
+                </h3>
+                <p>
+                  {error
+                    ? "기존 기록은 그대로 두고 다시 불러와주세요."
+                    : "대화와 업무 맥락을 불러오는 중입니다."}
+                </p>
+              </div>
+            ) : messages.length === 0 ? (
               <div className={styles.chatWelcome}>
                 <div className={styles.welcomeMark}>
                   <Icon name="spark" size={37} />
                 </div>
                 <span className={styles.welcomeEyebrow}>
-                  ONE PLACE. EVERY NEXT STEP.
+                  THINK. CONNECT. MOVE FORWARD.
                 </span>
                 <h3>오늘, 어떤 일을 진행할까요?</h3>
                 <p>
-                  생각을 적고 관련 자료를 연결해주세요.
+                  생각을 적고, 필요한 자료를 연결하세요.
                   <br />
-                  대화와 업무 맥락을 보관해 다음에 이어갈 수 있습니다.
+                  저장한 기록과 맥락은 다음에도 이어집니다.
                 </p>
                 <div className={styles.promptCards}>
                   {[
@@ -322,7 +377,7 @@ function AgentView() {
                   ].map((prompt) => (
                     <button
                       key={prompt.title}
-                      disabled={!ready}
+                      disabled={!ready || saving}
                       onClick={() => {
                         setDraft(prompt.text);
                         composer.current?.focus();
@@ -403,6 +458,7 @@ function AgentView() {
                     {documents.find((f) => f.id === fileId)?.name}
                     <button
                       aria-label="첨부 해제"
+                      disabled={saving}
                       onClick={() =>
                         setAttachmentIds((values) =>
                           values.filter((value) => value !== fileId),
@@ -415,15 +471,20 @@ function AgentView() {
                 ))}
               </div>
             )}
-            <form className={styles.composer} onSubmit={submit}>
+            <form
+              className={styles.composer}
+              onSubmit={submit}
+              aria-busy={saving}
+            >
               <textarea
                 ref={composer}
                 aria-label="Jarvis에게 전달할 내용"
+                aria-describedby="composer-hint"
                 placeholder="생각, 업무 요청, 기억할 내용을 적어주세요…"
                 value={draft}
                 maxLength={50000}
                 rows={2}
-                disabled={!ready}
+                disabled={!ready || saving}
                 onChange={(event) => setDraft(event.target.value)}
                 onKeyDown={(event) => {
                   if (
@@ -441,7 +502,7 @@ function AgentView() {
                   type="button"
                   className={styles.attachButton}
                   aria-label="대화에 자료 연결"
-                  disabled={!ready}
+                  disabled={!ready || saving}
                   onClick={() => setModal("files")}
                 >
                   <Icon name="paperclip" size={18} />
@@ -459,174 +520,209 @@ function AgentView() {
                     type="submit"
                     className={styles.sendButton}
                     disabled={!ready || saving || !draft.trim()}
-                    aria-label="대화 저장"
+                    aria-label={saving ? "대화 저장 중" : "대화 저장"}
                   >
-                    <Icon name="send" size={17} />
+                    <Icon name={saving ? "clock" : "send"} size={17} />
+                    <span>{saving ? "저장 중" : "저장"}</span>
                   </button>
                 </div>
               </div>
             </form>
-            <div className={styles.composerHint}>
-              <span>Enter 저장 · Shift+Enter 줄바꿈</span>
+            <div className={styles.composerHint} id="composer-hint">
+              <span role="status">
+                {saving
+                  ? "저장 중입니다. 잠시만 기다려주세요."
+                  : "Enter 저장 · Shift+Enter 줄바꿈"}
+              </span>
               <span>대화는 이 브라우저에 보관됩니다</span>
             </div>
-            {notice && (
-              <p className={styles.notice} role="status">
-                {notice}
-              </p>
+            {sendError ? (
+              <div className={styles.sendError} role="alert">
+                <p>
+                  대화를 저장하지 못했습니다. 입력 내용과 연결 자료는
+                  유지됩니다.
+                </p>
+                <button
+                  className={styles.retryButton}
+                  disabled={saving || !draft.trim()}
+                  onClick={() => void submit()}
+                >
+                  저장 다시 시도
+                </button>
+              </div>
+            ) : (
+              notice && (
+                <p className={styles.notice} role="status">
+                  {notice}
+                </p>
+              )
             )}
           </div>
         </section>
         <aside className={styles.contextRail} aria-label="현재 업무 맥락">
-          <section className={styles.railSection}>
-            <div className={styles.railHeading}>
-              <h2>
-                <Icon name="memory" size={17} />
-                누적 맥락
-              </h2>
-              <button
-                aria-label="맥락 편집"
-                disabled={!ready}
-                onClick={() => setModal("context")}
-              >
-                편집
-              </button>
-            </div>
-            <span className={styles.railScope}>
-              {spaceLabels[space]} /{" "}
-              {contextProjectId
-                ? data.projects.find((p) => p.id === contextProjectId)?.name
-                : "전체 업무"}
-            </span>
-            {general?.content && (
-              <details className={styles.generalContext}>
-                <summary>현재 영역의 공통 맥락</summary>
-                <p>{general.content}</p>
-              </details>
-            )}
-            <div className={styles.contextPreview}>
-              {note?.content ? (
-                <p>{note.content}</p>
-              ) : (
-                <>
-                  <span className={styles.contextEmptyIcon}>
-                    <Icon name="note" size={23} />
-                  </span>
-                  <h3>기억할 배경을 남겨주세요</h3>
-                  <p>
-                    목표, 업무 기준과 결정 사항을
-                    <br />
-                    계속 저장하고 업데이트할 수 있어요.
-                  </p>
+          {!ready ? (
+            <p className={styles.railSection}>
+              {error
+                ? "기록을 다시 불러오면 맥락과 자료를 확인할 수 있습니다."
+                : "맥락과 연결 자료를 확인하고 있습니다."}
+            </p>
+          ) : (
+            <>
+              <section className={styles.railSection}>
+                <div className={styles.railHeading}>
+                  <h2>
+                    <Icon name="memory" size={17} />
+                    누적 맥락
+                  </h2>
                   <button
-                    className={styles.textButton}
+                    aria-label="맥락 편집"
                     disabled={!ready}
                     onClick={() => setModal("context")}
                   >
-                    첫 맥락 기록 <Icon name="plus" size={13} />
+                    편집
                   </button>
-                </>
-              )}
-            </div>
-            <div className={styles.contextMeta}>
-              <span>{note ? `버전 ${note.revision}` : "아직 기록 없음"}</span>
-              <span>{note ? dateLabel(note.updatedAt) : ""}</span>
-            </div>
-            {revisions.length > 0 && (
-              <details className={styles.revisionDetails}>
-                <summary>
-                  맥락 수정 이력 <span>{revisions.length}</span>
-                </summary>
-                {revisions.map((revision) => (
-                  <details key={revision.id}>
-                    <summary>
-                      버전 {revision.revision} · {dateLabel(revision.createdAt)}
-                    </summary>
-                    <p>{revision.content || "빈 맥락"}</p>
+                </div>
+                <span className={styles.railScope}>
+                  {spaceLabels[space]} /{" "}
+                  {contextProjectId
+                    ? data.projects.find((p) => p.id === contextProjectId)?.name
+                    : "전체 업무"}
+                </span>
+                {general?.content && (
+                  <details className={styles.generalContext}>
+                    <summary>현재 영역의 공통 맥락</summary>
+                    <p>{general.content}</p>
                   </details>
-                ))}
-              </details>
-            )}
-          </section>
-          <section className={styles.railSection}>
-            <div className={styles.railHeading}>
-              <h2>
-                <Icon name="paperclip" size={17} />
-                관련 자료
-              </h2>
-              <Link href="/library">
-                자료실 <Icon name="arrow" size={12} />
-              </Link>
-            </div>
-            {documents.length ? (
-              <div className={styles.railFiles}>
-                {documents.slice(0, 4).map((file) => (
-                  <Link href="/library" key={file.id}>
-                    <span>
-                      <Icon name="note" size={17} />
-                    </span>
-                    <div>
-                      <strong>{file.name}</strong>
-                      <small>
-                        {file.projectId
-                          ? data.projects.find((p) => p.id === file.projectId)
-                              ?.name
-                          : "영역 공통 자료"}
-                      </small>
-                    </div>
+                )}
+                <div className={styles.contextPreview}>
+                  {note?.content ? (
+                    <p>{note.content}</p>
+                  ) : (
+                    <>
+                      <span className={styles.contextEmptyIcon}>
+                        <Icon name="note" size={23} />
+                      </span>
+                      <h3>기억할 배경을 남겨주세요</h3>
+                      <p>
+                        목표, 업무 기준과 결정 사항을
+                        <br />
+                        계속 저장하고 업데이트할 수 있어요.
+                      </p>
+                      <button
+                        className={styles.textButton}
+                        disabled={!ready}
+                        onClick={() => setModal("context")}
+                      >
+                        첫 맥락 기록 <Icon name="plus" size={13} />
+                      </button>
+                    </>
+                  )}
+                </div>
+                <div className={styles.contextMeta}>
+                  <span>
+                    {note ? `버전 ${note.revision}` : "아직 기록 없음"}
+                  </span>
+                  <span>{note ? dateLabel(note.updatedAt) : ""}</span>
+                </div>
+                {revisions.length > 0 && (
+                  <details className={styles.revisionDetails}>
+                    <summary>
+                      맥락 수정 이력 <span>{revisions.length}</span>
+                    </summary>
+                    {revisions.map((revision) => (
+                      <details key={revision.id}>
+                        <summary>
+                          버전 {revision.revision} ·{" "}
+                          {dateLabel(revision.createdAt)}
+                        </summary>
+                        <p>{revision.content || "빈 맥락"}</p>
+                      </details>
+                    ))}
+                  </details>
+                )}
+              </section>
+              <section className={styles.railSection}>
+                <div className={styles.railHeading}>
+                  <h2>
+                    <Icon name="paperclip" size={17} />
+                    관련 자료
+                  </h2>
+                  <Link href="/library">
+                    자료실 <Icon name="arrow" size={12} />
                   </Link>
-                ))}
-              </div>
-            ) : (
-              <div className={styles.railEmpty}>
-                <p>연결된 자료가 없습니다.</p>
-                <Link href="/library">
-                  파일을 올리고 업무에 연결하세요{" "}
-                  <Icon name="arrow" size={13} />
-                </Link>
-              </div>
-            )}
-          </section>
-          <section className={styles.railSection}>
-            <div className={styles.railHeading}>
-              <h2>
-                <Icon name="check" size={17} />
-                연결 업무
-              </h2>
-              <Link href="/tasks">
-                전체 <Icon name="arrow" size={12} />
-              </Link>
-            </div>
-            {contextTasks.filter((t) => t.status !== "done").length ? (
-              <div className={styles.railTasks}>
-                {contextTasks
-                  .filter((t) => t.status !== "done")
-                  .slice(0, 4)
-                  .map((task) => (
-                    <Link href="/tasks" key={task.id}>
-                      <span className={styles.taskDot} />
-                      <strong>{task.title}</strong>
-                      <small>{statusLabels[task.status]}</small>
+                </div>
+                {documents.length ? (
+                  <div className={styles.railFiles}>
+                    {documents.slice(0, 4).map((file) => (
+                      <Link href="/library" key={file.id}>
+                        <span>
+                          <Icon name="note" size={17} />
+                        </span>
+                        <div>
+                          <strong>{file.name}</strong>
+                          <small>
+                            {file.projectId
+                              ? data.projects.find(
+                                  (p) => p.id === file.projectId,
+                                )?.name
+                              : "영역 공통 자료"}
+                          </small>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                ) : (
+                  <div className={styles.railEmpty}>
+                    <p>연결된 자료가 없습니다.</p>
+                    <Link href="/library">
+                      파일을 올리고 업무에 연결하세요{" "}
+                      <Icon name="arrow" size={13} />
                     </Link>
-                  ))}
+                  </div>
+                )}
+              </section>
+              <section className={styles.railSection}>
+                <div className={styles.railHeading}>
+                  <h2>
+                    <Icon name="check" size={17} />
+                    연결 업무
+                  </h2>
+                  <Link href="/tasks">
+                    전체 <Icon name="arrow" size={12} />
+                  </Link>
+                </div>
+                {contextTasks.filter((t) => t.status !== "done").length ? (
+                  <div className={styles.railTasks}>
+                    {contextTasks
+                      .filter((t) => t.status !== "done")
+                      .slice(0, 4)
+                      .map((task) => (
+                        <Link href="/tasks" key={task.id}>
+                          <span className={styles.taskDot} />
+                          <strong>{task.title}</strong>
+                          <small>{statusLabels[task.status]}</small>
+                        </Link>
+                      ))}
+                  </div>
+                ) : (
+                  <div className={styles.railEmpty}>
+                    <p>아직 연결한 업무가 없습니다.</p>
+                    <Link href="/tasks">
+                      첫 업무 만들기 <Icon name="plus" size={13} />
+                    </Link>
+                  </div>
+                )}
+              </section>
+              <div className={styles.railFootnote}>
+                <Icon name="link" size={14} />
+                <span>
+                  대화·맥락·자료가 같은 업무에 연결됩니다.
+                  <br />
+                  회사와 개인의 기록은 따로 보관합니다.
+                </span>
               </div>
-            ) : (
-              <div className={styles.railEmpty}>
-                <p>아직 연결한 업무가 없습니다.</p>
-                <Link href="/tasks">
-                  첫 업무 만들기 <Icon name="plus" size={13} />
-                </Link>
-              </div>
-            )}
-          </section>
-          <div className={styles.railFootnote}>
-            <Icon name="link" size={14} />
-            <span>
-              대화·맥락·자료가 같은 업무에 연결됩니다.
-              <br />
-              회사와 개인의 기록은 따로 보관합니다.
-            </span>
-          </div>
+            </>
+          )}
         </aside>
       </div>
       {modal === "context" && (

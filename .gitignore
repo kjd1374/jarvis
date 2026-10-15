@@ -42,3 +42,7 @@ next-env.d.ts
 
 # Commit the public configuration template.
 !.env.example
+
+# Synthetic browser test artifacts (may contain test conversations/files)
+/playwright-report/
+/test-results/

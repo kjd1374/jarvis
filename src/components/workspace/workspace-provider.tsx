@@ -9,9 +9,10 @@ type Workspace = {
   ready: boolean;
   saving: boolean;
   error: string | null;
+  retryLoad: () => void;
   mutate: (
     transform: (data: WorkspaceData) => WorkspaceData,
-    files?: { id: string; blob: Blob }[],
+    files?: { id: string; blob: Blob; preventOverwrite?: boolean }[],
   ) => Promise<void>;
 };
 const Context = createContext<Workspace | null>(null);
@@ -21,6 +22,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const [pending, setPending] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const channel = useRef<BroadcastChannel | null>(null);
   const generation = useRef(0);
 
@@ -36,7 +38,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
           setError(null);
         }
       } catch (error) {
-        if (active)
+        if (active && requestGeneration === generation.current)
           setError(
             error instanceof Error
               ? error.message
@@ -59,11 +61,16 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       channel.current = null;
       document.removeEventListener("visibilitychange", visible);
     };
-  }, []);
+  }, [loadAttempt]);
+
+  function retryLoad() {
+    setError(null);
+    setLoadAttempt((attempt) => attempt + 1);
+  }
 
   async function mutate(
     transform: (data: WorkspaceData) => WorkspaceData,
-    files: { id: string; blob: Blob }[] = [],
+    files: { id: string; blob: Blob; preventOverwrite?: boolean }[] = [],
   ) {
     if (!ready)
       throw new Error("저장 공간을 준비 중입니다. 잠시 후 다시 시도해주세요.");
@@ -88,7 +95,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <Context.Provider
-      value={{ data, ready, saving: pending > 0, error, mutate }}
+      value={{ data, ready, saving: pending > 0, error, mutate, retryLoad }}
     >
       {children}
     </Context.Provider>

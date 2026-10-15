@@ -11,6 +11,8 @@ import {
   type Document,
 } from "@/lib/workspace/types";
 import { readFile } from "@/lib/workspace/storage";
+import { downloadCloudFile } from "@/lib/cloud/client";
+import { projectUrl } from "@/lib/workspace/project-links";
 import { useWorkspace } from "./workspace-provider";
 import { Modal, WorkspaceControls } from "./workspace-controls";
 import { Icon } from "./icon";
@@ -42,6 +44,10 @@ function LibraryView() {
   const [dragging, setDragging] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [referenceOpen, setReferenceOpen] = useState(false);
+  const [referenceName, setReferenceName] = useState("");
+  const [referenceUrl, setReferenceUrl] = useState("");
+  const uploading = useRef(false);
   const input = useRef<HTMLInputElement>(null);
   const filtered = documents.filter(
     (d) =>
@@ -50,11 +56,12 @@ function LibraryView() {
   );
 
   async function upload(files: File[]) {
-    if (!ready || saving || !files.length) return;
+    if (!ready || saving || uploading.current || !files.length) return;
     if (files.some((f) => f.size > 20 * 1024 * 1024)) {
       setError("파일당 20 MB까지 추가할 수 있습니다.");
       return;
     }
+    uploading.current = true;
     const records: Document[] = files.map((file) => ({
       id: id(),
       space,
@@ -80,12 +87,54 @@ function LibraryView() {
       setError(
         error instanceof Error ? error.message : "파일을 저장하지 못했습니다.",
       );
+    } finally {
+      uploading.current = false;
+    }
+  }
+
+  async function addReference(event: React.FormEvent) {
+    event.preventDefault();
+    if (saving || uploading.current || !referenceName.trim()) return;
+    uploading.current = true;
+    try {
+      const sourceUrl = projectUrl(referenceUrl);
+      if (!sourceUrl) throw new Error("원본 주소를 입력해주세요.");
+      const record: Document = {
+        id: id(),
+        space,
+        projectId,
+        taskId: uploadTask || null,
+        name: referenceName.trim(),
+        sourceUrl,
+        mime: "text/uri-list",
+        size: 0,
+        createdAt: now(),
+      };
+      await mutate((d) => {
+        assertLinks(d, space, projectId, record.taskId);
+        return { ...d, documents: [...d.documents, record] };
+      });
+      setReferenceOpen(false);
+      setReferenceName("");
+      setReferenceUrl("");
+      setError("");
+      setNotice(
+        "원본 링크와 연결 정보를 저장했습니다. 파일 내용은 복제하지 않았습니다.",
+      );
+    } catch (error) {
+      setError(
+        error instanceof Error ? error.message : "링크를 저장하지 못했습니다.",
+      );
+    } finally {
+      uploading.current = false;
     }
   }
 
   async function download(file: Document) {
     try {
-      const blob = await readFile(file.id);
+      const blob = await readFile(file.id).catch(() =>
+        downloadCloudFile(file.space, file.id),
+      );
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -137,14 +186,26 @@ function LibraryView() {
             파일과 결과물을 프로젝트·업무에 연결하고, 대화에서 함께 참조하세요.
           </p>
         </div>
-        <button
-          className={styles.primaryButton}
-          disabled={!ready || saving}
-          onClick={() => input.current?.click()}
-        >
-          <Icon name="plus" size={17} />
-          자료 추가
-        </button>
+        <div className={styles.projectActions}>
+          <button
+            className={styles.secondaryButton}
+            disabled={!ready || saving}
+            onClick={() => {
+              setError("");
+              setReferenceOpen(true);
+            }}
+          >
+            원본 링크 등록
+          </button>
+          <button
+            className={styles.primaryButton}
+            disabled={!ready || saving}
+            onClick={() => input.current?.click()}
+          >
+            <Icon name="plus" size={17} />
+            자료 추가
+          </button>
+        </div>
       </div>
       <input
         ref={input}
@@ -257,8 +318,9 @@ function LibraryView() {
                 <div>
                   <strong>{file.name}</strong>
                   <small>
-                    {fileSize(file.size)} ·{" "}
-                    {file.name.split(".").pop()?.toUpperCase() || "FILE"}
+                    {file.sourceUrl
+                      ? "원본 링크 · 내용 미복제"
+                      : `${fileSize(file.size)} · ${file.name.split(".").pop()?.toUpperCase() || "FILE"}`}
                   </small>
                 </div>
               </div>
@@ -288,12 +350,23 @@ function LibraryView() {
                 >
                   <Icon name="link" size={17} />
                 </button>
-                <button
-                  aria-label={`${file.name} 다운로드`}
-                  onClick={() => void download(file)}
-                >
-                  <Icon name="download" size={17} />
-                </button>
+                {file.sourceUrl ? (
+                  <a
+                    href={file.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`${file.name} 원본 열기`}
+                  >
+                    <Icon name="arrow" size={17} />
+                  </a>
+                ) : (
+                  <button
+                    aria-label={`${file.name} 다운로드`}
+                    onClick={() => void download(file)}
+                  >
+                    <Icon name="download" size={17} />
+                  </button>
+                )}
               </div>
             </article>
           ))
@@ -317,9 +390,67 @@ function LibraryView() {
       </section>
       <p className={styles.storageNote}>
         <Icon name="memory" size={14} />
-        파일 원본과 연결 정보는 이 브라우저에 보관됩니다. 다른 기기와의 동기화는
-        아직 연결되지 않았습니다.
+        기본 저장은 이 브라우저입니다. 원본 링크는 내용을 복제하지 않습니다.
+        설정에서 백업·이관과 서버 연결 상태를 확인하세요.
       </p>
+      {referenceOpen && (
+        <Modal
+          title="원본 링크 등록"
+          onClose={() => {
+            if (!saving) setReferenceOpen(false);
+          }}
+        >
+          <form className={styles.modalBody} onSubmit={addReference}>
+            <p className={styles.modalDescription}>
+              {spaceLabels[space]} · 현재 프로젝트와 선택한 업무에 원본 주소만
+              연결합니다. 비밀값이 포함된 주소는 등록하지 마세요.
+            </p>
+            <label className={styles.field}>
+              자료 이름
+              <input
+                aria-label="원본 자료 이름"
+                autoFocus
+                required
+                maxLength={200}
+                value={referenceName}
+                onChange={(e) => setReferenceName(e.target.value)}
+              />
+            </label>
+            <label className={styles.field}>
+              원본 주소
+              <input
+                aria-label="원본 자료 주소"
+                type="url"
+                required
+                maxLength={2048}
+                value={referenceUrl}
+                onChange={(e) => setReferenceUrl(e.target.value)}
+              />
+            </label>
+            {error && (
+              <p className={styles.formError} role="alert">
+                {error}
+              </p>
+            )}
+            <div className={styles.modalActions}>
+              <button
+                type="button"
+                className={styles.secondaryButton}
+                disabled={saving}
+                onClick={() => setReferenceOpen(false)}
+              >
+                취소
+              </button>
+              <button
+                className={styles.primaryButton}
+                disabled={saving || !referenceName.trim()}
+              >
+                원본 링크 저장
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
       {selected && (
         <Modal title="자료 연결 설정" onClose={() => setSelected(null)}>
           <form className={styles.modalBody} onSubmit={saveLinks}>

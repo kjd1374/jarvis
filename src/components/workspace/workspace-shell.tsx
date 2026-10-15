@@ -12,8 +12,10 @@ import { spaceLabels } from "@/lib/workspace/types";
 export function WorkspaceShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { data } = useWorkspace();
+  const isCurrent = (href: string) =>
+    pathname === href || (href === "/" && pathname === "/assistant") || (href !== "/" && pathname.startsWith(`${href}/`));
   const current =
-    navigation.find((item) => item.href === pathname) ?? navigation[0];
+    navigation.find((item) => isCurrent(item.href)) ?? navigation[0];
   const [menuOpen, setMenuOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [dialogMode, setDialogMode] = useState<"search" | "help">("search");
@@ -58,7 +60,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
           <Icon name="spark" size={25} />
         </span>
         <span>
-          jarvis<span className={styles.brandDot}>.</span>
+          JARVIS<span className={styles.brandDot}>.</span>
         </span>
       </Link>
       <div className={styles.workspaceLabel}>
@@ -75,12 +77,12 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
               key={item.href}
               href={item.href}
               onClick={() => menuRef.current?.close()}
-              aria-current={pathname === item.href ? "page" : undefined}
-              className={`${styles.navItem} ${pathname === item.href ? styles.navActive : ""}`}
+              aria-current={isCurrent(item.href) ? "page" : undefined}
+              className={`${styles.navItem} ${isCurrent(item.href) ? styles.navActive : ""}`}
             >
               <Icon name={item.icon} />
               <span>{item.label}</span>
-              {pathname === item.href && <span className={styles.activeDot} />}
+              {isCurrent(item.href) && <span className={styles.activeDot} />}
             </Link>
           ))}
       </nav>
@@ -170,7 +172,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
               <span>작업 공간 검색</span>
               <kbd>⌘ K</kbd>
             </button>
-            <span className={styles.previewBadge}>개인 통합 업무실</span>
+            <span className={styles.previewBadge}>{spaceLabels[data.activeSpace]} 워크스페이스</span>
             <button
               className={styles.helpButton}
               aria-label="사용 안내"
@@ -186,7 +188,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
         <footer className={styles.footer}>
           <span>맥락이 쌓이고, 실제 일이 끝나는 공간.</span>
           <span>
-            JARVIS WORKSPACE <span>↗</span>
+            JARVIS WORKSPACE <span><Icon name="arrow" size={16} /></span>
           </span>
         </footer>
       </div>

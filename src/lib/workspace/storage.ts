@@ -1,4 +1,5 @@
-import { emptyWorkspace, type WorkspaceData } from "./types";
+import { type WorkspaceData } from "./types";
+import { normalizeWorkspace } from "./validation";
 
 let database: Promise<IDBDatabase> | undefined;
 function open(): Promise<IDBDatabase> {
@@ -30,18 +31,7 @@ function open(): Promise<IDBDatabase> {
 }
 
 function decode(value: unknown): WorkspaceData {
-  if (value === undefined) return emptyWorkspace();
-  const data = value as WorkspaceData;
-  if (
-    data.version !== 1 ||
-    !Array.isArray(data.messages) ||
-    !Array.isArray(data.documents) ||
-    !Array.isArray(data.contextRevisions)
-  )
-    throw new Error(
-      "저장된 데이터 형식을 확인할 수 없습니다. 기존 데이터는 유지됩니다.",
-    );
-  return data;
+  return normalizeWorkspace(value);
 }
 
 export async function readWorkspace(): Promise<WorkspaceData> {
@@ -64,7 +54,7 @@ export async function readWorkspace(): Promise<WorkspaceData> {
 // Read and update in one transaction, including blobs, so tabs cannot overwrite each other's changes.
 export async function commitWorkspace(
   transform: (data: WorkspaceData) => WorkspaceData,
-  files: { id: string; blob: Blob }[] = [],
+  files: { id: string; blob: Blob; preventOverwrite?: boolean }[] = [],
 ): Promise<WorkspaceData> {
   const db = await open();
   return new Promise((resolve, reject) => {
@@ -75,10 +65,20 @@ export async function commitWorkspace(
     const request = store.get("current");
     request.onsuccess = () => {
       try {
-        result = transform(decode(request.result));
+        result = normalizeWorkspace(transform(decode(request.result)));
         store.put(result, "current");
-        for (const file of files)
-          tx.objectStore("files").put(file.blob, file.id);
+        for (const file of files) {
+          const record = result.documents.find(
+            (d) => d.id === file.id && !d.sourceUrl,
+          );
+          if (!record || record.size !== file.blob.size)
+            throw new Error(
+              "파일 원본과 저장 정보가 일치하지 않습니다. 기존 기록은 유지됩니다.",
+            );
+          const filesStore = tx.objectStore("files");
+          if (file.preventOverwrite) filesStore.add(file.blob, file.id);
+          else filesStore.put(file.blob, file.id);
+        }
       } catch (error) {
         failure = error;
         tx.abort();

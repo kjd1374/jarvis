@@ -1,0 +1,138 @@
+# 개발 선택 기록
+
+## 2026-10-14: 회귀 테스트와 업무실 상태 개선
+
+기존 Next.js 16.4.0 / React 19.3.0 / Node 24 환경, CSS Modules·native dialog,
+IndexedDB 트랜잭션과 기존 임시 Chromium 검증 스크립트를 먼저 확인했다.
+임시 스크립트의 사용자 흐름을 저장소의 독립된 Playwright 테스트로 옮긴다.
+새 업무 기능, 서버 저장, 실제 AI 응답은 추가하지 않는다.
+
+| 공식 후보 / 확인 버전 | 출처·유지보수·호환성 | 비용·정보 전송 | 선택과 직접 구현 대비 이익 |
+| --- | --- | --- | --- |
+| [microsoft/playwright](https://github.com/microsoft/playwright) / `@playwright/test` 1.64.0 | Apache-2.0, 공식 저장소 archived 아님, 2026-10-13 갱신. Node ≥20, 현재 Node 24와 호환 | 무료 OSS, 로컬 브라우저 실행. 패키지·브라우저 다운로드만 외부 연결; 합성 데이터와 로그만 사용 | **채택**, 정확한 버전 고정. 직접 만든 단일 smoke 스크립트보다 테스트 격리·자동 대기·모바일 에뮬레이션·실패 trace·CI 보고서 관리에 이익 |
+| [testing-library/react-testing-library](https://github.com/testing-library/react-testing-library) / 16.3.3 | MIT, archived 아님, 2026-08-27 갱신. React 18/19 지원, DOM 테스트 환경 추가 필요 | 무료 OSS, 로컬 실행 자체로 업무 데이터 전송 없음 | **보류**. 현재 우선순위인 메뉴·파일 다운로드·실제 IndexedDB·여러 탭은 브라우저 통합 검증이 적합. 컴포넌트 단위 복잡성이 커지면 재검토 |
+| [shadcn-ui/ui](https://github.com/shadcn-ui/ui) / CLI 4.21.4 | MIT, archived 아님, 2026-10-13 갱신. Node ≥20.18.1. 현재 CSS Modules에 registry/스타일 기반을 추가로 맞춰야 함 | 무료 OSS. CLI 사용 시 registry 접속; 이번에는 실행·설치하지 않음 | **보류**. 기존 native dialog·버튼·CSS로 상태와 접근성 개선 가능. 이번 범위에는 스타일 기반 추가 비용보다 이익이 작음 |
+
+공식 GitHub API와 npm registry에서 버전·라이선스·갱신 상태를 확인했다.
+설치된 Next.js의 `node_modules/next/dist/docs/01-app/02-guides/testing/playwright.md`와
+`environment-variables.md`, 공식 [Playwright 1.64.0 문서](https://github.com/microsoft/playwright/tree/v1.64.0/docs/src)의
+web server·fixture·mock API 안내를 확인했다. Context7은 현재 도구 목록에 없어 공식 문서로 진행했다.
+외부 저장소의 설치 스크립트는 실행하지 않았고, 패키지는 `--ignore-scripts`로 설치했다.
+
+테스트 서버는 허용한 소스만 임시 폴더에 복사하고 별도 환경변수로 빌드한다.
+`.env*`, 클라우드 토큰, 기존 브라우저 기록을 사용하지 않는다. 임시 앱 밖에 있는 기존
+`node_modules`를 재사용하므로 공식 Next.js webpack 빌드 옵션을 사용한다.
+기존 `npm run check`의 Turbopack 빌드는 유지해 두 빌드 경로를 모두 확인한다.
+
+Superpowers는 테스트 우선·원인 분석·완료 검증 원칙만 적용하고 설치하지 않았다.
+Repomix가 필요한 코드 전달 작업이 없으므로 사용하지 않았다.
+Mastra·LangGraph·Codex App Server는 실제 AI 실행·재개 요구가 구체화될 때,
+TTS는 음성 사용 요구가 있을 때, 별도 분석 서버는 현재 구조의 한계가 측정될 때만 재검토한다.
+
+검증 결과는 `docs/TESTING.md`의 이번 검증 기록에 남긴다.
+
+## 2026-10-14: 사용자 요청에 따른 테마 재디자인
+
+사용자가 기존 색감·테마를 교체하고 더 화려하고 모던한 디자인을 요청했다.
+기존 CSS Modules와 native dialog를 확인하고 다음 공식 후보를 비교했다.
+기존의 디자인 유지 제한은 이번 명시적 요청에 한해 대체한다. 배포 제한은 유지한다.
+
+| 후보 / 확인 버전 | 공식 출처·유지보수·호환성 | 비용·정보 전송·결정 |
+| --- | --- | --- |
+| [Radix Themes](https://github.com/radix-ui/themes) 3.3.0 | MIT, 2026-04-11 갱신, archived 아님, React 19 지원 | 무료 OSS. 로컬 UI 렌더링으로 업무 정보 전송 불필요. 완성형 테마가 있으나 기존 입력·레이아웃을 교체할 비용이 커 **보류** |
+| [shadcn/ui](https://github.com/shadcn-ui/ui) CLI 4.21.4 | MIT, 2026-10-13 갱신, archived 아님. 현재 Next/React에서 사용 가능하나 스타일 기반 조정 필요 | 무료 OSS. CLI registry 네트워크 사용. 이번에는 미실행. 선택적 복사 가능하지만 기존 접근성·저장 동작이 있으므로 **보류** |
+| [Headless UI](https://github.com/tailwindlabs/headlessui) 2.2.10 | MIT, 2026-04-13 갱신, archived 아님, React 18/19 지원 | 무료 OSS. 로컬 UI 렌더링으로 업무 정보 전송 불필요. 색상·테마 자체를 제공하지 않으므로 이번 시각 개편의 직접적 이익이 작아 **보류** |
+
+**채택:** 기존 CSS Modules를 유지하며 전역 색상 토큰과 공통 표면·입력·팝업 스타일을 재구성한다.
+짙은 네이비, 블루·바이올렛 그라디언트, 상태별 카드 포인트, 밝은 본문 색으로 통일한다.
+새 패키지·외부 폰트·이미지 CDN·분석 스크립트는 추가하지 않는다.
+공통 셸의 사용하지 않는 예전 대시보드 스타일을 제거하고, 기존 저장·오류 복구·모바일 동작을 보존한다.
+설치된 Next.js 16.4.0의 `01-app/01-getting-started/11-css.md`를 확인했다.
+Context7은 사용 가능한 도구가 없어 공식 로컬 문서와 공식 GitHub/npm 정보를 사용했다.
+
+검증: `npm run check`와 `npm run test:all` 17건이 통과했다.
+실제 캡처에서 빈 대화의 시작 버튼이 잘리는 문제를 찾아 자동 높이로 수정했다.
+이후 UI 테스트 12건과 기존 lint·타입 검사·빌드를 다시 실행해 모두 통과했다.
+합성 데이터로 1440px 데스크톱·390px/320px 모바일, 자료실·프로젝트·설정·검색·입력 팝업을 확인했다.
+추가 비용·외부 전송 없이 검증했으며 운영 배포와 데이터 변경은 하지 않았다.
+
+## 2026-10-14: korean-friend 연결 가능성 검토
+
+사용자가 지정한 `kjd1374/korean-friend`의 `8c6f8bf`를 검토했다.
+기존 Node/로컬 Ollama/JSON 학습 저장 구조를 유지하는 프로젝트 참조 연결을 권장하며,
+Vercel에 전체 코드를 그대로 이식하는 방식은 저장소·사설 네트워크·API 접근 경계 조정이 필요해 보류한다.
+별도 패키지나 후보 프레임워크 도입은 없는 읽기·검증 작업이다.
+가짜 AI와 합성 데이터로 기존 앱 7개 흐름을 확인했다. 실제 모델·맥 장비·음성 서비스는 호출하지 않았다.
+상세 구조·출처·비용·라이선스·검증 범위는 [연결 검토](integrations/korean-friend.md)에 기록했다.
+
+## 2026-10-14: 프로젝트 선택 흐름 수정
+
+프로젝트 카드의 기존 링크가 전역 프로젝트 범위를 바꾼 뒤 `/`로 이동해
+프로젝트를 열어도 메인 대시보드처럼 보였다. 프로젝트 전용 상세 화면을 먼저 열고
+대화 이동은 별도 버튼으로 선택하게 수정했다. 이름·설명·주소를 편집하고,
+업무·자료·맥락·대화를 해당 프로젝트/영역으로 제한해 모아 보여준다.
+
+기존 코드와 공식 후보를 비교했다. [Next.js](https://github.com/vercel/next.js) 16.4.0의
+동적 경로·Link와 기존 CSS Modules/Modal을 채택한다(MIT, 현재 사용 중인 버전).
+[Radix Themes](https://github.com/radix-ui/themes) 3.3.0,
+[shadcn/ui](https://github.com/shadcn-ui/ui) CLI 4.21.4는 MIT이고 유지보수 중이지만,
+이번 문제는 탐색 경로와 데이터 범위에 있어 UI 기반을 추가할 이익이 작아 계속 보류한다.
+Next.js 로컬 공식 `page.md`와 `dynamic-routes.md`의 Promise params 규칙을 확인했다.
+Context7은 현재 도구 목록에 없어 공식 로컬 문서로 진행했다.
+추가 런타임 라이브러리·요금·외부 업무 정보 전송은 없다. GitHub/서비스 주소는
+http/https만 허용하고 자격 증명이 담긴 URL은 거부하며, 자동 요청 없이 새 탭으로 연다.
+기존 IndexedDB 버전과 프로젝트 ID를 유지하고 선택 필드만 추가해 이전 자료를 보존한다.
+Prettier 3.9.10(MIT, 공식 npm 패키지)을 설치 스크립트 없이 임시 실행해 새 소스만 정리했으며 앱 의존성에 추가하지 않았다.
+
+검증: 수정 전 프로젝트 상세 이동 테스트 실패를 재현했다. 수정 후 기존+신규 21건 통과.
+프로젝트 상세 새로고침·이름/주소 편집·실패 후 재시도·다른 프로젝트/영역 분리와
+모바일 320px 가로 넘침, 대화에서 돌아오기를 확인했다. 최종 `npm run check`의 lint·타입 검사·프로덕션 빌드도 통과했다.
+
+프로젝트 상세 수정본을 기존 승인 범위의 Vercel 미리보기로 배포하고,
+`jarvis-preview-ai-report.vercel.app` 별칭을 신규 preview deployment에 연결했다.
+별칭이 기존에 없음을 확인했고 production 배포를 가리키지 않도록 검증했다.
+고정 미리보기에서도 Vercel 로그인 보호를 유지한다. 이후 승인된 preview 배포는
+이 주소를 재사용해 브라우저 저장 공간이 배포마다 바뀌지 않도록 한다.
+이전 일회성 URL의 브라우저 기록은 자동 이전되지 않으며 기존 주소에 그대로 남는다.
+
+## 2026-10-14: 통합 업무실·서버 저장·읽기 연결 기반
+
+시작 상태: main / caeb78a, 이전 프로젝트 상세·디자인·테스트 미커밋 변경을 보존했다. 브라우저 IndexedDB v1에 실제 저장, 앱 계정/서버 업무 테이블·v4·AI 연결은 없는 상태를 확인했다. 기존 `/` 대화를 `/assistant`로 보존하고 결과/다음 행동 중심 홈을 추가한다. 별도 UI 프레임워크를 추가하지 않는다.
+
+| 후보 / 확인 버전 | 출처·라이선스·유지보수·호환성 | 비용·전송·결정 |
+| --- | --- | --- |
+| [supabase/supabase-js](https://github.com/supabase/supabase-js) 2.117.3 | 공식 MIT, 2026-10-13 갱신, 설치된 버전과 일치. 기존 @supabase/ssr 0.12.7 및 Next 16.4.0과 재사용 | OSS SDK, 운영 저장/전송 비용은 기존 Supabase 요금제에 따름. 활성화 시 선택한 영역의 메타데이터·명시적으로 올린 파일만 기존 프로젝트로 전송. **채택: 기존 의존성 재사용**, 서비스 역할 키를 앱에서 사용하지 않음 |
+| [TanStack/query](https://github.com/TanStack/query) 5.104.2 | 공식 MIT, 유지보수 중, React 19 지원 | 무료 OSS, 라이브러리 자체의 업무 정보 전송 불필요. 지금은 명시적 검토/병합 위주여서 기존 provider/fetch로 충분해 **보류** |
+| [dexie/Dexie.js](https://github.com/dexie/Dexie.js) 4.4.6 | 공식 Apache-2.0, 유지보수 중, 브라우저 IndexedDB 호환 | 무료 OSS, 로컬 사용의 외부 전송 불필요. 기존 원자적 IDB·파일·탭 갱신 동작을 교체/이관할 이익이 작아 **보류** |
+
+설치된 Next 16.4.0의 route handler·cookies 공식 로컬 문서를 먼저 확인했다. Context7은 사용 가능한 도구가 없어 공식 문서로 계속 진행했다. 새 패키지/유료 서비스·외부 설치 스크립트를 추가하지 않았다. 기존 Prettier 3.9.10 임시 실행으로 새 소스만 정리했다. Superpowers 원칙(실패 재현·원인 분석·완료 검증)을 참고하며 별도 도구·worktree 규칙을 도입하지 않았다.
+
+서버는 사용자+영역별 JSON snapshot/RLS/revision CAS를 채택한다. 대규모 통계에 유리한 정규화 테이블은 후속 실제 사용량에 따라 검토한다. 기존 v1 형식 재사용과 백업 이관, 원자적 보관, 계정/영역 격리에 직접 이익이 있다. 자동 양방향 병합 대신 검토·확인 후 저장하며, 현재 문서의 삭제 동기화는 하지 않는다. 실서비스 수집은 독립 read-only adapter로 분리하고 실패를 삭제로 취급하지 않는다. v4 계약 부재로 실제 adapter/스케줄러는 보류했다.
+
+AI는 비용/모델/전송 범위가 결정되기 전 근거 검색과 출처·최신성만 제공한다. 답변 생성·실행은 연결 필요로 남긴다. 실제 연결 전 모의 답변을 제품에 표시하지 않는다. 새 인증/접근 권한·운영 마이그레이션·배포는 적용하지 않았다. 최종 검증 결과와 미실행 범위는 `TESTING.md`에 기록한다.
+
+최종 검증: lint/타입/빌드 통과, 합성 domain 6 + UI/실제 IDB 28건 통과. 화면 검토 후 긴 메모 접기와 사실 우선 필터를 보완하고 관련 6건·domain 6건·check를 다시 통과했다. 별도 실제 로컬 Supabase에서 소유자 RLS·영역 분리·다중 브라우저 복원·revision 충돌·UI 서버 저장을 검증했다. v4·AI·운영 연동과 실제 물리 기기는 미검증이며 서버 파일 API는 로컬 storage-api 부재로 미실행이다. 자세한 제한은 `TESTING.md`에 남겼다. 운영 배포·설정·인증·데이터 변경 없음.
+
+## 2026-10-14: 미리보기 배포 누락 수정
+
+사용자의 배포 문제 수정 요청으로 Vercel 이력과 main을 조회했다. 최근 ERROR 배포가 아니라 로컬 변경이 배포되지 않은 상태였다. 기존 Git 소스 헬퍼는 커밋/push 전용이고 이전 작업은 배포를 보류했다. 기본 미리보기 명령을 Node 24의 공식 `--use-env-proxy`와 Vercel 공식 REST createDeployment(files)/assignAlias로 보완했다. 기존 주입 토큰·프로젝트를 재사용하며 새 SDK·유료 서비스·권한을 도입하지 않았다. 작은 배포 경로 수정이므로 새 GitHub 라이브러리 비교는 생략했다.
+
+운영 설정을 바꾸지 않고 현재 허용된 소스만 올리는 preview 경로다. 개인정보·비밀값·사용자 대화·업로드·백업을 전송하지 않는다. 이미 사용하는 Vercel 요금제의 일반 빌드이며 별도 유료 옵션은 선택하지 않는다. 빌드 확인·소스 해시·프로젝트/주소 소유권 검사·프로덕션 거부·이전 주소 보존·중단 후 resume을 지원한다. 합성 단위 검증 4건과 lint/타입/build가 통과했고 새 preview가 READY로 완료됐다. 상세 ID/주소/검증 한계는 `DEPLOYMENT.md`에 기록했다. Git push/merge와 운영 DB 변경은 하지 않았다.
+
+## 2026-10-15: 제공된 v4 저장소의 읽기 연결 구조 검토
+
+사용자가 제공한 kjd1374/33m2-v4-workspace main `939c906`의 코드·AGENTS·README를 읽었다. 별도 임시 clone의 읽기만 수행했으며 v4를 설치/실행/수정/배포하거나 고객 데이터/API를 조회하지 않았다. 익명 웹 진입은 /login 응답으로 확인했다. 기존 RecordEnvelope와 Supabase 서버 조회, 성과 함수와 수집 상태를 재사용할 수 있다. 현재 owner 쿠키 전체 조회와 lookup/importer의 쓰기도 가능한 장치 API는 Jarvis 전용 최소 읽기 권한과 구분한다.
+
+전용 reader 역할/최소 필드 조회/완전 수집 계약/항목 링크를 v4의 별도 변경 후보로 제안했다. 지금은 구현 승인 전이며 신규 라이브러리·프레임워크·유료 호출·인증 권한 변경을 하지 않았다. 통화 AI 요약을 사실로 표시하지 않도록 Jarvis 출처 종류와 v4 상류 수집 최신성도 후속 보강 대상이다. 상세 근거와 미검증 범위는 `integrations/v4.md`에 기록했다.
+
+## 2026-10-15: 웹 v4·GitHub·시트 연결 준비
+
+기존 main의 미커밋 구현과 최신 디자인을 보존하고 서비스 등록·IndexedDB·설정 화면을 재사용했다. 설치된 Next 16.4.0의 공식 로컬 server/client components·Playwright 안내를 먼저 읽었다. Context7은 현재 제공되지 않는다. 실제 연동보다 서비스 주소 등록과 연결 순서·완료 기준을 이번 범위로 한정한다. 합성 브라우저 테스트로 새 연결 준비 경로 부재를 먼저 확인한 뒤 구현했다.
+
+| 공식 GitHub 후보 / 확인 버전 | 유지보수·호환성·라이선스 | 비용·개인정보·직접 구현 대비 결정 |
+| --- | --- | --- |
+| [vercel/next.js](https://github.com/vercel/next.js) / 설치 16.4.0 | MIT, archived 아님, 2026-10-14 갱신, 기존 React 19.3/Node 24 환경 | 기존 컴포넌트·CSS·폼을 **재사용**. 새 서비스 요금/외부 업무 정보 전송 없음. 등록 안내에 새 프레임워크 이익이 없음 |
+| [octokit/rest.js](https://github.com/octokit/rest.js) / npm @octokit/rest 22.0.1 | MIT, archived 아님, 2026-10-14 갱신, Node >=20으로 현재 Node 24 호환 | 무료 SDK, 연결 시 GitHub API로 허용된 정보/인증 전송. 실제 인증/조회 범위가 결정되지 않아 **보류**. 등록 UI에는 SDK 불필요 |
+| [googleapis/google-api-nodejs-client](https://github.com/googleapis/google-api-nodejs-client) / npm googleapis 186.0.0 | Apache-2.0, archived 아님, 2026-10-14 갱신, Node >=22로 현재 Node 24 호환 | 무료 SDK, 연결 시 Google에 허용 데이터 전송 및 서비스별 API 쿼터 적용. 사용할 시트·권한·열이 미정이므로 **보류**. 현재는 원본 열기만 제공 |
+
+GitHub 공식 API/npm registry의 메타데이터만 조회했으며 설치·외부 스크립트·실제 고객/API 호출은 없다. 새 런타임 의존성과 AI 프레임워크를 추가하지 않았다. 등록 양식은 비밀값을 받지 않으며 읽기/입력 전송/실행을 활성화하지 않는다. 기존 동기화 어댑터는 null이며 가짜 수집·답변·승인·완료 시각을 만들지 않는다. 검증과 GitHub 반영 경계는 TESTING.md와 integrations/github.md에 기록한다.
