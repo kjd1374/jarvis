@@ -70,7 +70,8 @@ export function applyAnalysis(service: Service, analysis: ProjectAnalysis): Serv
   if (analysis.basis !== prior.inspection?.fingerprint || analysis.headSha !== prior.inspection.headSha || prior.job?.phase !== "analyze")
     throw new Error("분석 중 원본이 바뀌었습니다. 현재 자료로 다시 점검해주세요.");
   const old = prior.analysis;
-  const decisions = new Map(old?.suggestions.map(s => [s.id, s]) ?? []);
+  const decisions = new Map([...prior.previousAnalyses, ...(old ? [old] : [])].flatMap(a => a.suggestions)
+    .filter(s => s.state !== "proposed").map(s => [s.id, s]));
   const updated = { ...analysis, suggestions: analysis.suggestions.map(s => {
     const decision = decisions.get(s.id);
     return decision && decision.state !== "proposed" ? { ...s, state: decision.state, taskId: decision.taskId } : s;

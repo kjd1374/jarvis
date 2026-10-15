@@ -271,11 +271,13 @@ function ServicesView({
                 <p className={styles.detailFootnote}>
                   연결 방식:{" "}
                   {service.connector === "shortcut"
-                    ? "웹 바로가기"
+                    ? service.monitoring?.enabled ? "웹 열기 · 구독 CLI GitHub 점검" : "웹 바로가기"
                     : "v4 읽기 연동(준비 중)"}
                   <br />
-                  마지막 정상 수집:{" "}
-                  {service.lastSuccessAt
+                  {service.connector === "shortcut" && service.monitoring?.enabled ? "GitHub 마지막 정상 조회" : "업무 데이터 마지막 정상 수집"}:{" "}
+                  {service.connector === "shortcut" && service.monitoring?.enabled
+                    ? service.monitoring.lastSuccessAt ? dateLabel(service.monitoring.lastSuccessAt) : "조회 기록 없음"
+                    : service.lastSuccessAt
                     ? dateLabel(service.lastSuccessAt)
                     : "수집 기록 없음"}
                 </p>

@@ -56,6 +56,8 @@ test("제안 채택은 한 번만 등록하고 사용자 선택을 재분석 뒤
   const service = { ...data.services[0], monitoring: { ...data.services[0].monitoring!, job: { ...data.services[0].monitoring!.job!, phase: "analyze" as const } } };
   const again = parseAnalysis(data, service, { ...analysisRaw(data.sourceRecords[0].id), summary: "재분석" }, stamp);
   expect(applyAnalysis(service, again).monitoring!.analysis!.suggestions[0].state).toBe("adopted");
+  const absent = { ...service, monitoring: { ...service.monitoring!, previousAnalyses: [service.monitoring!.analysis!], analysis: { ...service.monitoring!.analysis!, suggestions: [] } } };
+  expect(applyAnalysis(absent, again).monitoring!.analysis!.suggestions[0].state).toBe("adopted");
   expect(normalizeWorkspace(data).tasks).toHaveLength(1);
 });
 test("완료 제안은 직접 확인을 요구하고 오류·24시간 경과 시 채택하지 않는다", () => {

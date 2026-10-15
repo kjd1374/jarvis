@@ -27,6 +27,7 @@ test("사실·AI 판단과 제안 채택을 구분하고 새로고침 뒤 중복
   const monitor = page.getByRole("region", { name: "합성 GitHub GitHub 점검" });
   await expect(monitor).toContainText("AI의 판단 · Codex CLI");
   await expect(monitor).toContainText("파일 구조 1개");
+  await expect(page.getByText("GitHub 마지막 정상 조회:", { exact: false })).toBeVisible();
   await monitor.getByText("분석 근거와 확인 범위", { exact: true }).click();
   await expect(monitor.getByRole("link", { name: "README.md" })).toHaveAttribute("href", /github.com\/example\/synthetic\/blob/);
   await monitor.getByRole("button", { name: "할 일로 채택", exact: true }).click();
