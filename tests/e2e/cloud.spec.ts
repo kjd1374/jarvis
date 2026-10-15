@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { test, expect, ready, projectForm, state } from "../support/fixtures";
 import { emptyWorkspace, type Space } from "../../src/lib/workspace/types";
+import { automationWorkspace } from "../support/automation";
 const owner = "11111111-1111-4111-8111-111111111111";
 function fixture() {
   const company = emptyWorkspace(),
@@ -27,7 +28,7 @@ function fixture() {
   };
 }
 async function connect(page: Page, remote = fixture()) {
-  const control = { failWrites: false, loseAcknowledgement: false, puts: 0 };
+  const control = { failWrites: false, loseAcknowledgement: false, puts: 0, collideWrites: 0, holdAck: null as Promise<void> | null };
   await page.route("**/api/account", (route) =>
     route.fulfill({
       json: {
@@ -61,6 +62,11 @@ async function connect(page: Page, remote = fixture()) {
         status: 503,
         json: { error: "합성 서버 연결 실패", code: "save_failed" },
       });
+    if (control.collideWrites > 0) {
+      control.collideWrites--;
+      target.data.projects[0].nextAction = `실행기 새 진행 ${control.puts}`;
+      target.revision++;
+    }
     if (body.revision !== target.revision)
       return route.fulfill({
         status: 409,
@@ -68,6 +74,10 @@ async function connect(page: Page, remote = fixture()) {
       });
     target.data = body.data;
     target.revision++;
+    const savedRevision = target.revision;
+    if (control.holdAck) {
+      const gate = control.holdAck; control.holdAck = null; await gate;
+    }
     if (control.loseAcknowledgement) {
       control.loseAcknowledgement = false;
       return route.fulfill({
@@ -75,7 +85,7 @@ async function connect(page: Page, remote = fixture()) {
         json: { error: "합성 응답 유실", code: "save_failed" },
       });
     }
-    return route.fulfill({ json: { revision: target.revision } });
+    return route.fulfill({ json: { revision: savedRevision } });
   });
   return { remote, control };
 }
@@ -214,7 +224,7 @@ test("응답 유실 뒤에는 서버의 같은 내용을 확인하고 중복 전
   expect(remote.company.data.projects).toHaveLength(2);
 });
 
-test("다른 기기의 변경은 검토와 확인 후 병합하고 이전 브라우저 기록은 자동 이관하지 않는다", async ({
+test("기준본 없는 기존 저장 대기는 검토 후 갱신 중인 서버에 병합하고 이전 브라우저 기록은 자동 이관하지 않는다", async ({
   page,
 }) => {
   await page.goto("/projects");
@@ -230,6 +240,15 @@ test("다른 기기의 변경은 검토와 확인 후 병합하고 이전 브라
       exact: true,
     }),
   ).toHaveCount(0);
+  await page.evaluate(owner => new Promise<void>((resolve, reject) => {
+    const opened = indexedDB.open(`jarvis-workspace-owner-${owner}`, 1);
+    opened.onsuccess = () => {
+      const db = opened.result, tx = db.transaction("workspace", "readwrite"), store = tx.objectStore("workspace");
+      const read = store.get("cloud-sync");
+      read.onsuccess = () => { const sync = read.result; delete sync.bases; store.put(sync, "cloud-sync"); };
+      tx.oncomplete = () => { db.close(); resolve(); }; tx.onerror = () => reject(tx.error);
+    };
+  }), owner);
   remote.company.data.projects[0].description = "다른 기기에서 바꾼 합성 내용";
   remote.company.revision++;
   await create(page, "충돌에도 보존할 합성 프로젝트");
@@ -248,6 +267,8 @@ test("다른 기기의 변경은 검토와 확인 후 병합하고 이전 브라
     }),
   ).toBeDisabled();
   await review.getByLabel("변경 내용과 충돌 처리 기준을 확인했습니다.").check();
+  remote.company.data.projects[0].nextAction = "검토 중 갱신된 서버 진행";
+  remote.company.revision++;
   await review
     .getByRole("button", { name: "충돌은 서버 내용으로 병합", exact: true })
     .click();
@@ -255,6 +276,7 @@ test("다른 기기의 변경은 검토와 확인 후 병합하고 이전 브라
   expect(remote.company.data.projects[0].description).toBe(
     "다른 기기에서 바꾼 합성 내용",
   );
+  expect(remote.company.data.projects[0].nextAction).toBe("검토 중 갱신된 서버 진행");
   await expect(review).not.toBeVisible();
   await page
     .getByRole("button", { name: "이전 브라우저 기록 확인", exact: true })
@@ -269,4 +291,69 @@ test("다른 기기의 변경은 검토와 확인 후 병합하고 이전 브라
     .click();
   await expect.poll(() => remote.company.data.projects.length).toBe(3);
   expect(await state(page)).toEqual(legacy);
+});
+
+test("실행기 갱신과 두 번의 저장 경쟁에도 새 입력·서버 결과·개인 기록을 보존한다", async ({ page }) => {
+  const data = fixture(); data.company.data = automationWorkspace();
+  const { remote, control } = await connect(page, data);
+  await page.goto("/projects"); await ready(page);
+  const personal = structuredClone(remote.personal);
+  remote.company.data.services[0].monitoring!.runnerSeenAt = "2026-10-15T12:30:00Z";
+  remote.company.data.projects[0].currentStatus = "실행기가 기록한 최신 결과";
+  remote.company.revision++;
+  control.collideWrites = 2;
+  await create(page, "동시 갱신 중 새 프로젝트");
+  await expect(page.getByRole("status").filter({ hasText: "서버에 저장됨" })).toBeVisible();
+  expect(control.puts).toBe(3);
+  expect(remote.company.data.projects).toHaveLength(2);
+  expect(remote.company.data.projects[0]).toMatchObject({ currentStatus: "실행기가 기록한 최신 결과", nextAction: "실행기 새 진행 2" });
+  expect(remote.company.data.services[0].monitoring!.runnerSeenAt).toBe("2026-10-15T12:30:00Z");
+  expect(remote.personal).toEqual(personal);
+  await expect(page.getByRole("link", { name: "서버 변경 검토", exact: true })).toHaveCount(0);
+  await page.reload(); await ready(page);
+  await expect(page.getByRole("heading", { name: "동시 갱신 중 새 프로젝트", exact: true })).toBeVisible();
+});
+
+test("실제 같은 필드의 충돌만 검토하고 검토 중 새 편집은 재확인한다", async ({ page }) => {
+  const { remote } = await connect(page);
+  await page.goto("/projects/company-project"); await ready(page);
+  await page.getByRole("button", { name: "프로젝트 수정", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "프로젝트 수정" });
+  await editor.getByLabel("프로젝트 설명", { exact: true }).fill("이 기기의 수정");
+  remote.company.data.projects[0].description = "서버의 동시 수정"; remote.company.revision++;
+  await editor.getByRole("button", { name: "변경 저장", exact: true }).click();
+  await page.getByRole("link", { name: "서버 변경 검토", exact: true }).click();
+  const review = page.getByRole("region", { name: "서버 변경 충돌 검토", exact: true });
+  await expect(review).toContainText("검토할 내용 충돌 1곳");
+  await review.getByLabel("변경 내용과 충돌 처리 기준을 확인했습니다.").check();
+  remote.company.data.projects[0].description = "검토 이후 다시 수정"; remote.company.revision++;
+  await review.getByRole("button", { name: "충돌은 이 기기 내용으로 병합", exact: true }).click();
+  await expect(review.getByLabel("변경 내용과 충돌 처리 기준을 확인했습니다.")).not.toBeChecked();
+  expect(remote.company.data.projects[0].description).toBe("검토 이후 다시 수정");
+  await review.getByLabel("변경 내용과 충돌 처리 기준을 확인했습니다.").check();
+  remote.company.data.projects[0].currentStatus = "동시에 도착한 결과"; remote.company.revision++;
+  await review.getByRole("button", { name: "충돌은 이 기기 내용으로 병합", exact: true }).click();
+  await expect(review).not.toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "서버에 저장됨" })).toBeVisible();
+  expect(remote.company.data.projects[0]).toMatchObject({ description: "이 기기의 수정", currentStatus: "동시에 도착한 결과" });
+});
+
+test("저장 응답을 기다리는 동안 추가한 입력과 새 서버 결과도 마지막에 함께 저장된다", async ({ page }) => {
+  const { remote, control } = await connect(page);
+  await page.goto("/projects"); await ready(page);
+  let release!: () => void;
+  control.holdAck = new Promise<void>(resolve => { release = resolve; });
+  await create(page, "응답 대기 중 첫 입력");
+  await expect.poll(() => remote.company.data.projects.length).toBe(2);
+  await create(page, "응답 대기 중 둘째 입력");
+  remote.company.data.projects[0].currentStatus = "응답 중 도착한 서버 결과"; remote.company.revision++;
+  release();
+  await expect(page.getByRole("status").filter({ hasText: "서버에 저장됨" })).toBeVisible();
+  expect(remote.company.data.projects).toHaveLength(3);
+  expect(remote.company.data.projects[0].currentStatus).toBe("응답 중 도착한 서버 결과");
+  await expect(page.getByRole("heading", { name: "응답 대기 중 둘째 입력", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "서버 변경 검토", exact: true })).toHaveCount(0);
+  await page.reload(); await ready(page);
+  await expect(page.getByRole("heading", { name: "응답 대기 중 첫 입력", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "응답 대기 중 둘째 입력", exact: true })).toBeVisible();
 });

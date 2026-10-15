@@ -1,18 +1,21 @@
 "use client";
 import { useState } from "react";
+import type { CloudConflict } from "@/lib/cloud/persistence";
 import { useWorkspace } from "./workspace-provider";
 import { spaceLabels } from "@/lib/workspace/types";
-import { mergeWorkspace } from "@/lib/workspace/transfer";
+import { mergeCloudWorkspace } from "@/lib/cloud/merge";
 import styles from "./studio.module.css";
 export function CloudConflictReview() {
   const { conflict, resolveConflict } = useWorkspace();
+  return conflict ? <ConflictReview key={conflict.reviewId} conflict={conflict} resolveConflict={resolveConflict} /> : null;
+}
+function ConflictReview({ conflict, resolveConflict }: { conflict: CloudConflict; resolveConflict: (preferLocal: boolean) => Promise<void> }) {
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  if (!conflict) return null;
   let counts;
   try {
-    counts = mergeWorkspace(conflict.local, conflict.remote.data);
+    counts = mergeCloudWorkspace(conflict.base, conflict.local, conflict.remote.data);
   } catch {
     /* Invalid cross-scope data must not be merged. */
   }
@@ -39,12 +42,12 @@ export function CloudConflictReview() {
       <h2>{spaceLabels[conflict.space]} 기록의 서버 변경 검토</h2>
       <p>
         서버 버전 {conflict.remote.revision}과 이 기기의 저장 대기가 다릅니다.
-        양쪽 기록은 유지했습니다. 서로 다른 항목은 함께 보관하고, 같은 ID의
-        충돌은 아래 선택으로 처리합니다.
+        양쪽 기록은 유지했습니다. 서로 다른 변경은 함께 보관하고, 같은 내용을
+        양쪽에서 수정한 경우에만 아래 선택을 적용합니다. 실행 상태·결과는 서버의 최신 기록을 유지합니다.
       </p>
       {counts ? (
         <p>
-          새 항목 {counts.added}개 · 내용 충돌 {counts.conflicts}개
+          검토할 내용 충돌 {counts.conflicts.length}곳
         </p>
       ) : (
         <p role="alert">

@@ -59,10 +59,11 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const channel = useRef<BroadcastChannel | null>(null);
   const generation = useRef(0);
   const syncing = useRef(false);
+  const conflictRef = useRef<CloudConflict | null>(null);
 
   const retryCloud = useCallback(async function flush(): Promise<void> {
     const accountId = accountRef.current?.accountId;
-    if (!accountId || !accountRef.current?.authenticated || syncing.current)
+    if (!accountId || !accountRef.current?.authenticated || syncing.current || conflictRef.current)
       return;
     syncing.current = true;
     setSyncStatus("saving");
@@ -74,9 +75,13 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
         if (accountRef.current?.accountId === accountId) setData(value);
       }
       await flushCloud(accountId);
+      const saved = await readCloudLocal(accountId);
       if (accountRef.current?.accountId === accountId) {
+        generation.current++;
+        setData(saved.data);
         setSyncStatus("saved");
         setError(null);
+        conflictRef.current = null;
         setConflict(null);
       }
     } catch (e) {
@@ -88,6 +93,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
         setLoadAttempt((n) => n + 1);
       }
       if (e instanceof CloudConflict) {
+        conflictRef.current = e;
         setConflict(e);
         setSyncStatus("conflict");
       } else setSyncStatus("error");
@@ -114,6 +120,10 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       try {
         let status = await accountStatus();
         if (!current()) return;
+        if (accountRef.current?.accountId !== status.accountId) {
+          conflictRef.current = null;
+          setConflict(null);
+        }
         accountRef.current = status;
         setAccount(status);
         if (
@@ -129,6 +139,8 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
         accountRef.current = status;
         setAccount(status);
         if (status.enabled && (!status.authenticated || !status.accountId)) {
+          conflictRef.current = null;
+          setConflict(null);
           setStorageAccount(null);
           setData(emptyWorkspace());
           setReady(false);
@@ -148,13 +160,15 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
         if (!current()) return;
         setData(value);
         setReady(true);
-        setError(null);
+        if (!conflictRef.current) setError(null);
         if (accountId) {
           const local = await readCloudLocal(accountId);
           if (!current()) return;
           const dirty = Object.values(local.sync.dirty).some((n) => n !== null);
-          setSyncStatus(dirty ? "waiting" : "saved");
-          if (dirty) void retryCloud();
+          if (!conflictRef.current) {
+            setSyncStatus(dirty ? "waiting" : "saved");
+            if (dirty) void retryCloud();
+          }
         } else setSyncStatus("local");
       } catch (e) {
         if (!current()) return;
@@ -197,35 +211,45 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!account?.authenticated || !monitoringActive) return;
     const timer = setInterval(() => {
-      if (document.visibilityState === "visible") setLoadAttempt(n => n + 1);
+      if (document.visibilityState === "visible" && !conflictRef.current) setLoadAttempt(n => n + 1);
     }, 30_000);
     return () => clearInterval(timer);
   }, [account?.authenticated, monitoringActive]);
 
   function retryLoad() {
-    setError(null);
+    if (!conflictRef.current) setError(null);
     setLoadAttempt((n) => n + 1);
   }
   async function resolveConflict(preferLocal: boolean) {
     const accountId = accountRef.current?.accountId;
     if (!accountId || !conflict) return;
+    if (syncing.current) throw new Error("저장이 진행 중입니다. 잠시 후 다시 시도해주세요.");
+    syncing.current = true;
     try {
       const value = await resolveCloudConflict(
         accountId,
         conflict,
         preferLocal,
       );
+      if (accountRef.current?.accountId !== accountId) return;
+      generation.current++;
       setData(value);
+      conflictRef.current = null;
       setConflict(null);
       setError(null);
-      await retryCloud();
     } catch (e) {
-      if (e instanceof CloudConflict) setConflict(e);
+      if (accountRef.current?.accountId !== accountId) return;
+      if (e instanceof CloudConflict) {
+        conflictRef.current = e;
+        setConflict(e);
+        setSyncStatus("conflict");
+      }
       setError(
         e instanceof Error ? e.message : "병합 내용을 다시 확인해주세요.",
       );
       throw e;
-    }
+    } finally { syncing.current = false; }
+    await retryCloud();
   }
   async function mutate(
     transform: (data: WorkspaceData) => WorkspaceData,
