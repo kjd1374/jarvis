@@ -587,7 +587,7 @@ try {
         .click();
       await page.getByRole("button", { name: "회사", exact: true }).waitFor();
       await page.goto(base);
-      await page.getByText("합성 회사 결과 수정됨", { exact: true }).waitFor();
+      await page.getByText(label === "device-a" ? "합성 회사 결과 수정됨" : "동시 변경에도 보존할 새 메모", { exact: true }).waitFor();
       assert.equal(
         await page.getByText("합성 개인 전용 비밀", { exact: true }).count(),
         0,
@@ -623,6 +623,19 @@ try {
         recordCheck(
           "real browser device session automatically saves records visible from a separate approved device",
         );
+        const concurrent = structuredClone(written.body.data);
+        concurrent.notes.push({ ...concurrent.notes.find(n => n.id === "company-note"), id: "concurrent-note", content: "다른 기기의 동시 저장 결과", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+        const concurrentSave = await api("/api/workspace", a.secondToken, "PUT", { space: "company", revision: written.body.revision, data: concurrent });
+        assert.equal(concurrentSave.status, 200);
+        await page.getByLabel("빠른 메모 내용").fill("동시 변경에도 보존할 새 메모");
+        await page.getByRole("button", { name: "메모 저장", exact: true }).click();
+        await page.getByRole("status").filter({ hasText: "서버에 저장됨" }).waitFor();
+        assert.equal(await page.getByRole("link", { name: "서버 변경 검토", exact: true }).count(), 0);
+        const combined = await api("/api/workspace?space=company", a.secondToken);
+        assert.equal(combined.body.data.notes.find(n => n.id === "concurrent-note").content, "다른 기기의 동시 저장 결과");
+        assert(combined.body.data.notes.some(n => n.content === "동시 변경에도 보존할 새 메모"));
+        await page.getByText("다른 기기의 동시 저장 결과", { exact: true }).waitFor();
+        recordCheck("real CAS persistence merges concurrent browser input and another approved device's edit without losing either change");
         await page.goto(base + "/library");
         await page
           .getByRole("button", { name: "자료 추가", exact: true })

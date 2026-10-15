@@ -5,6 +5,7 @@ export type SyncState = {
   revisions: Record<Space, number>;
   dirty: Record<Space, number | null>;
   uploadedFiles: string[];
+  bases?: Partial<Record<Space, WorkspaceData>>;
 };
 export const emptySync = (): SyncState => ({
   sequence: 0,
