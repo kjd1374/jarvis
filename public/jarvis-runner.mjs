@@ -8,7 +8,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-export const VERSION = "2.0.0";
+export const VERSION = "2.0.1";
 export class RunnerError extends Error {
   constructor(code) { super(code); this.code = code; }
 }
@@ -370,6 +370,7 @@ export async function runCodexWork(job, cwd, controlDir, { run = runCommand, sig
     "Do not access files outside the checkout, credentials, private user/customer data, other repositories or services. Do not open .env, auth, uploads, backups or conversation files.",
     "Never run git commit/push/merge, gh, deployment commands, database migrations, network requests, browser/session access or modify authentication/access policies. The runner handles authorized publishing separately.",
     "Do not change .git, .github/workflows, .codex, AGENTS.md or CI/security policy. Do not install packages or run install hooks. Do not weaken checks, disable tests or fabricate completion.",
+    "runnerPreparation.checks records the runner's actual dependency preparation. Explain failed or skipped preparation separately from checks you ran. A preparation failure does not mean the host CLI is disconnected. Do not claim unexecuted checks passed.",
     job.mode === "ask" ? "Answer the user's question using this repository. Do not edit files or execute project scripts." : "Implement the requested code changes in this checkout. Inspect code before editing, make minimal changes and preserve unrelated behavior. You may run relevant local checks within the sandbox. Dependency installation is handled separately. If scope/credentials/data are missing or the requested change is not completed, set blocked=true, explain the blocker and record a follow-up. Set blocked=false only when the request was fulfilled within the allowed scope.",
     "Your final reply must describe what you actually did, limitations and next steps. Avoid claiming GitHub publication, CI success, merge or deployment: those are observed by the runner after you finish. Follow-ups are recorded as Jarvis tasks, not automatically executed. Keep followUps <= 10; title <= 160, reason <= 2000; reply <= 8000, summary <= 4000, currentStatus/nextAction <= 2000 characters.",
   ].join("\n");
@@ -391,6 +392,20 @@ export function allowedWorkPath(path) {
   return !/(?:^|\/)(?:[^/]*\.)?env(?:\.|$)|secret|credential|auth\.json|(?:token|password)[^/]*\.(?:json|txt|ya?ml)|\.(?:pem|key|p12|csv|sqlite|db)$/i.test(path);
 }
 const wait = ms => new Promise(r => setTimeout(r, ms));
+function dependencyFailureDetail(install) {
+  const output = `${install.err ?? ""}\n${install.out ?? ""}`;
+  if (/double-loading config/i.test(output)) return "npm 설정 파일 중복으로 설치를 시작하지 못했습니다. 실행기를 업데이트한 뒤 새 요청을 보내세요.";
+  const code = output.match(/npm (?:error|ERR!) code ([A-Z][A-Z0-9_]{1,40})\b/)?.[1];
+  // Report only known categories, never raw npm logs, local paths or credentials.
+  const reasons = {
+    EAI_AGAIN: "레지스트리 주소 조회 실패", ENOTFOUND: "레지스트리 주소 조회 실패", ECONNREFUSED: "레지스트리 연결 실패", ETIMEDOUT: "레지스트리 연결 시간 초과",
+    EACCES: "설치 폴더 접근 권한 부족", EPERM: "설치 폴더 접근 권한 부족", EBADENGINE: "Node/npm 버전 조건 불일치",
+    EUSAGE: "package.json과 잠금 파일 또는 npm 실행 조건 확인 필요", EINTEGRITY: "패키지 무결성 검사 실패",
+    E401: "패키지 인증 필요", E403: "패키지 접근 거부", CERT_HAS_EXPIRED: "레지스트리 인증서 확인 실패", UNABLE_TO_VERIFY_LEAF_SIGNATURE: "레지스트리 인증서 확인 실패", SELF_SIGNED_CERT_IN_CHAIN: "레지스트리 인증서 확인 실패",
+  };
+  const reason = Object.hasOwn(reasons, code) ? `${reasons[code]} (${code})` : `npm 실행 실패 (종료 코드 ${Number.isInteger(install.code) ? install.code : "확인 불가"})`;
+  return `의존성 준비 실패: ${reason}. 의존성이 필요한 로컬 검사는 완료로 판단할 수 없습니다.`;
+}
 export async function executeProjectWork(client, job, { stateDir, run = runCommand, model = runCodexWork, get = githubGet, delay = wait, log = console.log } = {}) {
   if (!stateDir || !/^[a-f0-9-]{36}$/.test(job.id) || !/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/.test(job.repository) || job.repository.includes("..") || !["ask", "change"].includes(job.mode) || !["pr", "merge"].includes(job.publish)) throw new RunnerError("invalid_work_scope");
   const identity = { space: job.space, projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken };
@@ -462,8 +477,12 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
         const packages = Object.values(lock.packages ?? {});
         const permitted = packages.length > 0 && packages.every(p => !p.resolved || typeof p.resolved === "string" && /^https:\/\/registry\.npmjs\.org\//.test(p.resolved));
         if (permitted) {
-          const install = await run("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd, env: { ...cliEnv, NPM_CONFIG_USERCONFIG: "/dev/null", NPM_CONFIG_GLOBALCONFIG: "/dev/null" }, signal: abort.signal, timeout: 180_000 });
-          checks.push({ name: "의존성 준비", status: install.code === 0 ? "passed" : "failed", detail: install.code === 0 ? "잠금 파일 기준 설치 · 설치 스크립트 비활성" : "의존성 설치 실패. 로컬 검사 실행 범위를 확인해야 합니다." });
+          // npm rejects loading one path as both user and global config, even /dev/null.
+          const userConfig = join(directory, "npm-user.config"), globalConfig = join(directory, "npm-global.config");
+          await writeFile(userConfig, "", { mode: 0o600 });
+          await writeFile(globalConfig, "", { mode: 0o600 });
+          const install = await run("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd, env: { ...cliEnv, NPM_CONFIG_USERCONFIG: userConfig, NPM_CONFIG_GLOBALCONFIG: globalConfig }, signal: abort.signal, timeout: 180_000 });
+          checks.push({ name: "의존성 준비", status: install.code === 0 ? "passed" : "failed", detail: install.code === 0 ? "잠금 파일 기준 설치 · 설치 스크립트 비활성" : dependencyFailureDetail(install) });
         } else checks.push({ name: "의존성 준비", status: "not_run", detail: "일반 npm 레지스트리 외의 의존성이 있어 자동 설치하지 않았습니다." });
       }
       journal.dependenciesChecked = true; journal.checks = checks; await save();
@@ -476,7 +495,8 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
       }
       if (!journal.model) {
         journal.modelStarted = true; journal.modelAttempt = job.attempt ?? 1; await save();
-        journal.model = validModelWork(await model(job, cwd, directory, { run, signal: abort.signal }));
+        const modelJob = { ...job, context: { ...job.context, runnerPreparation: { checks: checks.map(check => ({ ...check })) } } };
+        journal.model = validModelWork(await model(modelJob, cwd, directory, { run, signal: abort.signal }));
       }
       await save();
     }
@@ -592,6 +612,7 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
 }
 
 export async function main(argv = process.argv.slice(2)) {
+  if (argv.includes("--version")) { console.log(VERSION); return; }
   if (argv.includes("--help")) {
     console.log("Jarvis private CLI runner\nnode jarvis-runner.mjs --config /path/to/jarvis-runner.json [--once]\nNode 24+, gh auth login, codex login(ChatGPT) 필요. 기기 확인 번호는 비밀값이 아닙니다.\n프로젝트 요청에 따라 격리된 코드 수정·검증·PR/선택한 병합을 수행합니다. API 키 과금 자동 전환 없음. 중단은 Ctrl+C."); return;
   }
@@ -627,7 +648,7 @@ export async function main(argv = process.argv.slice(2)) {
     if (argv.includes("--once")) return;
     while (!account.authenticated) { await new Promise(r => setTimeout(r, 15_000)); account = await resilientRequest("/api/account"); }
   }
-  console.log("Jarvis 실행기 연결됨 · 선택한 영역/프로젝트만 점검합니다. 구독 사용 한도가 적용됩니다.");
+  console.log(`Jarvis 실행기 ${VERSION} 연결됨 · 선택한 영역/프로젝트만 점검합니다. 구독 사용 한도가 적용됩니다.`);
   do {
     for (const scope of config.scopes) {
       const claimed = await resilientRequest("/api/automation/claim", { ...scope, provider: config.provider, workVersion: 1 });
