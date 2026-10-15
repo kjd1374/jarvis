@@ -18,6 +18,7 @@ test("프로젝트 요청은 원자적으로 저장되며 같은 제출을 중�
 test("작업 임대는 영역·저장소·기기·토큰을 묶고 중단된 쓰기를 자동 재실행하지 않는다", () => {
   expect(claimProjectWork(queued(), { ...scope, space: "personal" }, stamp).job).toBeNull();
   const claim = claimProjectWork(queued(), scope, stamp), job = claim.job!;
+  expect(job.context.executionContext).toMatchObject({ jarvisRunner: { connectedAt: stamp, provider: "codex", space: "company", projectId: "auto-project" }, targetRepository: "example/synthetic" });
   const body = { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "heartbeat" };
   expect(claimProjectWork(claim.data, scope, stamp).job).toBeNull();
   expect(() => reportProjectWork(claim.data, "company", body, "another-device", stamp)).toThrow();

@@ -100,3 +100,9 @@ export async function seed(page: Page, data: WorkspaceData) {
   await page.reload();
   await ready(page);
 }
+
+export async function openDetails(page: Page, title: string) {
+  const summary = page.locator("summary").filter({ hasText: title }).first();
+  await expect(summary).toBeVisible();
+  if (await summary.locator("..").getAttribute("open") === null) await summary.click();
+}

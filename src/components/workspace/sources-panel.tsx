@@ -12,7 +12,7 @@ import { useWorkspace } from "./workspace-provider";
 import { Icon } from "./icon";
 import styles from "./studio.module.css";
 
-export function EvidenceList({ sources }: { sources: Evidence[] }) {
+export function EvidenceList({ sources, compact = false }: { sources: Evidence[]; compact?: boolean }) {
   const { data, saving, mutate } = useWorkspace();
   const pending = useRef(false);
   const [error, setError] = useState("");
@@ -81,6 +81,9 @@ export function EvidenceList({ sources }: { sources: Evidence[] }) {
           </div>
           <h3>{source.title}</h3>
           {source.status && <small>원본 상태: {source.status}</small>}
+          {compact ? <details className={styles.revisionDetails}>
+            <summary>원문 내용 보기</summary><p>{source.content}</p>
+          </details> : <>
           <p>
             {source.content.length > 600
               ? `${source.content.slice(0, 300)}…`
@@ -92,6 +95,7 @@ export function EvidenceList({ sources }: { sources: Evidence[] }) {
               <p>{source.content}</p>
             </details>
           )}
+          </>}
           <footer>
             {source.serviceName && <strong>{source.serviceName} · </strong>}원본
             변경 {dateLabel(source.updatedAt)} ·{" "}
@@ -127,7 +131,7 @@ export function EvidenceList({ sources }: { sources: Evidence[] }) {
     </div>
   );
 }
-export function SourceResults({ projectId }: { projectId?: string }) {
+export function SourceResults({ projectId, compact = false }: { projectId?: string; compact?: boolean }) {
   const { data } = useWorkspace();
   const scope = { space: data.activeSpace, projectId, query: "" };
   const results = searchWorkspace(data, { ...scope, kinds: ["fact"] }).slice(
@@ -146,7 +150,7 @@ export function SourceResults({ projectId }: { projectId?: string }) {
         <span>출처 자료 기준</span>
       </div>
       {results.length ? (
-        <EvidenceList sources={results} />
+        <EvidenceList sources={results} compact={compact} />
       ) : (
         <div className={styles.detailEmpty}>
           <p>

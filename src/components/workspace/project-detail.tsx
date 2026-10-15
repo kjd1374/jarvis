@@ -201,7 +201,9 @@ function ProjectView({ project }: { project: Project }) {
       )}
       <ProjectAgent project={project} />
       <ProjectAutomaticResults project={project} />
-      <div className={styles.projectDetailGrid}>
+      <details className={styles.projectDisclosure}>
+        <summary>프로젝트 정보·연결 <span>목표와 서비스 관리</span></summary>
+        <div className={styles.projectDetailGrid}>
         <section
           className={`${styles.detailSection} ${styles.projectOverview}`}
           aria-label="프로젝트 개요"
@@ -274,7 +276,11 @@ function ProjectView({ project }: { project: Project }) {
             </details>
           )}
         </ServicesPanel>
-        <SourceResults projectId={project.id} />
+        </div>
+      </details>
+      <details className={styles.projectDisclosure}>
+        <summary>업무·메모·기록 <span>남은 업무 {tasks.length - done} · 결정 필요 {decisions.length}</span></summary>
+        <div className={styles.projectDetailGrid}>
         <section className={styles.detailSection} aria-label="프로젝트 업무">
           <div className={styles.detailHeading}>
             <h2>
@@ -459,13 +465,15 @@ function ProjectView({ project }: { project: Project }) {
         </section>
       </div>
       <div className={styles.homeSection}>
-        <RequestsPanel projectId={project.id} />
-      </div>
-      <div className={styles.homeSection}>
         <NotesPanel projectId={project.id} />
       </div>
-      <details className={styles.homeDetails}>
-        <summary>이 프로젝트 자료 검색 · AI 질문</summary>
+      <div className={styles.homeSection}>
+        <RequestsPanel projectId={project.id} />
+      </div>
+      </details>
+      <details className={styles.projectDisclosure}>
+        <summary>수집 자료·근거 <span>원문과 검색</span></summary>
+        <SourceResults projectId={project.id} compact />
         <SourcesPanel projectId={project.id} />
       </details>
       {editing && (

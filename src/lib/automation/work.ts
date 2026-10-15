@@ -97,7 +97,11 @@ export function claimProjectWork(data: WorkspaceData, scope: { space: Space; pro
       const history = turns.filter(t => t.status === "completed" && t.repository === turn.repository).slice(-6).map(t => ({ request: t.request, reply: t.result?.reply, prUrl: t.result?.prUrl }));
       return { data: current, job: { kind: "work", id: turn.id, space: project.space, projectId: project.id, serviceId: service.id, repository: turn.repository,
         provider: "codex", leaseToken: claimed.leaseToken, attempt: claimed.attempt, request: turn.request, mode: turn.mode, publish: turn.publish,
-        context: { project: { name: project.name, description: project.description }, history,
+        context: { executionContext: {
+          jarvisRunner: { connectedAt: stamp, provider: "codex", projectId: project.id, space: project.space },
+          targetRepository: turn.repository,
+          connectionScope: "이 요청은 승인된 Jarvis 실행기가 가져왔다. 실행기 연결과 대상 저장소 앱 내부 Codex/Claude 연동은 별개다. 앱에 어댑터가 없거나 격리 작업 폴더에서 CLI/네트워크를 사용할 수 없는 것은 호스트 실행기 미연결의 근거가 아니다. 호스트의 다른 공급자 로그인·연결 상태는 미확인이다.",
+        }, project: { name: project.name, description: project.description }, history,
           tasks: current.tasks.filter(t => t.projectId === project.id && t.space === project.space).slice(-50).map(t => ({ title: t.title, status: t.status })) } } };
     }
   }

@@ -336,7 +336,7 @@ function ServicesView({
                 <p className={styles.detailFootnote}>
                   {repositoryFor(service) ? "웹 주소와 프로젝트 내용을 CLI로 자동 점검합니다. 코드 수정은 프로젝트 상단 AI 작업실에서 요청하세요." : "서비스 열기는 웹 주소를 엽니다. 이 서비스의 업무 데이터 읽기·쓰기는 별도 연결이 필요합니다."}
                 </p>
-                <GitHubMonitor service={service} />
+                {repositoryFor(service) && <details className={styles.compactDisclosure}><summary>GitHub 점검·분석 상세</summary><GitHubMonitor service={service} /></details>}
                 <details className={styles.revisionDetails}>
                   <summary>동기화 상세 기록</summary>
                   <p>

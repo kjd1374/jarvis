@@ -837,6 +837,8 @@ try {
   const identity = { space: "company", serviceId: autoService.id, jobId: "synthetic-job-1" };
   assert.equal((await api("/api/automation/heartbeat", loser, "POST", identity)).status, 409);
   assert.equal((await api("/api/automation/heartbeat", winner, "POST", identity)).status, 200);
+  const afterHeartbeat = await api("/api/workspace?space=company", winner);
+  assert(Date.now() - Date.parse(afterHeartbeat.body.data.services.find(s => s.id === autoService.id).monitoring.runnerSeenAt) < 30_000);
   const githubFacts = { items: [{ externalId: "github:example/synthetic:file:README.md", title: "README.md", content: "합성 검증 근거", status: "reviewed", sourceUrl: `https://github.com/example/synthetic/blob/${autoHead}/README.md`, sourceUpdatedAt: autoStamp }], deletedIds: [], unchangedIds: [],
     inspection: { repository: "example/synthetic", branch: "main", headSha: autoHead, filesTotal: 1, treeComplete: true, excludedFiles: 0, reviewedPaths: ["README.md"], fileShas: { "README.md": autoHead }, limitations: ["합성 서버 전송 테스트"] } };
   assert.equal((await api("/api/automation/report", winner, "POST", { ...identity, phase: "facts", result: { ...githubFacts, items: [{ ...githubFacts.items[0], sourceUrl: "https://github.com/other/private" }] } })).status, 400);

@@ -12,7 +12,7 @@ export async function POST(request: Request) {
       if (!service) throw new CloudError(404, "service_missing", "이 영역의 연결을 찾을 수 없습니다.");
       try { requireLease(service, body.jobId, deviceId, stamp); }
       catch { throw new CloudError(409, "stale_job", "실행 요청이 만료되었습니다."); }
-      return { data: { ...data, services: data.services.map(s => s.id === service.id ? { ...s, monitoring: { ...s.monitoring!, job: { ...s.monitoring!.job!,
+      return { data: { ...data, services: data.services.map(s => s.id === service.id ? { ...s, monitoring: { ...s.monitoring!, runnerSeenAt: stamp, job: { ...s.monitoring!.job!,
         leaseUntil: new Date(Date.parse(stamp) + 10 * 60_000).toISOString() } } } : s) }, result: { alive: true } };
     }));
   } catch (error) { return failure(error); }

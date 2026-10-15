@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, type Page } from "@playwright/test";
-import { test, expect, ready, state, projectForm } from "../support/fixtures";
+import { test, expect, openDetails, ready, state, projectForm } from "../support/fixtures";
 
 const message = "합성 회사 프로젝트의 다음 기획을 정리한다";
 
@@ -764,6 +764,7 @@ test("프로젝트 상세는 다른 프로젝트의 업무·맥락·자료·대�
   await page.goto(`/projects/${a.id}`);
   await expect(page.locator("h1")).toHaveText(a.name);
   await expect(page.getByLabel("프로젝트 범위")).toHaveValue(a.id);
+  await openDetails(page, "업무·메모·기록");
   for (const [section, own, other] of [
     ["프로젝트 업무", "합성 업무 A", "합성 업무 B"],
     ["프로젝트 자료", "합성 자료 A.txt", "합성 자료 B.txt"],
@@ -796,6 +797,7 @@ test("프로젝트 상세는 다른 프로젝트의 업무·맥락·자료·대�
   await page
     .getByRole("link", { name: `${a.name}로 돌아가기`, exact: true })
     .click();
+  await openDetails(page, "업무·메모·기록");
   await page.getByRole("button", { name: "자료 관리", exact: true }).click();
   await expect(page).toHaveURL("/library");
   await expect(
@@ -844,6 +846,7 @@ test("프로젝트 수정 오류는 입력과 기존 연결을 보존하고 영�
   expect((await state(page))!.projects[0]).toEqual(original);
   await editor.getByRole("button", { name: "변경 저장", exact: true }).click();
   await expect(editor).not.toBeVisible();
+  await openDetails(page, "프로젝트 정보·연결");
   await page.getByRole("button", { name: "서비스 등록", exact: true }).click();
   const connection = page.getByRole("dialog", { name: "서비스 등록", exact: true });
   await connection.getByLabel("서비스 이름", { exact: true }).fill("합성 수정 서비스");
@@ -868,6 +871,7 @@ test("프로젝트 수정 오류는 입력과 기존 연결을 보존하고 영�
   await expect(connection).not.toBeVisible();
   await page.reload();
   await expect(page.locator("h1")).toHaveText("합성 수정 후 프로젝트");
+  await openDetails(page, "프로젝트 정보·연결");
   await expect(page.getByRole("link", { name: "합성 수정 서비스 서비스 열기", exact: true })).toHaveAttribute("href", "http://localhost:8765/");
   expect((await state(page))!.projects[0]).toMatchObject({ id: original.id, name: "합성 수정 후 프로젝트" });
   expect((await state(page))!.services[0]).toMatchObject({ projectId: original.id, repositoryUrl: "https://github.com/example/synthetic-repository", webUrl: "http://localhost:8765/" });

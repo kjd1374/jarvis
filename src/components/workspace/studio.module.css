@@ -2367,22 +2367,28 @@
 .projectAgent { margin: 24px 0; border-color: rgba(139, 141, 255, .45); }
 .agentConnection { padding: 12px 16px; border: 1px solid var(--line, #33435d); border-radius: 10px; font-size: 13px; line-height: 1.8; }
 .agentConnection a { color: #b5baff; white-space: nowrap; }
-.agentMessages { display: grid; gap: 18px; max-height: 560px; overflow-y: auto; margin: 22px 0; }
-.agentTurn { border-bottom: 1px solid #28354b; padding-bottom: 18px; min-width: 0; }
+.agentLatest { margin: 16px 0 0; padding-top: 16px; border-top: 1px solid #2b3952; }
+.agentHistory { display: grid; gap: 16px; max-height: 60vh; overflow-y: auto; padding: 12px 0; }
+.agentTurn { min-width: 0; }
+.agentTurn .detailHeading { margin-bottom: 8px; font-size: 13px; }
+.agentHistory .agentTurn { border-bottom: 1px solid #28354b; padding-bottom: 12px; }
 .agentText { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
-.agentReply { background: #0f192a; border-left: 3px solid #7976eb; border-radius: 8px; padding: 18px; margin-top: 12px; line-height: 1.7; }
+.agentReply { background: #0f192a; border-left: 3px solid #7976eb; border-radius: 8px; padding: 12px 14px; margin-top: 8px; line-height: 1.7; font-size: 13px; }
 .agentReply a { display: inline-block; margin: 8px 20px 0 0; color: #b5baff; }
-.agentComposer { display: grid; gap: 12px; margin-top: 22px; }
+.agentComposer { display: grid; gap: 8px; margin-top: 16px; }
+.agentComposer .detailFootnote { margin-top: 0; }
+.agentTurnActions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
+.agentTurnActions > span { font-size: 11px; color: #9baecb; }
 .agentComposer > label { font-size: 13px; color: #c2cce1; }
-.agentComposer textarea { width: 100%; box-sizing: border-box; resize: vertical; padding: 16px; border: 1px solid #465575; border-radius: 12px; background: #0d1625; color: #eef2ff; font: inherit; line-height: 1.6; }
+.agentComposer textarea { width: 100%; box-sizing: border-box; resize: vertical; max-height: 240px; padding: 12px; border: 1px solid #465575; border-radius: 12px; background: #0d1625; color: #eef2ff; font: inherit; line-height: 1.6; }
 .agentComposer textarea:focus { outline: 2px solid #8b8dff; outline-offset: 2px; }
 .agentComposerActions { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
 .agentComposerActions label { display: grid; gap: 6px; max-width: 100%; min-width: 0; font-size: 12px; color: #bac8df; }
 .agentComposerActions select { max-width: 100%; min-width: 0; border: 1px solid #3c4c68; border-radius: 8px; background: #162138; color: #eef2ff; padding: 11px; font: inherit; }
 .agentComposerActions button { margin-left: auto; }
-.automaticResults { margin: 28px 0 38px; }
-.automaticResults h3 { margin: 0 0 16px; font-size: 16px; }
-.automaticResults p, .automaticResults li { line-height: 1.8; overflow-wrap: anywhere; }
+.automaticResults { margin: 18px 0; }
+
+.automaticResults p, .automaticResults li { line-height: 1.7; overflow-wrap: anywhere; font-size: 13px; }
 .automaticResults ul { padding-left: 20px; }
 .automaticResults a { color: #b5baff; }
 @media (max-width: 600px) {
@@ -2391,3 +2397,39 @@
   .agentComposerActions button { width: 100%; margin-left: 0; }
   .agentReply { padding: 12px; }
 }
+
+/* Keep routine project work short; saved detail opens only on demand. */
+.projectAgent > .detailHeading, .automaticResults > .detailHeading { margin-bottom: 12px; }
+.projectAgent .agentText { font-size: 13px; line-height: 1.7; }
+.projectDisclosure { margin-top: 12px; border: 1px solid #2e3d59; border-radius: 12px; background: #121b2b; min-width: 0; }
+.projectDisclosure > summary, .compactDisclosure > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; gap: 10px; color: #d2ddf4; font-size: 13px; overflow-wrap: anywhere; list-style: none; }
+.projectDisclosure > summary { padding: 10px 18px; }
+.projectDisclosure > summary::-webkit-details-marker, .compactDisclosure > summary::-webkit-details-marker, .briefText > summary::-webkit-details-marker { display: none; }
+.projectDisclosure > summary::before, .compactDisclosure > summary::before { content: "›"; color: #ada9ef; font-size: 20px; flex: 0 0 auto; }
+.projectDisclosure[open] > summary::before, .compactDisclosure[open] > summary::before { transform: rotate(90deg); }
+.projectDisclosure > summary > span, .compactDisclosure > summary > span { margin-left: auto; color: #a9b9d5; font-size: 11px; text-align: right; }
+.projectDisclosure[open] > summary { border-bottom: 1px solid #2e3d59; }
+.projectDisclosure > :not(summary) { margin: 14px; }
+.compactDisclosure { min-width: 0; border-top: 1px solid #2b3952; margin-top: 10px; }
+.compactDisclosure > section { padding: 6px 0 12px; }
+.resultDisclosures { margin-top: 14px; }
+.resultDisclosures > .compactDisclosure { margin-top: 0; }
+.briefText { min-width: 0; }
+.briefText > summary { cursor: pointer; list-style: none; }
+.briefPreview { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; line-height: 1.7; font-size: 13px; }
+.briefMore, .briefLess { display: inline-flex; align-items: center; min-height: 32px; color: #b6baff; font-size: 12px; }
+.briefLess, .briefText[open] > summary > .briefPreview, .briefText[open] > summary > .briefMore { display: none; }
+.briefText[open] > summary > .briefLess { display: inline-flex; }
+.briefText > p { max-height: 22rem; overflow-y: auto; }
+@media (max-width: 600px) {
+  .projectDisclosure > summary { padding: 10px 12px; flex-wrap: wrap; }
+  .projectDisclosure > :not(summary) { margin: 10px; }
+  .compactDisclosure > summary { flex-wrap: wrap; padding-block: 8px; }
+  .agentComposerActions { gap: 8px; }
+  .agentComposerActions label { flex: 1 1 100%; }
+}
+
+.runnerEvidence { margin: 4px 0 12px; color: #9baecb; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+
+.runnerStatus { padding: 4px 8px; border-radius: 6px; background: #453c252e; color: #dcc58f !important; }
+.runnerStatus[data-online="true"] { background: #204339; color: #a2e1c1 !important; }
