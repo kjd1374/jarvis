@@ -923,6 +923,21 @@ try {
   assert(workSaved.body.data.notes.some(n => n.id === "human-during-work"));
   assert(!(await api("/api/workspace?space=personal", a.token)).body.data.projects.some(p => p.id === projectId));
   recordCheck("project chat queue and automatic follow-ups persist atomically; old runners skip work; device/token/scope fencing and duplicate result recovery hold (synthetic execution)");
+  const previewId = randomUUID();
+  workSaved.body.data.projects.find(p => p.id === projectId).automation.turns.push({ id: previewId, serviceId: workServiceId, repository: "example/synthetic", request: "합성 화면 준비", mode: "preview", publish: "pr", status: "queued", phase: "queued", attempt: 0, createdAt: autoStamp, updatedAt: autoStamp });
+  assert.equal((await api("/api/workspace", a.token, "PUT", { space: "company", data: workSaved.body.data, revision: workSaved.body.revision })).status, 200);
+  assert.notEqual((await api("/api/automation/claim", a.token, "POST", workClaim)).body.job?.mode, "preview");
+  const previewClaim = await api("/api/automation/claim", a.token, "POST", { ...workClaim, previewVersion: 1 });
+  assert.equal(previewClaim.body.job.mode, "preview");
+  const previewIdentity = { space: "company", projectId, jobId: previewId, leaseToken: previewClaim.body.job.leaseToken };
+  const previewResult = { ...workResult, changes: [], checks: [], followUps: [], outcome: "answered", branch: null, headSha: null, prUrl: null,
+    preview: { state: "ready", kind: "mac", url: "http://127.0.0.1:45678/", sha: "a".repeat(40), checkedAt: autoStamp, expiresAt: new Date(Date.parse(autoStamp) + 3600_000).toISOString(), message: "합성 맥미니 화면" } };
+  assert.equal((await api("/api/automation/work", a.secondToken, "POST", { ...previewIdentity, phase: "result", result: previewResult })).status, 409);
+  assert.equal((await api("/api/automation/work", a.token, "POST", { ...previewIdentity, phase: "result", result: previewResult })).status, 200);
+  const previewSaved = await api("/api/workspace?space=company", a.secondToken);
+  assert.equal(previewSaved.body.data.projects.find(p => p.id === projectId).automation.turns.at(-1).result.preview.url, previewResult.preview.url);
+  assert(!previewSaved.body.data.tasks.some(t => t.id === `work-${previewId}`));
+  recordCheck("preview capability gates old runners; device-fenced exact-commit result persists without a change task (synthetic preview URL)");
   console.log(
     JSON.stringify(
       {

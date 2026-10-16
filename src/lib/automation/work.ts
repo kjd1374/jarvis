@@ -1,7 +1,7 @@
 import { id, type Project, type Space, type WorkspaceData } from "../workspace/types";
 import { repositoryFor } from "./state";
 import { publicWebUrl } from "./web-links";
-import type { ProjectTurn, WorkResult } from "./work-types";
+import type { ProjectTurn, WorkResult, WorkPreview } from "./work-types";
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const text = (v: unknown, n: number): v is string => typeof v === "string" && v.length <= n;
 const date = (v: unknown) => typeof v === "string" && Number.isFinite(Date.parse(v));
@@ -11,6 +11,21 @@ const repo = (v: unknown): v is string => typeof v === "string" && /^[a-z0-9_.-]
 const clean = (v: string) => v.replace(/\b(?:ghp_|gho_|github_pat_|sk-(?:proj-)?)[A-Za-z0-9_-]{16,}\b/g, "[토큰 제외]");
 const phaseValues = ["queued", "preparing", "coding", "testing", "publishing", "reporting"];
 function invalid(): never { throw new Error("프로젝트 실행 기록의 범위·형식을 확인해주세요."); }
+export function parseWorkPreview(raw: unknown): WorkPreview {
+  if (!object(raw) || !["ready", "unavailable", "failed"].includes(String(raw.state)) || !["deployment", "mac"].includes(String(raw.kind)) ||
+    typeof raw.sha !== "string" || !sha(raw.sha) || !date(raw.checkedAt) || !text(raw.message, 1000) ||
+    !(raw.expiresAt === null || date(raw.expiresAt))) invalid();
+  if (raw.state === "ready") {
+    if (raw.kind === "deployment" && (!publicWebUrl(raw.url) || raw.expiresAt !== null)) invalid();
+    if (raw.kind === "mac") {
+      if (typeof raw.url !== "string" || !/^http:\/\/127\.0\.0\.1:[0-9]{4,5}\/$/.test(raw.url)) invalid();
+      const port = Number(new URL(raw.url).port);
+      if (port < 1024 || port > 65535 || !date(raw.expiresAt) || Date.parse(raw.expiresAt as string) <= Date.parse(raw.checkedAt as string) || Date.parse(raw.expiresAt as string) - Date.parse(raw.checkedAt as string) > 2 * 60 * 60_000) invalid();
+    }
+  } else if (raw.url !== null || raw.expiresAt !== null) invalid();
+  return { state: raw.state as WorkPreview["state"], kind: raw.kind as WorkPreview["kind"], url: raw.url as string | null, sha: raw.sha,
+    checkedAt: raw.checkedAt as string, expiresAt: raw.expiresAt as string | null, message: clean(raw.message) };
+}
 export function parseWorkResult(raw: unknown, repository: string, mode: ProjectTurn["mode"]): WorkResult {
   if (!object(raw) || !text(raw.reply, 8000) || !raw.reply.trim() || !text(raw.summary, 4000) || !text(raw.currentStatus, 2000) || !text(raw.nextAction, 2000) ||
     !strings(raw.changes, 50, 500) || !Array.isArray(raw.checks) || raw.checks.length > 30 ||
@@ -21,10 +36,12 @@ export function parseWorkResult(raw: unknown, repository: string, mode: ProjectT
     !(raw.prUrl === null || text(raw.prUrl, 2048) && new RegExp(`^https://github\\.com/${repository.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/pull/[1-9][0-9]*$`).test(raw.prUrl))) invalid();
   const d = raw.deployment;
   if (!object(d) || !["not_configured", "pending", "success", "failure"].includes(String(d.state)) || !sha(d.sha) || !(d.url === null || publicWebUrl(d.url))) invalid();
-  if (mode === "ask" && (raw.outcome !== "answered" && raw.outcome !== "blocked" || raw.prUrl !== null || raw.branch !== null)) invalid();
+  if ((mode === "ask" || mode === "preview") && (raw.outcome !== "answered" && raw.outcome !== "blocked" || raw.prUrl !== null || raw.branch !== null)) invalid();
   if (["pr_open", "merged", "deployed"].includes(String(raw.outcome)) && (!raw.prUrl || !raw.headSha || !raw.baseSha || !raw.branch)) invalid();
   if (raw.outcome === "deployed" && (d.state !== "success" || !d.sha || !d.url)) invalid();
+  if (raw.preview !== undefined && ![raw.baseSha, raw.headSha, d.sha].includes(parseWorkPreview(raw.preview).sha)) invalid();
   return {
+    ...(raw.preview === undefined ? {} : { preview: parseWorkPreview(raw.preview) }),
     reply: clean(raw.reply), summary: clean(raw.summary), currentStatus: clean(raw.currentStatus), nextAction: clean(raw.nextAction),
     changes: raw.changes.map(clean), checks: raw.checks.map(c => ({ name: clean(c.name), status: c.status, detail: clean(c.detail) })),
     followUps: raw.followUps.map(f => ({ title: clean(f.title), reason: clean(f.reason), kind: f.kind })),
@@ -39,7 +56,7 @@ export function validateProjectAutomation(project: Project, data: WorkspaceData)
   const ids = new Set();
   for (const turn of project.automation.turns) {
     if (!object(turn) || !text(turn.id, 100) || !/^[a-f0-9-]{36}$/.test(turn.id) || ids.has(turn.id) || !repo(turn.repository) ||
-      !text(turn.serviceId, 2048) || !text(turn.request, 8000) || !turn.request.trim() || !["ask", "change"].includes(turn.mode) || !["pr", "merge"].includes(turn.publish) ||
+      !text(turn.serviceId, 2048) || !text(turn.request, 8000) || !turn.request.trim() || !["ask", "change", "preview"].includes(turn.mode) || !["pr", "merge"].includes(turn.publish) ||
       !["queued", "running", "completed", "failed", "interrupted", "cancelled"].includes(turn.status) || !phaseValues.includes(turn.phase) ||
       !date(turn.createdAt) || !date(turn.updatedAt) || !Number.isInteger(turn.attempt) || turn.attempt < 0 || turn.attempt > 100 ||
       turn.executionDevice !== undefined && !text(turn.executionDevice, 200) || turn.leaseOwner !== undefined && !text(turn.leaseOwner, 200) || turn.leaseToken !== undefined && !text(turn.leaseToken, 100) ||
@@ -71,7 +88,7 @@ export function changeWorkState(data: WorkspaceData, space: Space, projectId: st
   const next = updateTurn(data, project, { ...turn, status: action === "cancel" ? "cancelled" : "queued", phase: "queued", updatedAt: stamp, error: undefined, leaseOwner: undefined, leaseToken: undefined, leaseUntil: undefined });
   return { ...next, tasks: next.tasks.map(t => t.id === `work-${turn.id}` ? { ...t, status: action === "cancel" ? "decision" as const : "todo" as const } : t) };
 }
-export function claimProjectWork(data: WorkspaceData, scope: { space: Space; projectIds: (string | null)[]; deviceId: string }, stamp: string) {
+export function claimProjectWork(data: WorkspaceData, scope: { space: Space; projectIds: (string | null)[]; deviceId: string; previews?: boolean }, stamp: string) {
   let current = data;
   for (const project of current.projects.filter(p => p.space === scope.space && scope.projectIds.includes(p.id))) {
     const turns = project.automation?.turns ?? [];
@@ -83,6 +100,7 @@ export function claimProjectWork(data: WorkspaceData, scope: { space: Space; pro
     }
     if (turns.some(t => ["running", "interrupted"].includes(t.status))) continue;
     for (const turn of turns.filter(t => t.status === "queued")) {
+      if (turn.mode === "preview" && !scope.previews) continue;
       if (turn.executionDevice && turn.executionDevice !== scope.deviceId) continue;
       const service = current.services.find(s => s.id === turn.serviceId && s.space === project.space && s.projectId === project.id);
       if (!service || repositoryFor(service) !== turn.repository) {
@@ -100,6 +118,7 @@ export function claimProjectWork(data: WorkspaceData, scope: { space: Space; pro
         context: { executionContext: {
           jarvisRunner: { connectedAt: stamp, provider: "codex", projectId: project.id, space: project.space },
           targetRepository: turn.repository,
+          webWorkflow: "사용자는 브라우저에서 수정된 화면을 확인하려고 한다. GitHub 코드 주소와 실제 웹 주소를 구분한다. 실행기는 실제 배포 또는 맥미니의 별도 미리보기를 준비하고 확인된 주소를 결과에 덧붙인다. 사용자에게 프로젝트를 직접 다운로드하라는 안내로 작업을 대체하지 말고, 앱의 start/build 실행 조건이나 배포에 필요한 조건을 구체적으로 기록한다. 실행 전 미리보기·배포 완료를 주장하지 않는다.",
           connectionScope: "이 요청은 승인된 Jarvis 실행기가 가져왔다. 실행기 연결과 대상 저장소 앱 내부 Codex/Claude 연동은 별개다. 앱에 어댑터가 없거나 격리 작업 폴더에서 CLI/네트워크를 사용할 수 없는 것은 호스트 실행기 미연결의 근거가 아니다. 호스트의 다른 공급자 로그인·연결 상태는 미확인이다.",
         }, project: { name: project.name, description: project.description }, history,
           tasks: current.tasks.filter(t => t.projectId === project.id && t.space === project.space).slice(-50).map(t => ({ title: t.title, status: t.status })) } } };

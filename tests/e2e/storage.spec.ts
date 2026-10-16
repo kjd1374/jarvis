@@ -915,6 +915,8 @@ test("원본 포함 백업을 새 브라우저로 이관하고 재가져오기·
   await page.getByRole("button", { name: "메모 저장", exact: true }).click();
   await expect.poll(async () => (await state(page))?.notes.length).toBe(2);
   await page.getByRole("button", { name: "회사", exact: true }).click();
+  // A hard navigation can abort the async IndexedDB scope write; wait for the chosen scope.
+  await expect.poll(async () => (await state(page))?.activeSpace).toBe("company");
   await page.goto("/library");
   await ready(page);
   const original = Buffer.from("원본 파일 이관 검증용 합성 데이터");

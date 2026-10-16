@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { executeProjectWork, runCodexWork, runCommand, allowedWorkPath } from "../public/jarvis-runner.mjs";
 const modelResult = { blocked: false, reply: "합성 화면 수정", summary: "합성 결과", currentStatus: "검증 준비", nextAction: "확인", followUps: [] };
 const job = { id: "11111111-1111-4111-8111-111111111111", repository: "example/synthetic", projectId: "project", space: "personal", mode: "change", publish: "pr", request: "PRIVATE REQUEST NEVER PUBLISH", leaseToken: "test-lease", attempt: 1 };
-async function fixture({ ci = "success", deliveryFails = false, publish = "pr", failPush = false, blocked = false, cancelAtPublish = false, npmProject = false, npmFailure = false } = {}) {
+async function fixture({ ci = "success", deliveryFails = false, publish = "pr", failPush = false, blocked = false, cancelAtPublish = false, npmProject = false, npmFailure = false, previewOnly = false, previewEnabled = false } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "jarvis-work-test-")), source = join(dir, "source"), remote = join(dir, "remote.git");
   await mkdir(source); await runCommand("git", ["init", "-b", "main", source]);
   await writeFile(join(source, "page.js"), "export const title = 'before';\n");
@@ -60,8 +60,9 @@ async function fixture({ ci = "success", deliveryFails = false, publish = "pr", 
     if (body.phase === "result" && ++deliveries === 1 && deliveryFails) throw new Error("synthetic lost response");
     return { accepted: true };
   } };
-  const options = { stateDir: join(dir, "state"), run, get, model, delay: async () => {}, log: () => {} };
-  const execute = () => executeProjectWork(client, { ...job, publish }, options);
+  const options = { stateDir: join(dir, "state"), run, get, model, delay: async () => {}, log: () => {}, previewEnabled,
+    previewTools: { findDeploymentPreview: async () => null, startMacPreview: async ({ sha }) => ({ state: "ready", kind: "mac", sha, url: "http://127.0.0.1:45678/", checkedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 3600_000).toISOString(), message: "Synthetic preview" }) } };
+  const execute = () => executeProjectWork(client, { ...job, publish, mode: previewOnly ? "preview" : job.mode }, options);
   return { dir, execute, reports, ghCalls, npmCalls, modelJobs, counts: () => ({ modelCalls, deliveries, pushes, merged }) };
 }
 test("real npm prepares a locked dependency-free project without running install hooks, including redelivery", async () => {
@@ -142,4 +143,20 @@ test("a blocked model result never publishes a partial implementation", async ()
   const f = await fixture({ blocked: true, publish: "merge" });
   try { await f.execute(); assert.equal(f.counts().pushes, 0); assert.equal(f.reports.find(r => r.phase === "result").result.outcome, "blocked"); }
   finally { await rm(f.dir, { recursive: true, force: true }); }
+});
+
+test("preview-only work prepares a pinned screen without model use, code writes, or replay", async () => {
+  const f = await fixture({ previewOnly: true, previewEnabled: true, deliveryFails: true });
+  try { await f.execute(); await f.execute();
+    assert.equal(f.counts().modelCalls, 0); assert.equal(f.counts().pushes, 0);
+    const result = f.reports.find(r => r.phase === "result").result;
+    assert.equal(result.preview.state, "ready"); assert.equal(result.preview.sha, result.baseSha);
+    assert.equal(result.prUrl, null); assert.equal(result.outcome, "answered");
+  } finally { await rm(f.dir, { recursive: true, force: true }); }
+});
+test("code work attaches the changed commit preview without calling the model twice", async () => {
+  const f = await fixture({ previewEnabled: true });
+  try { await f.execute(); const result = f.reports.find(r => r.phase === "result").result;
+    assert.equal(result.preview.sha, result.headSha); assert.equal(result.outcome, "pr_open"); assert.equal(f.counts().modelCalls, 1);
+  } finally { await rm(f.dir, { recursive: true, force: true }); }
 });

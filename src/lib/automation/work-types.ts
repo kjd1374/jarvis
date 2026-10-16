@@ -1,5 +1,15 @@
+export type WorkPreview = {
+  state: "ready" | "unavailable" | "failed";
+  kind: "deployment" | "mac";
+  url: string | null;
+  sha: string;
+  checkedAt: string;
+  expiresAt: string | null;
+  message: string;
+};
 export type WorkCheck = { name: string; status: "passed" | "failed" | "not_run"; detail: string };
 export type WorkResult = {
+  preview?: WorkPreview;
   reply: string;
   summary: string;
   currentStatus: string;
@@ -19,7 +29,7 @@ export type ProjectTurn = {
   serviceId: string;
   repository: string;
   request: string;
-  mode: "ask" | "change";
+  mode: "ask" | "change" | "preview";
   publish: "pr" | "merge";
   status: "queued" | "running" | "completed" | "failed" | "interrupted" | "cancelled";
   phase: "queued" | "preparing" | "coding" | "testing" | "publishing" | "reporting";
