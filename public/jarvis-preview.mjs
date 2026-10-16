@@ -108,6 +108,11 @@ const server=http.createServer(async(req,res)=>{
     if(headers.origin!=='http://'+req.headers.host){res.statusCode=403;res.end();return;}
     headers.origin='http://127.0.0.1:3000';
   }
+  // Treat an explicit top-level click to the preview's bare home URL like address-bar entry.
+  // Keep fetch metadata intact for APIs, writes, frames, query actions and automatic navigation.
+  if(req.method==='GET' && req.url==='/' && !req.headers.origin &&
+    headers['sec-fetch-site']==='cross-site' && headers['sec-fetch-mode']==='navigate' &&
+    headers['sec-fetch-dest']==='document' && headers['sec-fetch-user']==='?1') headers['sec-fetch-site']='none';
   delete headers['x-forwarded-host'];delete headers['x-forwarded-proto'];delete headers['x-forwarded-for'];
   const upstream=http.request({hostname:'127.0.0.1',port:3000,path:req.url,method:req.method,headers},response=>{
     const out={...response.headers};
