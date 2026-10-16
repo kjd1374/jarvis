@@ -19,6 +19,7 @@ import { mkdirSync } from 'node:fs'; import { DatabaseSync } from 'node:sqlite';
 mkdirSync(process.env.DATA_DIR,{recursive:true});const db=new DatabaseSync(process.env.DATA_DIR+'/test.db');
 db.exec('CREATE TABLE IF NOT EXISTS counter(n INTEGER)');db.exec('INSERT INTO counter VALUES(0)');
 http.createServer((req,res)=>{
+ if(req.headers['sec-fetch-site']==='cross-site'){res.writeHead(403);res.end('Cross-site request rejected');return;}
  if(req.url==='/api') { if(req.method==='POST') {if(req.headers.origin!=='http://127.0.0.1:3000'){res.writeHead(403);res.end();return;}db.exec('UPDATE counter SET n=n+1');}
  res.setHeader('Content-Type','application/json');res.end(JSON.stringify(db.prepare('SELECT n FROM counter').get()));return;}
  res.setHeader('Content-Type','text/html');res.end('<h1>Synthetic preview</h1><button>Save</button><output></output><script>document.querySelector("button").onclick=async()=>{const r=await fetch("/api",{method:"POST"});document.querySelector("output").textContent=(await r.json()).n}</script>');
@@ -34,13 +35,42 @@ if(existsSync('/app/.env')||process.env.GH_TOKEN||process.env.OPENAI_API_KEY)pro
 const s=net.connect(443,'203.0.113.1');s.on('connect',()=>process.exit(2));s.on('error',()=>process.exit(0));setTimeout(()=>process.exit(3),3000);`]);
   assert.equal(isolation.code, 0, "no credentials or external network available");
   browser = await chromium.launch({ ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } : {}) });
-  const page = await browser.newPage(), errors = []; page.on("pageerror", e => errors.push(e.message));
-  await page.goto(result.url); assert.equal(await page.locator("h1").textContent(), "Synthetic preview");
+  const context = await browser.newContext(), source = await context.newPage(), errors = [];
+  context.on("page", page => page.on("pageerror", error => errors.push(error.message)));
+  await source.route("https://jarvis-preview.invalid/", route => route.fulfill({ contentType: "text/html",
+    body: `<a href="${result.url}" target="_blank" rel="noopener noreferrer">Open preview</a>` }));
+  await source.goto("https://jarvis-preview.invalid/");
+  const opening = source.waitForEvent("popup");
+  const loading = context.waitForEvent("response", { predicate: response => response.url() === result.url });
+  await source.getByRole("link", { name: "Open preview" }).click();
+  const page = await opening, response = await loading;
+  const entryHeaders = await response.request().allHeaders();
+  assert.equal(entryHeaders["sec-fetch-site"], "cross-site", "reproduce entry from the hosted Jarvis button");
+  assert.equal(response.status(), 200, "user-initiated cross-site document entry opens the preview");
+  await page.waitForLoadState("domcontentloaded");
+  assert.equal(await page.locator("h1").textContent(), "Synthetic preview");
   await page.getByRole("button", { name: "Save" }).click(); await page.waitForFunction(() => document.querySelector("output").textContent === "1");
   await page.reload();
   assert.equal(await page.evaluate(async () => (await (await fetch("/api")).json()).n), 1);
+  const crossSite = { "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document", "sec-fetch-user": "?1" };
+  for (const { path = "", method = "GET", headers } of [
+    { path: "api", method: "POST", headers: { ...crossSite, origin: "https://jarvis-preview.invalid" } },
+    { method: "POST", headers: { ...crossSite, origin: "https://jarvis-preview.invalid" } },
+    { method: "POST", headers: crossSite },
+    { headers: { ...crossSite, "sec-fetch-mode": "cors", "sec-fetch-dest": "empty" } },
+    { headers: { ...crossSite, "sec-fetch-dest": "iframe" } },
+    { headers: { ...crossSite, "sec-fetch-user": "" } },
+    { headers: { ...crossSite, origin: "https://jarvis-preview.invalid" } },
+    { path: "api", headers: crossSite },
+    { path: "?action=change", headers: crossSite },
+  ]) {
+    const blocked = await context.request.fetch(result.url + path, { method, headers });
+    assert.equal(blocked.status(), 403, "cross-site API, writes, frames and automatic navigation remain blocked");
+  }
+  await page.goto(result.url); assert.equal(await page.locator("h1").textContent(), "Synthetic preview");
+  assert.equal(await page.evaluate(async () => (await (await fetch("/api")).json()).n), 1);
   assert.deepEqual(errors, []);
-  console.log("PASS: real Docker → loopback bridge → browser; SQLite write/reload; no host mounts, credentials or external network.");
+  console.log("PASS: hosted-page link → real Docker preview; SQLite write/reload; cross-site writes/API/frames blocked; no host mounts, credentials or external network.");
 } finally {
   await browser?.close(); activeBridge?.close();
   await runCommand("docker", ["rm", "-f", name]).catch(() => {});
