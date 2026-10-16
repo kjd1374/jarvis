@@ -1,7 +1,7 @@
 {
-  "version": "2.1.1",
+  "version": "2.2.0",
   "files": {
-    "jarvis-runner.mjs": "fc7a7c52a77b94585e5ccbf63cb2a4975e4afca1bd1323d4669acaeefc6b42f8",
+    "jarvis-runner.mjs": "e683b27a1fe4b82e7ac86fa4aec53d0adad14ba1161db4086ce07330315559a6",
     "jarvis-preview.mjs": "7ae0d17268d16c75aa89e32a641a7da43549ebc76e88e64759bfe7d150a551e5"
   }
 }

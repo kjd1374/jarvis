@@ -243,7 +243,7 @@ function AgentView() {
             description: "선택을 기다리는 업무",
           },
         ].map((item) => (
-          <Link href="/tasks" key={item.label} className={styles.summaryCard}>
+          <Link href="/tasks?view=records" key={item.label} className={styles.summaryCard}>
             <span className={styles.summaryArrow} aria-hidden="true">
               <Icon name="arrow" size={16} />
             </span>
@@ -691,7 +691,7 @@ function AgentView() {
                     <Icon name="check" size={17} />
                     연결 업무
                   </h2>
-                  <Link href="/tasks">
+                  <Link href="/tasks?view=records">
                     전체 <Icon name="arrow" size={12} />
                   </Link>
                 </div>
@@ -701,7 +701,7 @@ function AgentView() {
                       .filter((t) => t.status !== "done")
                       .slice(0, 4)
                       .map((task) => (
-                        <Link href="/tasks" key={task.id}>
+                        <Link href="/tasks?view=records" key={task.id}>
                           <span className={styles.taskDot} />
                           <strong>{task.title}</strong>
                           <small>{statusLabels[task.status]}</small>
@@ -711,7 +711,7 @@ function AgentView() {
                 ) : (
                   <div className={styles.railEmpty}>
                     <p>아직 연결한 업무가 없습니다.</p>
-                    <Link href="/tasks">
+                    <Link href="/tasks?view=records">
                       첫 업무 만들기 <Icon name="plus" size={13} />
                     </Link>
                   </div>

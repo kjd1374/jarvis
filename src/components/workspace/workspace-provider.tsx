@@ -207,14 +207,15 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     };
   }, [loadAttempt, retryCloud]);
 
-  const monitoringActive = data.services.some(s => s.monitoring?.enabled) || data.projects.some(p => p.automation?.turns.some(t => t.status === "queued" || t.status === "running"));
+  const documentPending = data.documents.some(d => d.sheet?.questions.some(q => q.status === "queued" || q.status === "running"));
+  const monitoringActive = documentPending || data.documents.some(d => d.sheet) || data.services.some(s => s.monitoring?.enabled) || data.projects.some(p => p.automation?.turns.some(t => t.status === "queued" || t.status === "running"));
   useEffect(() => {
     if (!account?.authenticated || !monitoringActive) return;
     const timer = setInterval(() => {
       if (document.visibilityState === "visible" && !conflictRef.current) setLoadAttempt(n => n + 1);
-    }, 30_000);
+    }, documentPending ? 5_000 : 30_000);
     return () => clearInterval(timer);
-  }, [account?.authenticated, monitoringActive]);
+  }, [account?.authenticated, monitoringActive, documentPending]);
 
   function retryLoad() {
     if (!conflictRef.current) setError(null);

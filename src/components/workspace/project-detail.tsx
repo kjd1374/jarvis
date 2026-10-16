@@ -290,7 +290,7 @@ function ProjectView({ project }: { project: Project }) {
             </h2>
             <button
               disabled={saving}
-              onClick={() => void openWorkspace("/tasks")}
+              onClick={() => void openWorkspace("/tasks?view=records")}
             >
               업무 관리 <Icon name="arrow" size={14} />
             </button>
@@ -301,7 +301,7 @@ function ProjectView({ project }: { project: Project }) {
                 <li key={task.id}>
                   <button
                     disabled={saving}
-                    onClick={() => void openWorkspace("/tasks")}
+                    onClick={() => void openWorkspace("/tasks?view=records")}
                   >
                     <div>
                       <strong>{task.title}</strong>
@@ -327,7 +327,7 @@ function ProjectView({ project }: { project: Project }) {
               <button
                 className={styles.secondaryButton}
                 disabled={saving}
-                onClick={() => void openWorkspace("/tasks")}
+                onClick={() => void openWorkspace("/tasks?view=records")}
               >
                 할 일 등록하기 <Icon name="plus" size={14} />
               </button>

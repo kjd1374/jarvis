@@ -68,7 +68,7 @@ export function IntegratedHome() {
       ) : (
         <>
           <div className={styles.summaryGrid}>
-            <Link className={styles.summaryCard} href="/tasks">
+            <Link className={styles.summaryCard} href="/tasks?view=records">
               <span className={styles.summaryIcon}>
                 <Icon name="check" size={20} />
               </span>
@@ -80,7 +80,7 @@ export function IntegratedHome() {
                 </strong>
               </div>
             </Link>
-            <Link className={styles.summaryCard} href="/tasks">
+            <Link className={styles.summaryCard} href="/tasks?view=records">
               <span className={styles.summaryIcon}>
                 <Icon name="clock" size={20} />
               </span>
@@ -114,7 +114,7 @@ export function IntegratedHome() {
             >
               <div className={styles.detailHeading}>
                 <h2>오늘의 다음 행동</h2>
-                <Link href="/tasks">업무 관리 →</Link>
+                <Link href="/tasks?view=records">업무 관리 →</Link>
               </div>
               {due.length ? (
                 <ul className={styles.detailList}>
@@ -125,7 +125,7 @@ export function IntegratedHome() {
                         href={
                           task.projectId
                             ? `/projects/${task.projectId}`
-                            : "/tasks"
+                            : "/tasks?view=records"
                         }
                       >
                         <div>
@@ -170,7 +170,7 @@ export function IntegratedHome() {
                       href={
                         task.projectId
                           ? `/projects/${task.projectId}`
-                          : "/tasks"
+                          : "/tasks?view=records"
                       }
                     >
                       {task.title}

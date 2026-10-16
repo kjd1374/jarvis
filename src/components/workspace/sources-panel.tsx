@@ -114,7 +114,7 @@ export function EvidenceList({ sources, compact = false }: { sources: Evidence[]
           {source.kind === "fact" && (
             <div className={styles.projectActions}>
               {data.sourceRecords.find((s) => s.id === source.id)?.taskId ? (
-                <Link href="/tasks">연결한 후속 할 일 보기 →</Link>
+                <Link href="/tasks?view=records">연결한 후속 할 일 보기 →</Link>
               ) : (
                 <button
                   className={styles.secondaryButton}

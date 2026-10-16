@@ -1,4 +1,5 @@
 import { validateProjectAutomation } from "../automation/work";
+import { validateSheetDocument } from "../sheets/documents";
 import { validateMonitoring } from "../automation/validation";
 import { unifyProjectConnections } from "./project-connections";
 import { emptyWorkspace, type WorkspaceData, type Space } from "./types";
@@ -200,7 +201,10 @@ export function normalizeWorkspace(value: unknown): WorkspaceData {
       !["todo", "in_progress", "decision", "done"].includes(row.status)
     )
       throw new Error("업무 상태를 확인해주세요.");
+  if (JSON.stringify(data.documents.filter(d => d.sheet)).length > 2_000_000)
+    throw new Error("시트 보관 용량에 도달했습니다. 기존 내용은 유지됩니다.");
   for (const row of data.documents) {
+    validateSheetDocument(row);
     if (
       !text(row.name, 500) ||
       !text(row.mime, 200) ||

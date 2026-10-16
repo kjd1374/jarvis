@@ -101,21 +101,26 @@ export function GitHubMonitor({ service }: { service: Service }) {
 export function CliRunnerSetup() {
   const { data, ready } = useWorkspace();
   const space = data.activeSpace, projectId = data.activeProjects[space];
+  const scopedProjects = projectId ? [projectId] : [...new Set([
+    ...data.services.filter(s => s.space === space && repositoryFor(s)).map(s => s.projectId),
+    ...data.documents.filter(d => d.space === space && d.sheet).map(d => d.projectId),
+  ])];
+  if (!scopedProjects.length) scopedProjects.push(null);
   function download() {
-    const projectIds = projectId ? [projectId] : [...new Set(data.services.filter(s => s.space === space && repositoryFor(s)).map(s => s.projectId))].slice(0, 20);
-    if (!projectIds.length) return;
+    const projectIds = scopedProjects;
+    if (projectIds.length > 20) return;
     const file = new Blob([JSON.stringify({ origin: window.location.origin, provider: "codex", scopes: [{ space, projectIds }] }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(file), a = document.createElement("a"); a.href = url; a.download = "jarvis-runner.json"; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
-  const hasRepository = data.services.some(s => s.space === space && (!projectId || s.projectId === projectId) && repositoryFor(s));
   return <section className={styles.settingsCard} id="cli-runner" aria-label="구독 CLI 실행기">
     <h2>구독 CLI 실행기</h2>
-    <p>ChatGPT 구독으로 로그인한 공식 Codex CLI가 저장소 점검·웹 주소 발견과 프로젝트 대화의 수정 요청을 처리합니다. API 결제나 구독 인증값의 웹 복사는 필요하지 않습니다. 구독 사용 한도는 적용됩니다.</p>
+    <p>ChatGPT 구독으로 로그인한 공식 Codex CLI가 저장소 점검·프로젝트 요청과 선택한 시트 문답을 처리합니다. 문답은 실행기 2.2.0 이상에서 사용할 수 있습니다. API 결제나 구독 인증값의 웹 복사는 필요하지 않습니다. 구독 사용 한도는 적용됩니다.</p>
     <p>{spaceLabels[space]} · {projectId ? data.projects.find(p => p.id === projectId)?.name : "현재 등록된 프로젝트"}만 실행기에 연결합니다.</p>
     <ol><li>실행할 PC에 Node 24+, GitHub CLI, Codex CLI를 준비합니다.</li><li>터미널에서 <code>gh auth login</code>과 <code>codex login</code>을 확인합니다. Codex는 ChatGPT 로그인 방식을 사용합니다.</li>
       <li>아래 실행기와 설정 파일을 같은 폴더에 받습니다. 설정 파일에는 토큰이 없습니다.</li><li><code>node jarvis-runner.mjs --config jarvis-runner.json</code>을 실행하고, 표시되는 12자리 번호로 최초 기기 등록을 진행합니다.</li></ol>
     <div className={styles.projectActions}><a className={styles.secondaryButton} href="/jarvis-runner.mjs" download>실행기 파일 받기</a>
-      <button className={styles.secondaryButton} disabled={!ready || !hasRepository} onClick={download}>현재 범위의 실행기 설정 받기</button></div>
+      <button className={styles.secondaryButton} disabled={!ready || scopedProjects.length > 20} onClick={download}>현재 범위의 실행기 설정 받기</button></div>
+    <p>새 프로젝트에 시트를 추가했다면 해당 프로젝트를 선택해 설정을 다시 받아 적용해주세요. 20개를 넘으면 프로젝트 범위를 좁혀주세요. 보관한 시트도 같은 범위에 포함됩니다.</p>
     <details className={styles.revisionDetails}><summary>맥미니 자동 실행·미리보기 설치</summary>
       <p>맥미니에서 기존 수동 실행기를 Ctrl+C로 종료한 뒤 설치 파일을 받아 아래 명령을 실행합니다. Node 24+, GitHub·Codex 구독 로그인과 Docker Desktop 또는 Colima 등 Docker 호환 엔진이 필요합니다.</p>
       <a className={styles.secondaryButton} href="/jarvis-mac.mjs" download>맥미니 설치 파일 받기</a>
