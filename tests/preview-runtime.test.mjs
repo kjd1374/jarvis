@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, rm, symlink, chmod } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { previewFile, previewPlan, findDeploymentPreview, startMacPreview } from "../public/jarvis-preview.mjs";
-import { validateConfig, launchAgent, preflight, downloadRuntime } from "../public/jarvis-mac.mjs";
+import { validateConfig, launchAgent, preflight, downloadRuntime, macCommandPath, runSetupCommand } from "../public/jarvis-mac.mjs";
 import { VERSION } from "../public/jarvis-runner.mjs";
 const sha = "a".repeat(40);
 test("published runtime manifest matches all shipped executables", async () => {
@@ -92,4 +92,30 @@ test("Mac runtime download verifies every hash before writing any executable", a
     await assert.rejects(downloadRuntime("https://synthetic.example", join(dir, "bad"), transport), /무결성/);
     await assert.rejects(readFile(join(dir, "bad/jarvis-runner.mjs")));
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+test("Mac setup finds a user-installed Docker CLI outside the inherited PATH and persists the working lookup", async () => {
+  const home = await mkdtemp(join(tmpdir(), "jarvis-mac path-"));
+  try {
+    const bin = join(home, ".docker", "bin"); await mkdir(bin, { recursive: true });
+    await writeFile(join(bin, "docker"), '#!/bin/sh\ncase "$1" in\n--version) echo "Docker version 29.0.0" ;;\nversion) echo "29.0.0" ;;\n*) exit 2 ;;\nesac\n');
+    await chmod(join(bin, "docker"), 0o700);
+    const inherited = join(home, "empty");
+    assert.notEqual((await runSetupCommand("docker", ["--version"], { env: { PATH: inherited } })).code, 0);
+    const path = macCommandPath({ home, node: join(home, "node", "bin", "node"), path: inherited });
+    const ready = await preflight((command, args) => command === "docker" ? runSetupCommand(command, args, { env: { PATH: path } })
+      : Promise.resolve({ code: 0, output: command === "codex" ? "Logged in using ChatGPT" : "ready" }));
+    assert.equal(ready.docker, true); assert.equal(ready.dockerProblem, null);
+    const plist = launchAgent({ node: process.execPath, runner: "/runner.mjs", config: "/config.json", directory: home, path });
+    const storedPath = plist.match(/<key>PATH<\/key><string>([^<]+)<\/string>/)[1];
+    assert.equal((await runSetupCommand("docker", ["version"], { env: { PATH: storedPath } })).output.trim(), "29.0.0");
+    assert(path.includes("/Applications/Docker.app/Contents/Resources/bin"));
+    assert(path.indexOf(inherited) < path.indexOf(bin));
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+test("Docker diagnosis distinguishes a missing command from a disconnected engine without exposing logs", async () => {
+  const missing = await preflight(async bin => ({ code: bin === "docker" ? -1 : 0, output: "private diagnostic" }));
+  assert.equal(missing.dockerProblem, "client_unavailable"); assert.equal(missing.docker, false);
+  const offline = await preflight(async (bin, args) => ({ code: bin === "docker" && args[0] === "version" ? 1 : 0, output: "private diagnostic" }));
+  assert.equal(offline.dockerProblem, "engine_unavailable"); assert.equal(offline.docker, false);
+  assert(!JSON.stringify([missing, offline]).includes("private diagnostic"));
 });

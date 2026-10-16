@@ -8,6 +8,14 @@ import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const LABEL = "app.jarvis.runner";
+export function macCommandPath({ node = process.execPath, home = homedir(), path = process.env.PATH ?? "" } = {}) {
+  // An already-open terminal may not know Docker Desktop's user or bundled CLI location.
+  // Keep working shell commands first, then add supported Mac installation locations.
+  return [...new Set([dirname(node), ...path.split(":"), join(home, ".docker", "bin"),
+    "/Applications/Docker.app/Contents/Resources/bin", join(home, "Applications", "Docker.app", "Contents", "Resources", "bin"),
+    "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"])]
+    .filter(directory => directory.startsWith("/") && !directory.includes("\0")).join(":");
+}
 export const xml = text => String(text).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
 export function launchAgent({ node, runner, config, directory, path }) {
   const args = ["/usr/bin/caffeinate", "-is", node, runner, "--config", config];
@@ -31,9 +39,9 @@ export function validateConfig(config) {
   // Copy only explicit non-secret settings. Device cookies and CLI credentials stay where they are.
   return { origin: url.origin, provider: "codex", scopes: config.scopes.map(s => ({ space: s.space, projectIds: s.projectIds })), preview: { enabled: true } };
 }
-function command(bin, args) {
+export function runSetupCommand(bin, args, { env = process.env } = {}) {
   return new Promise(resolveResult => {
-    const child = spawn(bin, args, { shell: false, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(bin, args, { env, shell: false, stdio: ["ignore", "pipe", "pipe"] });
     let output = "", done = false;
     const finish = code => { if (!done) { done = true; clearTimeout(timer); resolveResult({ code, output }); } };
     const timer = setTimeout(() => { child.kill(); finish(-1); }, 30_000);
@@ -41,11 +49,14 @@ function command(bin, args) {
     child.on("error", () => finish(-1)); child.on("close", finish);
   });
 }
-export async function preflight(run = command) {
+export async function preflight(run = runSetupCommand) {
   const git = await run("gh", ["auth", "status", "--hostname", "github.com"]);
   const codex = await run("codex", ["login", "status"]);
-  const docker = await run("docker", ["version", "--format", "{{.Server.Version}}"]);
-  return { github: git.code === 0, codex: codex.code === 0 && /ChatGPT/i.test(codex.output) && !/API key|workload identity/i.test(codex.output), docker: docker.code === 0 };
+  const dockerClient = await run("docker", ["--version"]);
+  const docker = dockerClient.code === 0 ? await run("docker", ["version", "--format", "{{.Server.Version}}"]): dockerClient;
+  return { github: git.code === 0, codex: codex.code === 0 && /ChatGPT/i.test(codex.output) && !/API key|workload identity/i.test(codex.output),
+    docker: dockerClient.code === 0 && docker.code === 0 && !!docker.output.trim(),
+    dockerProblem: dockerClient.code !== 0 ? "client_unavailable" : docker.code !== 0 || !docker.output.trim() ? "engine_unavailable" : null };
 }
 export async function downloadRuntime(origin, destination, transport = fetch) {
   const get = async name => {
@@ -74,19 +85,23 @@ export async function main(args = process.argv.slice(2)) {
   }
   if (process.platform !== "darwin") throw new Error("이 설치 명령은 맥미니의 터미널에서 실행해주세요.");
   if (Number(process.versions.node.split(".")[0]) < 24) throw new Error("Node 24 이상이 필요합니다.");
+  const path = macCommandPath();
+  const run = (bin, commandArgs) => runSetupCommand(bin, commandArgs, { env: { ...process.env, PATH: path } });
   const domain = `gui/${process.getuid()}`, directory = join(homedir(), "Library", "Application Support", "Jarvis");
   const plist = join(homedir(), "Library", "LaunchAgents", `${LABEL}.plist`);
   if (args[0] === "stop") {
-    await command("launchctl", ["bootout", `${domain}/${LABEL}`]);
+    await run("launchctl", ["bootout", `${domain}/${LABEL}`]);
     await rm(plist, { force: true });
     console.log("자동 실행을 중단했습니다. 승인·작업 이력·설정은 보존했습니다. 실행 중인 미리보기는 만료 시 종료됩니다."); return;
   }
   if (!["install", "check"].includes(args[0])) throw new Error("install, check, stop 중 하나를 사용해주세요.");
-  const ready = await preflight();
-  console.log(`GitHub ${ready.github ? "준비됨" : "로그인 필요"} · Codex 구독 ${ready.codex ? "준비됨" : "로그인 필요"} · Docker ${ready.docker ? "준비됨" : "실행 필요"}`);
+  const ready = await preflight(run);
+  console.log(`GitHub ${ready.github ? "준비됨" : "로그인 필요"} · Codex 구독 ${ready.codex ? "준비됨" : "로그인 필요"} · Docker ${ready.docker ? "준비됨" : ready.dockerProblem === "client_unavailable" ? "명령 경로 확인 필요" : "엔진 접속 확인 필요"}`);
   if (args[0] === "check") return;
   if (!ready.github || !ready.codex) throw new Error("맥미니에서 gh auth login 및 codex login을 확인해주세요. 인증값을 채팅에 보내지 마세요.");
-  if (!ready.docker) throw new Error("맥미니에서 Docker Desktop, Colima 등 Docker 호환 엔진을 실행한 뒤 다시 설치해주세요.");
+  if (!ready.docker) throw new Error(ready.dockerProblem === "client_unavailable"
+    ? "Docker 명령을 실행하지 못했습니다. Docker Desktop을 응용 프로그램에 설치하거나 Docker CLI 설치 경로를 확인해주세요."
+    : "Docker 명령은 찾았지만 엔진에 접속하지 못했습니다. Docker Desktop의 Engine running 상태와 docker context show의 접속 대상을 확인해주세요.");
   const index = args.indexOf("--config");
   if (index < 0 || !args[index + 1]) throw new Error("기존 jarvis-runner.json의 경로를 --config로 지정해주세요.");
   const config = validateConfig(JSON.parse(await readFile(resolve(args[index + 1]), "utf8")));
@@ -96,16 +111,15 @@ export async function main(args = process.argv.slice(2)) {
   const configPath = join(runtime, "jarvis-runner.json");
   await writeFile(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
   await mkdir(dirname(plist), { recursive: true });
-  const path = [...new Set([dirname(process.execPath), "/opt/homebrew/bin", "/usr/local/bin", ...String(process.env.PATH ?? "/usr/bin:/bin").split(":")])].join(":");
   const contents = launchAgent({ node: process.execPath, runner: join(runtime, "jarvis-runner.mjs"), config: configPath, directory, path });
   const staged = join(runtime, "agent.plist"); await writeFile(staged, contents, { mode: 0o600 });
-  if ((await command("plutil", ["-lint", staged])).code !== 0) throw new Error("자동 시작 설정 검증에 실패했습니다. 기존 실행기는 유지됩니다.");
+  if ((await run("plutil", ["-lint", staged])).code !== 0) throw new Error("자동 시작 설정 검증에 실패했습니다. 기존 실행기는 유지됩니다.");
   const previous = await readFile(plist).catch(() => null);
-  await command("launchctl", ["bootout", `${domain}/${LABEL}`]);
+  await run("launchctl", ["bootout", `${domain}/${LABEL}`]);
   await writeFile(plist, contents, { mode: 0o600 }); await chmod(plist, 0o600);
-  const boot = await command("launchctl", ["bootstrap", domain, plist]);
+  const boot = await run("launchctl", ["bootstrap", domain, plist]);
   if (boot.code !== 0) {
-    if (previous) { await writeFile(plist, previous, { mode: 0o600 }); await command("launchctl", ["bootstrap", domain, plist]); }
+    if (previous) { await writeFile(plist, previous, { mode: 0o600 }); await run("launchctl", ["bootstrap", domain, plist]); }
     else await rm(plist, { force: true });
     throw new Error("자동 시작 등록에 실패했습니다. macOS 로그인 세션을 확인해주세요.");
   }
