@@ -256,3 +256,13 @@ Docker internal 네트워크에서 호스트 포트 공개가 동작하지 않�
 Apple의 공식 [Creating Launch Daemons and Agents](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html)를 참고해 기존 사용자 LaunchAgent를 유지한다. GUI 도메인을 먼저 확인하고, 해당 실행기 등록의 제거를 기다린 뒤 설정을 교체한다. 등록이 없는 동안의 일시적인 bootstrap 5만 제한적으로 재시도하고 등록 존재를 재확인한다. 실패 시 부분 등록을 제거한 뒤 이전 설정·등록을 복원하며, 복원 실패를 성공으로 표시하지 않는다. 오류에는 단계와 숫자 상태만 넣고 명령 원문 로그는 출력하지 않는다.
 
 새 도구나 시스템 권한을 추가하지 않았다. 실제 임시 파일과 합성 launchctl 상태 전이로 지연된 종료, 일시적/지속적 등록 실패, 세션 부재, 종료 실패, 부분 등록, 복원 실패와 거짓 성공 응답을 검증한다. macOS 자체를 실행한 테스트가 아니므로 실제 Mac의 결과는 별도 확인한다. 실행기 재시작 후 이전 미리보기 포트는 끊길 수 있으며 새 화면 준비로 새 링크를 사용한다.
+
+
+## 2026-10-17 시트 작업 공간과 문서 구독 CLI (Issue #30)
+
+- 비교: `googleapis/google-api-nodejs-client` (공식 Apache-2.0, 186.0.0 검토, 2026-10-14 유지보수), `TanStack/table` (MIT, 2026-10-12 유지보수), `dream-num/univer` (코어 Apache-2.0, 2026-10-16 유지보수). Google SDK는 서버 토큰 보관/갱신이 필요한 경우 유용하고, TanStack은 대규모 정렬/가상화, Univer는 전체 편집기가 필요할 때 유용하다. 현재 제한된 읽기 표에는 추가 의존성이 이점보다 크므로 세 패키지 모두 보류한다.
+- 채택: 공식 브라우저 GIS token model + Google Picker + Sheets REST GET, 네이티브 HTML 표. Node 24.19 / Next 16.4 / React 19.3 기존 조합을 유지한다. 공식 hosted SDK는 버전 고정 npm 배포물이 아니며 실패/만료를 명시한다. `drive.file` 파일 선택 범위, OAuth 토큰 메모리 보관, 원본은 Google에서 편집. 전체 OAuth 동기화 서버·유료 모델 API·새 DB 마이그레이션을 추가하지 않는다.
+- 저장한 값은 기존 개인 서버의 documents에 포함하며 범위·시간·불변 보관 ID를 붙인다. 문답 근거를 질문 시점에 고정하고 보관/조회 실패/다른 기기 갱신으로 바뀌지 않게 한다. 질문과 보관본 ID를 기준으로 3-way 병합, 실행 결과는 원자적으로 보존, 복원은 대기 요청을 중단한다.
+- 문답 전용 `documentVersion:1` 작업은 기존 명시적 영역/프로젝트/기기 인증을 재사용한다. CLI 2.2.0, ChatGPT 로그인만 허용, 셸/웹/멀티에이전트/사용자 규칙 비활성화, 2분 모델 제한. 셀은 비신뢰 자료이고 원본 쓰기나 코드 작업 지시가 될 수 없다. 전송 실패 시 비공개 결과 캐시를 재사용한다.
+- 외부 전송: 선택한 범위는 Google→브라우저→기존 개인 Jarvis 저장소, 사용자가 질문하면 해당 범위/질문/같은 보관 범위의 최근 대화가 Mac 구독 CLI→OpenAI로 전달된다. Google 자격 증명은 저장소/실행기에 보내지 않는다. 실제 Google 설정/사용자 구독 실사용은 최초 연결 뒤 별도로 확인한다.
+- 검증 결과는 PR/Issue #30에 기록한다. 합성 브라우저·모델 계약과 일회용 실제 Supabase 저장 검증을 분리한다.

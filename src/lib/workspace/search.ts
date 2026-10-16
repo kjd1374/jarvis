@@ -1,5 +1,6 @@
 import type { Space, WorkspaceData } from "./types";
 import { repositoryFor } from "../automation/state";
+import { sheetUrl } from "../sheets/documents";
 export type SearchScope = {
   space: Space;
   projectId?: string | null;
@@ -60,6 +61,17 @@ export function searchWorkspace(
         freshness,
       };
     });
+  records.push(
+    ...data.documents.filter(allowed).flatMap(document => document.sheet ? document.sheet.tabs.flatMap(tab => {
+      const snapshot = document.sheet!.snapshots.find(s => s.id === tab.snapshotId);
+      if (!snapshot) return [];
+      const collectedAt = tab.checkedAt ?? snapshot.capturedAt;
+      return [{ id: `sheet:${document.id}:${snapshot.id}`, kind: "fact" as const, space: document.space, projectId: document.projectId,
+        title: `${document.name} · ${snapshot.tabTitle} · ${snapshot.range}`, content: snapshot.values.map(row => row.join(" | ")).join("\n"),
+        sourceUrl: sheetUrl(document.sheet!.spreadsheetId, tab.id, snapshot.range), serviceName: "Google Sheets · 보관한 범위", status: document.sheet!.archivedAt ? "보관" : "업무 중",
+        updatedAt: collectedAt, collectedAt, freshness: Date.parse(stamp) - Date.parse(collectedAt) > 86_400_000 ? "stale" as const : "fresh" as const }];
+    }) : []),
+  );
   records.push(
     ...data.notes.filter(allowed).map((row): Evidence => ({
       id: row.id,

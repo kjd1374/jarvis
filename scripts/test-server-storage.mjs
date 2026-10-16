@@ -938,6 +938,36 @@ try {
   assert.equal(previewSaved.body.data.projects.find(p => p.id === projectId).automation.turns.at(-1).result.preview.url, previewResult.preview.url);
   assert(!previewSaved.body.data.tasks.some(t => t.id === `work-${previewId}`));
   recordCheck("preview capability gates old runners; device-fenced exact-commit result persists without a change task (synthetic preview URL)");
+  // Actual private storage and HTTP contracts; synthetic sheet values and model answer only.
+  const sheetState = await api("/api/workspace?space=company", a.token);
+  const documentId = randomUUID(), documentQuestionId = randomUUID(), snapshotId = randomUUID(), sheetProject = "synthetic-sheet-only";
+  sheetState.body.data.projects.push({ id: sheetProject, space: "company", name: "합성 문답 전용", description: "GitHub 연결 없는 범위", createdAt: autoStamp });
+  sheetState.body.data.documents.push({ id: documentId, space: "company", projectId: sheetProject, taskId: null, name: "합성 시트", mime: "application/vnd.google-apps.spreadsheet", size: 0, createdAt: autoStamp,
+    sourceUrl: "https://docs.google.com/spreadsheets/d/synthetic_sheet_123/edit", sheet: { version: 1, spreadsheetId: "synthetic_sheet_123", folder: "", pinned: false, archivedAt: autoStamp,
+      tabs: [{ id: 7, title: "합성 탭", snapshotId, checkedAt: autoStamp }], snapshots: [{ id: snapshotId, tabId: 7, tabTitle: "합성 탭", range: "B10:C12", capturedAt: autoStamp, values: [["항목", "값"], ["합성 일정", "20일"]] }],
+      questions: [{ id: documentQuestionId, snapshotId, question: "보관한 합성 일정은?", documentName: "합성 시트", readAt: autoStamp, createdAt: autoStamp, updatedAt: autoStamp, status: "queued", attempt: 0 }] } });
+  assert.equal((await api("/api/workspace", a.token, "PUT", { space: "company", data: sheetState.body.data, revision: sheetState.body.revision })).status, 200);
+  assert.equal((await api("/api/sheets/config", b.token)).status, 403);
+  assert.deepEqual((await api("/api/sheets/config", a.token)).body, { configured: false });
+  const sheetClaim = { space: "company", projectIds: [sheetProject], provider: "codex", documentVersion: 1 };
+  assert.equal((await api("/api/automation/claim", a.token, "POST", { ...sheetClaim, documentVersion: undefined })).body.job, null);
+  assert.equal((await api("/api/automation/claim", b.token, "POST", sheetClaim)).status, 403);
+  const documentClaims = await Promise.all([api("/api/automation/claim", a.token, "POST", sheetClaim), api("/api/automation/claim", a.secondToken, "POST", sheetClaim)]);
+  assert(documentClaims.every(c => c.status === 200)); assert.equal(documentClaims.filter(c => c.body.job?.kind === "document").length, 1);
+  const documentJob = documentClaims.find(c => c.body.job)?.body.job, documentWinner = documentClaims[0].body.job ? a.token : a.secondToken;
+  const documentLoser = documentWinner === a.token ? a.secondToken : a.token;
+  assert.equal(documentJob.snapshot.range, "B10:C12");
+  const documentIdentity = { space: "company", projectId: sheetProject, documentId, snapshotId, jobId: documentQuestionId, leaseToken: documentJob.leaseToken };
+  assert.equal((await api("/api/automation/document", documentLoser, "POST", { ...documentIdentity, phase: "heartbeat" })).status, 409);
+  assert.equal((await api("/api/automation/document", documentWinner, "POST", { ...documentIdentity, phase: "heartbeat" })).status, 200);
+  const documentAnswer = { reply: "합성 일정은 20일입니다.", rows: [11], limitation: "저장한 범위만 확인" };
+  assert.equal((await api("/api/automation/document", documentWinner, "POST", { ...documentIdentity, phase: "result", answer: { ...documentAnswer, rows: [999] } })).status, 400);
+  for (let i = 0; i < 2; i++) assert.equal((await api("/api/automation/document", documentWinner, "POST", { ...documentIdentity, phase: "result", answer: documentAnswer })).status, 200);
+  assert.equal((await api("/api/automation/document", documentLoser, "POST", { ...documentIdentity, phase: "result", answer: documentAnswer })).status, 409);
+  const documentSaved = await api("/api/workspace?space=company", a.secondToken);
+  assert.deepEqual(documentSaved.body.data.documents.find(d => d.id === documentId).sheet.questions[0].answer, documentAnswer);
+  assert(!(await api("/api/workspace?space=personal", a.token)).body.data.documents.some(d => d.id === documentId));
+  recordCheck("archived sheet Q&A persists without GitHub; capabilities, concurrent claims, scope/device/snapshot leases and duplicate delivery enforced by real private storage (synthetic Google/model data)");
   console.log(
     JSON.stringify(
       {

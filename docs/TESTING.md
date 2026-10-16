@@ -160,3 +160,10 @@ npm run test:storage -- --grep '원본 포함 백업'
 - `npm run check` lint/타입/빌드 통과. 별도 실제 로컬 Supabase의 **15개 검증 그룹 통과**. 정기 점검 heartbeat가 같은 연결의 runnerSeenAt을 갱신하는지와 다른 기기의 갱신 거절을 검사한다.
 - 합성 데이터/CLI 응답으로 검사했고 테스트의 운영 DB·유료 모델·사용자 저장소 코드 실행은 0이다. 사용자 문의 진단에서는 승인된 실행기의 접속/처리 상태 메타데이터만 읽었으며 업무 내용이나 인증값을 로그/공개 기록으로 옮기지 않았다.
 - 최종 PR/main CI와 운영 배포/합성 화면 확인은 Issue #17과 연결 PR에 기록한다. 실제 사용자 모델의 다음 자연어 답변 정확성은 별도이며 기존 답변을 다시 생성하지 않는다.
+# 2026-10-17 시트 작업 공간과 문답 (Issue #30)
+
+- `npm run test:domain`: 38개 통과. 제한 범위·불변 보관본·자료실/복귀·회사/개인/프로젝트 검색, 질문 임대·기기/토큰/보관본 검증·취소/재시도·중복 결과·동시 저장 병합·복원 요청 중단을 포함한다.
+- `npm run test:automation`: 39개 통과. 실제 구독 호출 없이 Codex의 ChatGPT 로그인·격리·도구 비활성화·stdin/JSON 계약, 잘못된 근거 행 거절, 전송 재시도의 모델 재사용을 검증했다. 기존 Mac 설치기/프로젝트 실행/미리보기 회귀와 배포 manifest 해시도 통과했다.
+- `npm run test:all`: 데스크톱/모바일/IndexedDB 저장 90개 통과. 합성 Google SDK/Picker/Sheets 응답으로 실제 브라우저 선택/권한 헤더/범위 GET/오류 시 보존/새로고침과 토큰 미보관, 문답 큐/답변/자료실/취소를 확인했다. 실제 사용자 Google/구독 성공을 뜻하지 않는다.
+- `npm run test:server`: 일회용 로컬 Supabase 실제 Auth/RLS/API·두 기기·CAS 검증 통과. GitHub가 없는 시트 전용 프로젝트에서 보관 문서 문답을 저장·배정·답변 재전송하고, 구버전/다른 기기/잘못된 행을 차단했다. 운영 데이터·실제 Google·유료 모델 호출 0.
+- `npm run check`: lint/typecheck/production build 통과. 최초 Google Cloud/OAuth/Picker 설정과 사용자 Mac 2.2.0 업데이트, 실제 파일 동의·구독 답변 확인은 사용자 첫 연결 단계로 남긴다. PR CI는 최종 커밋에 대해 전체 검증을 다시 수행한다.

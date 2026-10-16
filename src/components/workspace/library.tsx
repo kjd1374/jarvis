@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Link from "next/link";
 import {
   assertLinks,
   dateLabel,
@@ -33,7 +34,7 @@ function LibraryView() {
   const projectId = data.activeProjects[space];
   const projects = data.projects.filter((p) => p.space === space);
   const documents = data.documents.filter(
-    (d) => d.space === space && (!projectId || d.projectId === projectId),
+    (d) => d.space === space && (!projectId || d.projectId === projectId) && (!d.sheet || !!d.sheet.archivedAt),
   );
   const [search, setSearch] = useState("");
   const [taskFilter, setTaskFilter] = useState("");
@@ -318,7 +319,7 @@ function LibraryView() {
                 <div>
                   <strong>{file.name}</strong>
                   <small>
-                    {file.sourceUrl
+                    {file.sheet ? `시트 보관 · ${file.sheet.tabs.filter(t => t.snapshotId).length}개 탭의 불러온 범위 · 문답 ${file.sheet.questions.length}개` : file.sourceUrl
                       ? "원본 링크 · 내용 미복제"
                       : `${fileSize(file.size)} · ${file.name.split(".").pop()?.toUpperCase() || "FILE"}`}
                   </small>
@@ -338,6 +339,7 @@ function LibraryView() {
               </div>
               <time dateTime={file.createdAt}>{dateLabel(file.createdAt)}</time>
               <div className={styles.fileActions}>
+                {file.sheet && <Link href={`/tasks?document=${file.id}`} aria-label={`${file.name} 보기·질문`}>보기·질문</Link>}
                 <button
                   disabled={saving}
                   aria-label={`${file.name} 연결 설정`}

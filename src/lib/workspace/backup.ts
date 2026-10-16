@@ -95,6 +95,8 @@ export function parseBackup(text: string): Backup {
   // Restoring a record is not permission to replay a previous external code change.
   data.projects = data.projects.map(p => p.automation ? { ...p, automation: { turns: p.automation.turns.map(t =>
     ["queued", "running"].includes(t.status) ? { ...t, status: "interrupted" as const, error: "imported_request_review", leaseOwner: undefined, leaseToken: undefined, leaseUntil: undefined } : t) } } : p);
+  data.documents = data.documents.map(d => d.sheet ? { ...d, sheet: { ...d.sheet, runnerSeenAt: undefined, questions: d.sheet.questions.map(q =>
+    ["queued", "running"].includes(q.status) ? { ...q, status: "interrupted" as const, error: "imported_request_review", leaseOwner: undefined, leaseToken: undefined, leaseUntil: undefined } : q) } } : d);
   return { ...value, data };
 }
 export async function backupFiles(backup: Backup) {

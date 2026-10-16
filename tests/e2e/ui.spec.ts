@@ -178,7 +178,7 @@ test("읽기 오류를 데이터 초기화 없이 다시 불러온다", async ({
 
 for (const [path, label, emptyTitle] of [
   ["/projects", "프로젝트", "업무에 하나의 흐름을 만들어주세요"],
-  ["/tasks", "업무", "다음 할 일을 적어주세요"],
+  ["/tasks?view=records", "업무", "다음 할 일을 적어주세요"],
 ]) {
   test(`${label} 읽기 실패는 빈 목록으로 표시하지 않고 재시도한다`, async ({
     page,

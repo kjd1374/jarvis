@@ -199,7 +199,7 @@ test("프로젝트에 서비스·메모·할 일·요청을 저장하고 실제 
   await popup.waitForLoadState();
   await expect(popup).toHaveURL("http://127.0.0.1:4317/api/health");
   await popup.close();
-  await page.goto("/tasks");
+  await page.goto("/tasks?view=records");
   await page.getByRole("button", { name: "업무 만들기", exact: true }).click();
   const task = page.getByRole("dialog", { name: "업무 만들기", exact: true });
   await task

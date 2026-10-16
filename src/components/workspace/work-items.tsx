@@ -136,6 +136,7 @@ function WorkItemsView({
       </div>
       {kind === "tasks" && (
         <div className={styles.filterTabs} aria-label="업무 보기">
+          <Link href="/tasks">시트 작업 공간</Link>
           <button
             aria-pressed={view === "tasks"}
             onClick={() => setView("tasks")}

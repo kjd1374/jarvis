@@ -57,6 +57,7 @@ export type ContextRevision = {
   revision: number;
 };
 export type Document = {
+  sheet?: import("../sheets/types").SheetDocument;
   sourceUrl?: string;
   id: string;
   space: Space;

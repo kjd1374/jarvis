@@ -36,22 +36,24 @@ export function mergeCloudWorkspace(
       if (r === undefined) return l;
     }
     const turn = path.length === 5 && path[0] === "projects" && path[2] === "automation" && path[3] === "turns";
+    const question = path.length === 5 && path[0] === "documents" && path[2] === "sheet" && path[3] === "questions";
     const job = path.length === 4 && path[0] === "services" && path[2] === "monitoring" && path[3] === "job";
     const observation = path.length === 4 && path[0] === "services" && path[2] === "monitoring" &&
       ["runnerSeenAt", "runnerVersion", "lastSuccessAt", "lastAttemptAt", "error", "nextRetryAt", "inspection", "analysis", "previousAnalyses", "webLinks"].includes(path[3]) ||
       path.length === 3 && path[0] === "sourceRecords" && path[2] !== "taskId";
-    if (observation) return r;
+    if (observation || path.length === 4 && path[0] === "documents" && path[2] === "sheet" && path[3] === "runnerSeenAt") return r;
     // Never splice lease/result fields or roll back a progressing execution during review.
-    if (turn || job) {
+    if (turn || job || question) {
       conflicts.push(path.join("."));
       return r;
     }
     const keyed = path.length === 1 && collections.includes(path[0] as typeof collections[number]) ||
-      path.length === 4 && path[0] === "projects" && path[2] === "automation" && path[3] === "turns";
+      path.length === 4 && path[0] === "projects" && path[2] === "automation" && path[3] === "turns" ||
+      path.length === 4 && path[0] === "documents" && path[2] === "sheet" && ["questions", "snapshots", "tabs"].includes(path[3]);
     if (keyed && Array.isArray(l) && Array.isArray(r) && (b === undefined || Array.isArray(b))) {
       const indexed = (rows: unknown[]) => new Map(rows.map(row => {
-        if (!object(row) || typeof row.id !== "string") throw new Error("항목 ID를 확인해주세요. 기존 기록은 유지됩니다.");
-        return [row.id, row] as const;
+        if (!object(row) || !(typeof row.id === "string" || path[3] === "tabs" && Number.isSafeInteger(row.id))) throw new Error("항목 ID를 확인해주세요. 기존 기록은 유지됩니다.");
+        return [String(row.id), row] as const;
       }));
       const bm = indexed(Array.isArray(b) ? b : []), lm = indexed(l), rm = indexed(r);
       const ids = new Set([...rm.keys(), ...lm.keys(), ...bm.keys()]);
