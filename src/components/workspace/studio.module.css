@@ -2433,3 +2433,10 @@
 
 .runnerStatus { padding: 4px 8px; border-radius: 6px; background: #453c252e; color: #dcc58f !important; }
 .runnerStatus[data-online="true"] { background: #204339; color: #a2e1c1 !important; }
+
+.projectScreen { margin-block: 1rem; }
+.projectScreen p, .screenResult p { margin: 0.5rem 0; color: var(--muted, #b7c5df); font-size: 0.875rem; }
+.screenResult { display: flex; flex-wrap: wrap; align-items: center; gap: 0.65rem 1rem; margin-block: 0.65rem; }
+.screenResult p, .screenResult small { flex-basis: 100%; overflow-wrap: anywhere; }
+.screenResult small { color: var(--muted, #b7c5df); }
+@media (max-width: 600px) { .projectScreen > div:first-child { flex-wrap: wrap; gap: 0.75rem; } }

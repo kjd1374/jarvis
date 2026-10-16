@@ -212,3 +212,30 @@ test("과거 수집 기록과 현재 실행기 접속을 구분하고 예전 중
   await interrupted.getByRole("button", { name: "요청 취소", exact: true }).click();
   await expect.poll(async () => (await state(page))!.projects[0].automation!.turns[0].status).toBe("cancelled");
 });
+
+test("화면 준비 요청과 맥미니 전용 링크·만료 상태를 저장하고 모바일에서도 표시한다", async ({ page }, info) => {
+  const stamp = new Date().toISOString(), data = automationWorkspace(stamp);
+  await page.clock.install({ time: new Date(stamp) });
+  await seed(page, data); await page.goto("/projects/auto-project"); await ready(page);
+  const screen = page.getByRole("region", { name: "수정된 화면 확인", exact: true });
+  await screen.getByRole("button", { name: "화면 준비", exact: true }).click();
+  await expect(screen).toContainText("요청을 저장했습니다");
+  await expect(screen.getByRole("button")).toBeDisabled();
+  const saved = (await state(page))!;
+  expect(saved.projects[0].automation!.turns[0].mode).toBe("preview"); expect(saved.tasks).toHaveLength(0);
+  const { claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
+  const claimed = claimProjectWork(saved, { space: "company", projectIds: ["auto-project"], deviceId: "runner", previews: true }, stamp), job = claimed.job!;
+  const complete = reportProjectWork(claimed.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: {
+    reply: "합성 미리보기 준비", summary: "화면 준비", currentStatus: "", nextAction: "", changes: [], checks: [], followUps: [], outcome: "answered", branch: null, baseSha: "a".repeat(40), headSha: null, prUrl: null,
+    deployment: { state: "not_configured", url: null, sha: null }, preview: { state: "ready", kind: "mac", url: "http://127.0.0.1:45678/", sha: "a".repeat(40), checkedAt: stamp, expiresAt: new Date(Date.parse(stamp) + 60_000).toISOString(), message: "실행한 맥미니에서 열 수 있습니다." },
+  } }, "runner", stamp);
+  await seed(page, complete); await page.goto("/projects/auto-project"); await ready(page);
+  await expect(screen.getByRole("link", { name: "맥미니에서 화면 열기" })).toHaveAttribute("href", "http://127.0.0.1:45678/");
+  await expect(screen).toContainText("실행한 맥미니");
+  await page.setViewportSize({ width: 320, height: 740 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: info.outputPath("project-screen-mobile.png"), fullPage: true });
+  await page.clock.fastForward(61_000);
+  await expect(screen).toContainText("미리보기 시간 만료");
+  await expect(screen.getByRole("link", { name: "맥미니에서 화면 열기" })).toHaveCount(0);
+});

@@ -9,6 +9,7 @@ import { useWorkspace } from "./workspace-provider";
 import { useWorkspaceClock } from "./use-workspace-clock";
 import { Icon } from "./icon";
 import { BriefText } from "./brief-text";
+import { PreviewResult } from "./project-screen";
 import styles from "./studio.module.css";
 const phases: Record<ProjectTurn["phase"], string> = { queued: "실행 대기", preparing: "저장소 확인 중", coding: "코드 수정 중", testing: "변경 검사 중", publishing: "GitHub 반영·검증 중", reporting: "결과 정리 중" };
 const outcomes = { answered: "답변 완료", no_changes: "검토 완료 · 코드 변경 없음", pr_open: "PR 작성 · 반영 대기", merged: "병합 완료 · 배포 확인 중", deployed: "배포 확인 완료", blocked: "확인 필요" };
@@ -26,6 +27,7 @@ const errors: Record<string, string> = {
 function turnStatus(turn: ProjectTurn) {
   if (turn.status === "cancelled") return "요청 취소됨";
   if (turn.error || turn.status === "failed" || turn.status === "interrupted") return "확인 필요";
+  if (turn.mode === "preview") return turn.result?.preview?.state === "ready" ? "화면 준비 완료" : turn.result ? "화면 준비 필요" : "화면 준비 중";
   return turn.result ? outcomes[turn.result.outcome] : phases[turn.phase];
 }
 function WorkTurn({ turn, saving, onAction }: { turn: ProjectTurn; saving: boolean; onAction: (turn: ProjectTurn, action: "cancel" | "retry") => void }) {
@@ -34,12 +36,13 @@ function WorkTurn({ turn, saving, onAction }: { turn: ProjectTurn; saving: boole
     <BriefText text={turn.request} label="요청 전문" limit={100} />
     <div className={styles.agentReply}>
       {turn.result ? <><BriefText text={turn.result.reply} label="답변 전문" />
+        {turn.result.preview && <details className={styles.compactDisclosure}><summary>이 작업의 화면</summary><PreviewResult preview={turn.result.preview} /></details>}
         {turn.result.prUrl && <a href={turn.result.prUrl} target="_blank" rel="noopener noreferrer">변경 PR 열기 ↗</a>}
         {turn.result.deployment.url && <a href={turn.result.deployment.url} target="_blank" rel="noopener noreferrer">반영된 화면 열기 ↗</a>}
       </> : !turn.error && <p>{turn.status === "queued" ? "CLI가 연결되면 자동으로 시작합니다." : turn.status === "cancelled" ? "이미 반영된 변경은 유지됩니다." : "작업 중입니다. 결과는 자동으로 갱신됩니다."}</p>}
       {turn.error && <p role="status">{errors[turn.error] ?? "실행을 마치지 못했습니다. 저장된 결과를 확인한 뒤 이어서 시도해주세요."}</p>}
       <div className={styles.agentTurnActions}>
-        <span>{turn.mode === "ask" ? "질문" : turn.publish === "merge" ? "수정·검증 후 반영" : "수정 후 PR 검토"}</span>
+        <span>{turn.mode === "preview" ? "화면 준비 · AI 호출 없음" : turn.mode === "ask" ? "질문" : turn.publish === "merge" ? "수정·검증 후 반영" : "수정 후 PR 검토"}</span>
         {["failed", "interrupted"].includes(turn.status) && <button className={styles.textButton} disabled={saving} onClick={() => onAction(turn, "retry")}>이어서 실행</button>}
         {["queued", "running", "failed", "interrupted"].includes(turn.status) && <button className={styles.textButton} disabled={saving} onClick={() => onAction(turn, "cancel")}>요청 취소</button>}
       </div>
@@ -110,7 +113,7 @@ export function ProjectAgent({ project }: { project: Project }) {
 }
 export function ProjectAutomaticResults({ project }: { project: Project }) {
   const { data } = useWorkspace();
-  const turns = (project.automation?.turns ?? []).filter(t => t.result && data.services.some(s => s.id === t.serviceId && s.space === project.space && s.projectId === project.id && repositoryFor(s) === t.repository));
+  const turns = (project.automation?.turns ?? []).filter(t => t.mode !== "preview" && t.result && data.services.some(s => s.id === t.serviceId && s.space === project.space && s.projectId === project.id && repositoryFor(s) === t.repository));
   const latest = turns.at(-1);
   const monitor = data.services.filter(s => s.space === project.space && s.projectId === project.id && s.monitoring?.repository === repositoryFor(s))
     .map(s => s.monitoring!).filter(m => m.analysis).sort((a, b) => b.analysis!.generatedAt.localeCompare(a.analysis!.generatedAt))[0];

@@ -28,7 +28,7 @@ test("GitHub 사실은 중복 없이 저장하고 v4 업무 연결 상태는 바
   data = acceptFacts(data, data.services[0], facts(), "2026-10-15T10:01:00Z");
   expect(data.sourceRecords).toHaveLength(1);
   expect(data.services[0].monitoring!.inspection!.fingerprint).toBe(fingerprint);
-  expect(searchWorkspace(data, { space: "company", query: "합성" })[0].freshness).toBe("fresh");
+  expect(searchWorkspace(data, { space: "company", query: "합성" }, "2026-10-15T10:02:00Z")[0].freshness).toBe("fresh");
   expect(normalizeWorkspace(data).services[0].monitoring?.inspection).toBeTruthy();
 });
 test("부분 조회는 파일 삭제를 반영하지 않으며 다른 저장소·비밀값을 제한한다", () => {

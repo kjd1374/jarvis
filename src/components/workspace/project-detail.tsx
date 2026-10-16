@@ -1,4 +1,5 @@
 "use client";
+import { ProjectScreen } from "./project-screen";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -187,7 +188,7 @@ function ProjectView({ project }: { project: Project }) {
           {!links.github.length && <ServiceRegistrationButton preset="github" projectId={project.id}>GitHub 연결</ServiceRegistrationButton>}
           <a className={styles.textButton} href="#project-ai">AI에 수정 요청 →</a>
         </div>
-        <p>{links.web.length ? "실제 화면을 새 탭에서 확인하고 바로 아래 AI에게 요청하세요. GitHub에서 발견한 웹 주소도 자동으로 표시됩니다." : links.github.length ? "연결된 CLI가 GitHub 홈페이지·배포 기록에서 웹 주소를 자동으로 찾습니다. 주소가 발견되면 여기에 표시됩니다." : "GitHub를 연결하면 실행기가 웹 주소와 프로젝트 내용을 확인합니다."}</p>
+        <p>{links.web.length ? "실제 화면을 새 탭에서 확인하고 바로 아래 AI에게 요청하세요. GitHub에서 발견한 웹 주소도 자동으로 표시됩니다." : links.github.length ? "아래 화면 준비를 누르면 현재 코드의 배포 또는 맥미니 미리보기를 확인할 수 있습니다." : "GitHub를 연결하면 실행기가 웹 주소와 프로젝트 내용을 확인합니다."}</p>
         {data.services.some(s => s.space === project.space && s.projectId === project.id && s.monitoring?.webLinks?.length) &&
           <details className={styles.revisionDetails}><summary>자동으로 찾은 웹 주소의 출처</summary>
             {data.services.filter(s => s.space === project.space && s.projectId === project.id && s.monitoring?.repository === repositoryKey(githubConnectionUrl(s) ?? "")).flatMap(s => s.monitoring?.webLinks ?? []).map((link, index) =>
@@ -199,6 +200,7 @@ function ProjectView({ project }: { project: Project }) {
           {notice}
         </p>
       )}
+      <ProjectScreen project={project} />
       <ProjectAgent project={project} />
       <ProjectAutomaticResults project={project} />
       <details className={styles.projectDisclosure}>

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Jarvis private outbound runner. Official gh/Codex CLIs own their logins.
-// No inbound listener or API billing fallback. Work requests use isolated checkouts.
+// No public listener or API billing fallback. Optional previews use host loopback only.
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
@@ -8,7 +8,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-export const VERSION = "2.0.1";
+export const VERSION = "2.1.0";
 export class RunnerError extends Error {
   constructor(code) { super(code); this.code = code; }
 }
@@ -406,8 +406,8 @@ function dependencyFailureDetail(install) {
   const reason = Object.hasOwn(reasons, code) ? `${reasons[code]} (${code})` : `npm 실행 실패 (종료 코드 ${Number.isInteger(install.code) ? install.code : "확인 불가"})`;
   return `의존성 준비 실패: ${reason}. 의존성이 필요한 로컬 검사는 완료로 판단할 수 없습니다.`;
 }
-export async function executeProjectWork(client, job, { stateDir, run = runCommand, model = runCodexWork, get = githubGet, delay = wait, log = console.log } = {}) {
-  if (!stateDir || !/^[a-f0-9-]{36}$/.test(job.id) || !/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/.test(job.repository) || job.repository.includes("..") || !["ask", "change"].includes(job.mode) || !["pr", "merge"].includes(job.publish)) throw new RunnerError("invalid_work_scope");
+export async function executeProjectWork(client, job, { stateDir, run = runCommand, model = runCodexWork, get = githubGet, delay = wait, log = console.log, previewEnabled = false, previewTools } = {}) {
+  if (!stateDir || !/^[a-f0-9-]{36}$/.test(job.id) || !/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/.test(job.repository) || job.repository.includes("..") || !["ask", "change", "preview"].includes(job.mode) || !["pr", "merge"].includes(job.publish)) throw new RunnerError("invalid_work_scope");
   const identity = { space: job.space, projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken };
   const abort = new AbortController();
   let progress = "preparing";
@@ -467,6 +467,31 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
         if (!allowedWorkPath(path) || info?.isSymbolicLink()) { journal.omittedPaths.push(path); await rm(target, { recursive: true, force: true }); }
       }
       journal.prepared = true; await save();
+    }
+    const prepareScreen = async (sha) => {
+      try {
+        const tools = previewTools ?? await import("./jarvis-preview.mjs");
+        const deployed = await tools.findDeploymentPreview(job.repository, sha, get, publicWebUrl);
+        if (deployed) return deployed;
+        if (!previewEnabled) return { state: "unavailable", kind: "mac", url: null, sha, checkedAt: new Date().toISOString(), expiresAt: null, message: "맥미니 미리보기 설정이 필요합니다. 설정에서 맥미니 실행기를 설치해주세요." };
+        // Preview exactly the observed commit, including the merge commit, in a fresh sanitized container.
+        await pulse();
+        const current = (await git(["rev-parse", "HEAD"])).out.trim();
+        if (current !== sha) { await git(["fetch", "origin", sha]); await git(["checkout", "--detach", sha]); }
+        const files = (await git(["ls-files", "-z"])).out.split("\0").filter(Boolean);
+        return await tools.startMacPreview({ cwd, files, sha, stateDir, identity: `${job.space}:${job.projectId}:${job.id}`, group: `${job.space}:${job.projectId}:${job.repository}`, run, signal: abort.signal });
+      } catch {
+        return { state: "failed", kind: "mac", url: null, sha, checkedAt: new Date().toISOString(), expiresAt: null, message: "미리보기 모듈 또는 실행 환경을 확인하지 못했습니다. 맥미니 실행기를 설치한 뒤 다시 준비해주세요." };
+      }
+    };
+    if (job.mode === "preview") {
+      const preview = await prepareScreen(journal.baseSha);
+      const result = { reply: preview.message, summary: preview.state === "ready" ? "웹 화면 준비 완료" : "웹 화면 준비 필요", currentStatus: "", nextAction: "", changes: [], checks: [], followUps: [],
+        outcome: preview.state === "ready" ? "answered" : "blocked", branch: null, baseSha: journal.baseSha, headSha: null, prUrl: null,
+        deployment: { state: "not_configured", url: null, sha: null }, preview };
+      await pulse(); journal.result = result; await save();
+      await client.request("/api/automation/work", { ...identity, phase: "result", result });
+      log("웹 화면 준비 결과를 저장했습니다. AI 모델은 호출하지 않았습니다."); return;
     }
     const checks = journal.checks ?? [];
     // Install only locked npm packages, with lifecycle scripts disabled and no user npm config/tokens.
@@ -601,6 +626,9 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
         }
       }
     }
+    if (job.mode === "change" && !journal.model.blocked && previewEnabled) {
+      result.preview = await prepareScreen(result.deployment.sha ?? result.headSha ?? journal.baseSha);
+    }
     progress = "reporting"; await pulse();
     journal.result = result; await save();
     await client.request("/api/automation/work", { ...identity, phase: "result", result });
@@ -651,8 +679,8 @@ export async function main(argv = process.argv.slice(2)) {
   console.log(`Jarvis 실행기 ${VERSION} 연결됨 · 선택한 영역/프로젝트만 점검합니다. 구독 사용 한도가 적용됩니다.`);
   do {
     for (const scope of config.scopes) {
-      const claimed = await resilientRequest("/api/automation/claim", { ...scope, provider: config.provider, workVersion: 1 });
-      if (claimed.job?.kind === "work") await executeProjectWork(client, claimed.job, { stateDir });
+      const claimed = await resilientRequest("/api/automation/claim", { ...scope, provider: config.provider, workVersion: 1, previewVersion: config.preview?.enabled === true ? 1 : 0 });
+      if (claimed.job?.kind === "work") await executeProjectWork(client, claimed.job, { stateDir, previewEnabled: config.preview?.enabled === true });
       else if (claimed.job) await executeJob(client, claimed.job, { stateDir });
     }
     if (argv.includes("--once")) return;

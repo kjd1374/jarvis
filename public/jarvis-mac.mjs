@@ -1,0 +1,116 @@
+#!/usr/bin/env node
+// One-time, user-owned LaunchAgent installation. Never copies provider credentials.
+import { spawn } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, readFile, writeFile, chmod, rm } from "node:fs/promises";
+import { homedir } from "node:os";
+import { resolve, join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const LABEL = "app.jarvis.runner";
+export const xml = text => String(text).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
+export function launchAgent({ node, runner, config, directory, path }) {
+  const args = ["/usr/bin/caffeinate", "-is", node, runner, "--config", config];
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>
+<key>Label</key><string>${LABEL}</string>
+<key>ProgramArguments</key><array>${args.map(a => `<string>${xml(a)}</string>`).join("")}</array>
+<key>WorkingDirectory</key><string>${xml(directory)}</string>
+<key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(path)}</string></dict>
+<key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>30</integer>
+<key>ProcessType</key><string>Background</string><key>Umask</key><integer>63</integer>
+<key>StandardOutPath</key><string>${xml(join(directory, "runner.log"))}</string>
+<key>StandardErrorPath</key><string>${xml(join(directory, "runner-error.log"))}</string>
+</dict></plist>\n`;
+}
+export function validateConfig(config) {
+  const url = new URL(config.origin);
+  if (url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash ||
+    config.provider !== "codex" || !Array.isArray(config.scopes) || !config.scopes.length || config.scopes.length > 2 ||
+    config.scopes.some(s => !["company", "personal"].includes(s.space) || !Array.isArray(s.projectIds) || !s.projectIds.length || s.projectIds.length > 20 ||
+      s.projectIds.some(id => id !== null && (typeof id !== "string" || !id || id.length > 200)))) throw new Error("설정 파일의 Jarvis 주소·영역·프로젝트를 확인해주세요.");
+  // Copy only explicit non-secret settings. Device cookies and CLI credentials stay where they are.
+  return { origin: url.origin, provider: "codex", scopes: config.scopes.map(s => ({ space: s.space, projectIds: s.projectIds })), preview: { enabled: true } };
+}
+function command(bin, args) {
+  return new Promise(resolveResult => {
+    const child = spawn(bin, args, { shell: false, stdio: ["ignore", "pipe", "pipe"] });
+    let output = "", done = false;
+    const finish = code => { if (!done) { done = true; clearTimeout(timer); resolveResult({ code, output }); } };
+    const timer = setTimeout(() => { child.kill(); finish(-1); }, 30_000);
+    for (const stream of [child.stdout, child.stderr]) stream.on("data", b => { if (output.length < 100_000) output += b.toString(); });
+    child.on("error", () => finish(-1)); child.on("close", finish);
+  });
+}
+export async function preflight(run = command) {
+  const git = await run("gh", ["auth", "status", "--hostname", "github.com"]);
+  const codex = await run("codex", ["login", "status"]);
+  const docker = await run("docker", ["version", "--format", "{{.Server.Version}}"]);
+  return { github: git.code === 0, codex: codex.code === 0 && /ChatGPT/i.test(codex.output) && !/API key|workload identity/i.test(codex.output), docker: docker.code === 0 };
+}
+export async function downloadRuntime(origin, destination, transport = fetch) {
+  const get = async name => {
+    const response = await transport(`${origin}/${name}`, { redirect: "error", signal: AbortSignal.timeout(30_000) });
+    if (!response.ok) throw new Error("Jarvis 실행기 파일을 받지 못했습니다. 웹 접속 상태를 확인해주세요.");
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.length > 1_000_000) throw new Error("실행기 파일 크기를 확인하지 못했습니다.");
+    return bytes;
+  };
+  const manifest = JSON.parse(new TextDecoder().decode(await get("jarvis-runtime.json")));
+  if (!/^2\.\d+\.\d+$/.test(manifest.version ?? "")) throw new Error("실행기 버전을 확인하지 못했습니다.");
+  const files = ["jarvis-runner.mjs", "jarvis-preview.mjs"];
+  const downloaded = [];
+  for (const name of files) {
+    const bytes = await get(name), expected = manifest.files?.[name];
+    if (!/^[a-f0-9]{64}$/.test(expected ?? "") || createHash("sha256").update(bytes).digest("hex") !== expected) throw new Error("실행기 파일 무결성 확인에 실패했습니다. 기존 설정은 유지됩니다.");
+    downloaded.push([name, bytes]);
+  }
+  await mkdir(destination, { recursive: true, mode: 0o700 });
+  for (const [name, bytes] of downloaded) await writeFile(join(destination, name), bytes, { mode: 0o600 });
+  return manifest.version;
+}
+export async function main(args = process.argv.slice(2)) {
+  if (args.includes("--help") || !args.length) {
+    console.log("맥미니 Jarvis 실행기\nnode jarvis-mac.mjs install --config /path/jarvis-runner.json\nnode jarvis-mac.mjs check\nnode jarvis-mac.mjs stop\nmacOS 사용자 로그인 후 자동 시작합니다. 기존 수동 실행기는 Ctrl+C로 종료한 뒤 설치하세요. 인증값은 복사하지 않습니다."); return;
+  }
+  if (process.platform !== "darwin") throw new Error("이 설치 명령은 맥미니의 터미널에서 실행해주세요.");
+  if (Number(process.versions.node.split(".")[0]) < 24) throw new Error("Node 24 이상이 필요합니다.");
+  const domain = `gui/${process.getuid()}`, directory = join(homedir(), "Library", "Application Support", "Jarvis");
+  const plist = join(homedir(), "Library", "LaunchAgents", `${LABEL}.plist`);
+  if (args[0] === "stop") {
+    await command("launchctl", ["bootout", `${domain}/${LABEL}`]);
+    await rm(plist, { force: true });
+    console.log("자동 실행을 중단했습니다. 승인·작업 이력·설정은 보존했습니다. 실행 중인 미리보기는 만료 시 종료됩니다."); return;
+  }
+  if (!["install", "check"].includes(args[0])) throw new Error("install, check, stop 중 하나를 사용해주세요.");
+  const ready = await preflight();
+  console.log(`GitHub ${ready.github ? "준비됨" : "로그인 필요"} · Codex 구독 ${ready.codex ? "준비됨" : "로그인 필요"} · Docker ${ready.docker ? "준비됨" : "실행 필요"}`);
+  if (args[0] === "check") return;
+  if (!ready.github || !ready.codex) throw new Error("맥미니에서 gh auth login 및 codex login을 확인해주세요. 인증값을 채팅에 보내지 마세요.");
+  if (!ready.docker) throw new Error("맥미니에서 Docker Desktop, Colima 등 Docker 호환 엔진을 실행한 뒤 다시 설치해주세요.");
+  const index = args.indexOf("--config");
+  if (index < 0 || !args[index + 1]) throw new Error("기존 jarvis-runner.json의 경로를 --config로 지정해주세요.");
+  const config = validateConfig(JSON.parse(await readFile(resolve(args[index + 1]), "utf8")));
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const runtime = join(directory, `runtime-${randomUUID()}`);
+  const version = await downloadRuntime(config.origin, runtime);
+  const configPath = join(runtime, "jarvis-runner.json");
+  await writeFile(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
+  await mkdir(dirname(plist), { recursive: true });
+  const path = [...new Set([dirname(process.execPath), "/opt/homebrew/bin", "/usr/local/bin", ...String(process.env.PATH ?? "/usr/bin:/bin").split(":")])].join(":");
+  const contents = launchAgent({ node: process.execPath, runner: join(runtime, "jarvis-runner.mjs"), config: configPath, directory, path });
+  const staged = join(runtime, "agent.plist"); await writeFile(staged, contents, { mode: 0o600 });
+  if ((await command("plutil", ["-lint", staged])).code !== 0) throw new Error("자동 시작 설정 검증에 실패했습니다. 기존 실행기는 유지됩니다.");
+  const previous = await readFile(plist).catch(() => null);
+  await command("launchctl", ["bootout", `${domain}/${LABEL}`]);
+  await writeFile(plist, contents, { mode: 0o600 }); await chmod(plist, 0o600);
+  const boot = await command("launchctl", ["bootstrap", domain, plist]);
+  if (boot.code !== 0) {
+    if (previous) { await writeFile(plist, previous, { mode: 0o600 }); await command("launchctl", ["bootstrap", domain, plist]); }
+    else await rm(plist, { force: true });
+    throw new Error("자동 시작 등록에 실패했습니다. macOS 로그인 세션을 확인해주세요.");
+  }
+  console.log(`실행기 ${version} 자동 시작을 등록했습니다. 설정·승인·이력은 기존 것을 사용합니다.\n맥미니에서 로그아웃하지 말고 Docker를 켜두세요. 재부팅 뒤 사용자 로그인이 필요합니다.\nJarvis 프로젝트의 ‘화면 준비’를 눌러 실제 연결과 웹 응답을 확인해주세요.\n기기 확인이 필요한 경우 ${join(directory, "runner.log")}에 12자리 번호가 표시됩니다.`);
+}
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(error => {
+  console.error(error.message); process.exitCode = 1;
+});

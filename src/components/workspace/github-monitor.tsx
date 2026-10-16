@@ -116,6 +116,13 @@ export function CliRunnerSetup() {
       <li>아래 실행기와 설정 파일을 같은 폴더에 받습니다. 설정 파일에는 토큰이 없습니다.</li><li><code>node jarvis-runner.mjs --config jarvis-runner.json</code>을 실행하고, 표시되는 12자리 번호로 최초 기기 등록을 진행합니다.</li></ol>
     <div className={styles.projectActions}><a className={styles.secondaryButton} href="/jarvis-runner.mjs" download>실행기 파일 받기</a>
       <button className={styles.secondaryButton} disabled={!ready || !hasRepository} onClick={download}>현재 범위의 실행기 설정 받기</button></div>
+    <details className={styles.revisionDetails}><summary>맥미니 자동 실행·미리보기 설치</summary>
+      <p>맥미니에서 기존 수동 실행기를 Ctrl+C로 종료한 뒤 설치 파일을 받아 아래 명령을 실행합니다. Node 24+, GitHub·Codex 구독 로그인과 Docker Desktop 또는 Colima 등 Docker 호환 엔진이 필요합니다.</p>
+      <a className={styles.secondaryButton} href="/jarvis-mac.mjs" download>맥미니 설치 파일 받기</a>
+      <pre>cd ~/Downloads{"\n"}node jarvis-mac.mjs install --config jarvis-runner.json</pre>
+      <p>기존 설정 파일과 기기 승인을 재사용합니다. macOS 사용자 로그인 후 자동 실행되며 실행 중 절전을 방지합니다. 재부팅 후에는 사용자 로그인과 Docker 실행이 필요합니다. 미리보기는 맥미니에서만 열고 2시간 뒤 종료합니다.</p>
+      <p>준비 상태 확인: <code>node jarvis-mac.mjs check</code> · 자동 실행 중단: <code>node jarvis-mac.mjs stop</code></p>
+    </details>
     <p className={styles.detailFootnote}>macOS·Linux·WSL에서 사용합니다. PC와 실행기가 켜져 있어야 자동 조회됩니다. 중단 시 서버의 대기 작업·마지막 정상 자료는 유지합니다. 프로젝트 대화에서 보낸 수정 요청은 별도 작업 폴더에서 코드 수정·PR 작성 및 선택한 범위의 반영으로 이어집니다. 실행기를 이미 사용 중이면 새 파일로 교체한 뒤 다시 시작해주세요.</p>
   </section>;
 }

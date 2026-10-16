@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { automationWorkspace, automationStamp as stamp } from "../support/automation";
-import { enqueueWork, claimProjectWork, reportProjectWork, changeWorkState, parseWorkResult } from "../../src/lib/automation/work";
+import { enqueueWork, claimProjectWork, reportProjectWork, changeWorkState, parseWorkResult, parseWorkPreview } from "../../src/lib/automation/work";
 import { normalizeWorkspace } from "../../src/lib/workspace/validation";
 import { parseWebLinks, publicWebUrl } from "../../src/lib/automation/web-links";
 import { projectQuickLinks } from "../../src/lib/workspace/project-connections";
@@ -67,4 +67,22 @@ test("백업 복원은 이전 실행 요청을 자동으로 재실행하지 않�
   const restored = parseBackup(JSON.stringify({ format: "jarvis-backup", version: 1, exportedAt: stamp, data: queued(), files: [], includesFiles: false })).data;
   expect(restored.projects[0].automation!.turns[0].status).toBe("interrupted");
   expect(claimProjectWork(restored, scope, stamp).job).toBeNull();
+});
+
+test("화면 준비는 새 실행기에만 배정하고 수정 업무나 AI 요청으로 처리하지 않는다", () => {
+  const data = enqueueWork(automationWorkspace(), "company", "auto-project", "auto-service", "화면 준비", "preview", "pr", stamp, uuid);
+  expect(data.tasks).toHaveLength(0);
+  expect(claimProjectWork(data, scope, stamp).job).toBeNull();
+  expect(claimProjectWork(data, { ...scope, previews: true }, stamp).job?.mode).toBe("preview");
+});
+test("미리보기는 커밋·확인 시각·접속 범위를 검증하고 내부 주소를 일반 배포로 허용하지 않는다", () => {
+  const preview = { state: "ready", kind: "mac", url: "http://127.0.0.1:45678/", sha: "a".repeat(40), checkedAt: stamp, expiresAt: "2026-10-15T11:00:00Z", message: "맥미니 전용" };
+  expect(parseWorkPreview(preview).kind).toBe("mac");
+  for (const url of ["http://192.168.1.5:45678/", "http://127.0.0.1:22/", "http://127.0.0.1:99999/", "http://127.0.0.1:45678/admin", "javascript:alert(1)"])
+    expect(() => parseWorkPreview({ ...preview, url })).toThrow();
+  expect(() => parseWorkPreview({ ...preview, kind: "deployment", expiresAt: null })).toThrow();
+  expect(() => parseWorkPreview({ ...preview, expiresAt: "2026-10-18T11:00:00Z" })).toThrow();
+  expect(() => parseWorkPreview({ ...preview, sha: null })).toThrow();
+  expect(() => parseWorkPreview({ ...preview, state: "failed" })).toThrow();
+  expect(() => parseWorkResult({ ...result, preview: { ...preview, sha: "c".repeat(40) } }, "example/synthetic", "change")).toThrow();
 });
