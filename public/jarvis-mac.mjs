@@ -79,6 +79,57 @@ export async function downloadRuntime(origin, destination, transport = fetch) {
   for (const [name, bytes] of downloaded) await writeFile(join(destination, name), bytes, { mode: 0o600 });
   return manifest.version;
 }
+export async function replaceLaunchAgent({ domain, plist, contents, run, delay = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
+  const service = `${domain}/${LABEL}`;
+  const code = result => Number.isInteger(result?.code) ? result.code : "unknown";
+  const session = await run("launchctl", ["print", domain]);
+  if (session.code !== 0) throw new Error(`macOS 사용자 로그인 세션을 확인하지 못했습니다 (launchctl ${code(session)}). 기존 설정은 유지됩니다.`);
+  const registered = async () => {
+    const result = await run("launchctl", ["print", service]);
+    if (result.code === 0) return true;
+    if ([3, 113].includes(result.code)) return false;
+    throw new Error(`자동 실행 등록 상태를 확인하지 못했습니다 (launchctl ${code(result)}).`);
+  };
+  const stop = async () => {
+    if (!await registered()) return;
+    const result = await run("launchctl", ["bootout", service]);
+    for (let attempt = 0; attempt < 80; attempt++) {
+      if (!await registered()) return;
+      await delay(250);
+    }
+    throw new Error(`실행기 등록이 아직 남아 있어 설정 교체를 중단했습니다 (bootout ${code(result)}).`);
+  };
+  const start = async () => {
+    let result;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      result = await run("launchctl", ["bootstrap", domain, plist]);
+      const loaded = await registered();
+      if (result.code === 0 && loaded) return { ok: true, code: 0 };
+      // Retry transient launchd teardown failures only while no job is registered.
+      if (loaded || result.code !== 5) break;
+      await delay(1000);
+    }
+    return { ok: false, code: code(result) };
+  };
+  const previous = await readFile(plist).catch(error => { if (error.code === "ENOENT") return null; throw error; });
+  await stop();
+  let failure;
+  try {
+    await writeFile(plist, contents, { mode: 0o600 }); await chmod(plist, 0o600);
+    const result = await start();
+    if (result.ok) return;
+    failure = `자동 시작 등록에 실패했습니다 (bootstrap ${result.code}).`;
+  } catch (error) { failure = error.message; }
+  try {
+    await stop();
+    if (previous) {
+      await writeFile(plist, previous, { mode: 0o600 });
+      const restored = await start();
+      if (!restored.ok) throw new Error(`기존 설정 파일은 복원했지만 실행기 재등록에 실패했습니다 (bootstrap ${restored.code}).`);
+    } else await rm(plist, { force: true });
+  } catch (error) { throw new Error(`${failure} 복구 확인 실패: ${error.message}`); }
+  throw new Error(`${failure} ${previous ? "이전 설정과 자동 실행 등록을 복원했습니다." : "새 자동 실행 설정을 제거했습니다."} 승인·작업 이력은 보존했습니다.`);
+}
 export async function main(args = process.argv.slice(2)) {
   if (args.includes("--help") || !args.length) {
     console.log("맥미니 Jarvis 실행기\nnode jarvis-mac.mjs install --config /path/jarvis-runner.json\nnode jarvis-mac.mjs check\nnode jarvis-mac.mjs stop\nmacOS 사용자 로그인 후 자동 시작합니다. 기존 수동 실행기는 Ctrl+C로 종료한 뒤 설치하세요. 인증값은 복사하지 않습니다."); return;
@@ -114,15 +165,8 @@ export async function main(args = process.argv.slice(2)) {
   const contents = launchAgent({ node: process.execPath, runner: join(runtime, "jarvis-runner.mjs"), config: configPath, directory, path });
   const staged = join(runtime, "agent.plist"); await writeFile(staged, contents, { mode: 0o600 });
   if ((await run("plutil", ["-lint", staged])).code !== 0) throw new Error("자동 시작 설정 검증에 실패했습니다. 기존 실행기는 유지됩니다.");
-  const previous = await readFile(plist).catch(() => null);
-  await run("launchctl", ["bootout", `${domain}/${LABEL}`]);
-  await writeFile(plist, contents, { mode: 0o600 }); await chmod(plist, 0o600);
-  const boot = await run("launchctl", ["bootstrap", domain, plist]);
-  if (boot.code !== 0) {
-    if (previous) { await writeFile(plist, previous, { mode: 0o600 }); await run("launchctl", ["bootstrap", domain, plist]); }
-    else await rm(plist, { force: true });
-    throw new Error("자동 시작 등록에 실패했습니다. macOS 로그인 세션을 확인해주세요.");
-  }
+  console.log("자동 실행 등록을 갱신합니다. 기존 실행기 종료와 새 등록 상태를 확인합니다.");
+  await replaceLaunchAgent({ domain, plist, contents, run });
   console.log(`실행기 ${version} 자동 시작을 등록했습니다. 설정·승인·이력은 기존 것을 사용합니다.\n맥미니에서 로그아웃하지 말고 Docker를 켜두세요. 재부팅 뒤 사용자 로그인이 필요합니다.\nJarvis 프로젝트의 ‘화면 준비’를 눌러 실제 연결과 웹 응답을 확인해주세요.\n기기 확인이 필요한 경우 ${join(directory, "runner.log")}에 12자리 번호가 표시됩니다.`);
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(error => {

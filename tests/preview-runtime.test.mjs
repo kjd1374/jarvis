@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { previewFile, previewPlan, findDeploymentPreview, startMacPreview } from "../public/jarvis-preview.mjs";
-import { validateConfig, launchAgent, preflight, downloadRuntime, macCommandPath, runSetupCommand } from "../public/jarvis-mac.mjs";
+import { validateConfig, launchAgent, preflight, downloadRuntime, macCommandPath, runSetupCommand, replaceLaunchAgent } from "../public/jarvis-mac.mjs";
 import { VERSION } from "../public/jarvis-runner.mjs";
 const sha = "a".repeat(40);
 test("published runtime manifest matches all shipped executables", async () => {
@@ -118,4 +118,83 @@ test("Docker diagnosis distinguishes a missing command from a disconnected engin
   const offline = await preflight(async (bin, args) => ({ code: bin === "docker" && args[0] === "version" ? 1 : 0, output: "private diagnostic" }));
   assert.equal(offline.dockerProblem, "engine_unavailable"); assert.equal(offline.docker, false);
   assert(!JSON.stringify([missing, offline]).includes("private diagnostic"));
+});
+
+async function macUpdateFixture(options, check) {
+  const directory = await mkdtemp(join(tmpdir(), "jarvis-launchd-test-")), plist = join(directory, "app.jarvis.runner.plist");
+  if (!options.fresh) await writeFile(plist, "old", { mode: 0o600 });
+  let loaded = !options.fresh, unloading = null, unloadingDefinition, attempts = 0;
+  const boots = [], calls = [];
+  const run = async (bin, args) => {
+    assert.equal(bin, "launchctl"); calls.push(args);
+    let code = 0;
+    if (args[0] === "print" && args[1] === "gui/501") code = options.noSession ? 125 : 0;
+    else if (args[0] === "print") {
+      if (unloading !== null) {
+        assert.equal(await readFile(plist, "utf8"), unloadingDefinition, "do not change a definition while its job is unloading");
+        if (unloading-- <= 0) { loaded = false; unloading = null; }
+      }
+      code = loaded ? 0 : 113;
+    } else if (args[0] === "bootout") {
+      if (options.stuck) code = 5;
+      else { unloading = 2; unloadingDefinition = await readFile(plist, "utf8"); }
+    } else if (args[0] === "bootstrap") {
+      const contents = await readFile(plist, "utf8"); boots.push(contents);
+      code = contents === "new" ? (++attempts <= (options.failNew ?? 0) ? 5 : 0) : (options.failRecovery ? 5 : 0);
+      if (code === 0 && !(options.phantomSuccess && contents === "new")) loaded = true;
+      if (options.partialNew && contents === "new") loaded = true;
+    } else assert.fail("unexpected launchctl command");
+    return { code, output: "PRIVATE_DIAGNOSTIC" };
+  };
+  try { await check({ plist, boots, calls, loaded: () => loaded,
+    update: () => replaceLaunchAgent({ domain: "gui/501", plist, contents: "new", run, delay: async () => {} }) }); }
+  finally { await rm(directory, { recursive: true, force: true }); }
+}
+test("Mac update waits for old registration removal and recovers a transient bootstrap failure", async () => {
+  await macUpdateFixture({ failNew: 1 }, async ({ update, plist, boots, loaded }) => {
+    await update(); assert.equal(await readFile(plist, "utf8"), "new");
+    assert.deepEqual(boots, ["new", "new"]); assert(loaded());
+  });
+});
+test("Mac update preserves the existing job when its login session cannot be checked", async () => {
+  await macUpdateFixture({ noSession: true }, async ({ update, plist, calls }) => {
+    await assert.rejects(update(), /로그인 세션.*125/);
+    assert.equal(await readFile(plist, "utf8"), "old"); assert.equal(calls.length, 1);
+  });
+});
+test("Mac update does not overwrite a job that failed to unload", async () => {
+  await macUpdateFixture({ stuck: true }, async ({ update, plist, boots, loaded }) => {
+    await assert.rejects(update(), /설정 교체를 중단.*bootout 5/);
+    assert.equal(await readFile(plist, "utf8"), "old"); assert.deepEqual(boots, []); assert(loaded());
+  });
+});
+test("Mac update verifies rollback after repeated bootstrap failures without exposing raw diagnostics", async () => {
+  await macUpdateFixture({ failNew: 10 }, async ({ update, plist, boots, loaded }) => {
+    await assert.rejects(update(), error => /bootstrap 5.*이전 설정과 자동 실행 등록을 복원/.test(error.message) && !error.message.includes("PRIVATE_DIAGNOSTIC"));
+    assert.equal(await readFile(plist, "utf8"), "old"); assert.deepEqual(boots, ["new", "new", "new", "old"]); assert(loaded());
+  });
+});
+test("Mac update reports failed recovery instead of claiming the old worker is restored", async () => {
+  await macUpdateFixture({ failNew: 10, failRecovery: true }, async ({ update, plist, loaded }) => {
+    await assert.rejects(update(), /복구 확인 실패.*기존 설정 파일은 복원했지만 실행기 재등록에 실패/);
+    assert.equal(await readFile(plist, "utf8"), "old"); assert.equal(loaded(), false);
+  });
+});
+test("first Mac installation removes a failed new job definition", async () => {
+  await macUpdateFixture({ fresh: true, failNew: 10 }, async ({ update, plist, loaded }) => {
+    await assert.rejects(update(), /새 자동 실행 설정을 제거/);
+    await assert.rejects(readFile(plist), { code: "ENOENT" }); assert.equal(loaded(), false);
+  });
+});
+test("Mac update removes a partially registered replacement before restoring the old job", async () => {
+  await macUpdateFixture({ failNew: 10, partialNew: true }, async ({ update, plist, boots, loaded }) => {
+    await assert.rejects(update(), /이전 설정과 자동 실행 등록을 복원/);
+    assert.deepEqual(boots, ["new", "old"]); assert.equal(await readFile(plist, "utf8"), "old"); assert(loaded());
+  });
+});
+test("Mac update does not claim success from an exit code without a registered job", async () => {
+  await macUpdateFixture({ phantomSuccess: true }, async ({ update, plist, loaded }) => {
+    await assert.rejects(update(), /자동 시작 등록에 실패.*bootstrap 0/);
+    assert.equal(await readFile(plist, "utf8"), "old"); assert(loaded());
+  });
 });
