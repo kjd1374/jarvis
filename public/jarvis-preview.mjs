@@ -4,7 +4,7 @@ import net from "node:net";
 import http from "node:http";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile, lstat, realpath, copyFile, rm } from "node:fs/promises";
-import { join, dirname, resolve } from "node:path";
+import { join, dirname } from "node:path";
 
 const IMAGE = "node:24.19.0-bookworm-slim";
 const TTL = 2 * 60 * 60_000;
