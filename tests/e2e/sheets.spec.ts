@@ -76,23 +76,23 @@ test("selected-range questions persist, receive scoped CLI replies and remain us
   await page.getByRole("button", { name: "개인", exact: true }).click();
   await expect(panel.getByText("합성 일정의 마감은 10월 20일입니다.", { exact: true })).toHaveCount(0);
 });
-test("Google Picker grants a selected file, reads a bounded range and never persists the browser token", async ({ page }) => {
+test("Google Picker grants a selected file, reads the whole selected tab and never persists the browser token", async ({ page }) => {
   const remote = await cloud(page); remote.company.data.documents = [];
   await mockGoogle(page);
   let failValues = false, reads = 0;
   await page.route("https://sheets.googleapis.com/**", route => {
     expect(route.request().headers().authorization).toBe("Bearer synthetic-memory-only-token");
-    if (route.request().url().includes("/values/")) { reads++; expect(decodeURIComponent(route.request().url())).toContain(reads === 1 ? "'일정'!A1:T200" : "'일정'!B10:D20"); return route.fulfill({ status: failValues ? 403 : 200, headers: { "Access-Control-Allow-Origin": "*" }, json: failValues ? { error: "synthetic" } : { values: [["항목", "마감", "상태"], ["합성 Google 값", "10월 20일", "진행"]] } }); }
+    if (route.request().url().includes("/values/")) { reads++; expect(decodeURIComponent(route.request().url())).toContain("/values/'일정'?"); return route.fulfill({ status: failValues ? 403 : 200, headers: { "Access-Control-Allow-Origin": "*" }, json: failValues ? { error: "synthetic" } : { values: [["항목", "마감", "상태"], ["합성 Google 값", "10월 20일", "진행"]] } }); }
     return route.fulfill({ headers: { "Access-Control-Allow-Origin": "*" }, json: { spreadsheetId: "synthetic_sheet_123", properties: { title: "선택한 합성 시트" }, sheets: [{ properties: { sheetId: 7, title: "일정", sheetType: "GRID" } }] } });
   });
   await page.goto("/tasks"); await ready(page);
   await page.getByRole("button", { name: "＋ 시트 연결", exact: true }).click();
   await expect(page.getByRole("heading", { name: "선택한 합성 시트", exact: true })).toBeVisible();
   await expect(page.getByRole("cell", { name: "합성 Google 값", exact: true })).toBeVisible();
-  await page.getByLabel("불러올 범위").fill("B10:D20"); await page.getByRole("button", { name: "다시 불러오기", exact: true }).click();
+  await page.getByRole("button", { name: "전체 다시 불러오기", exact: true }).click();
   await expect(page.getByRole("cell", { name: "합성 Google 값", exact: true })).toBeVisible();
   await expect.poll(() => reads).toBe(2); expect(JSON.stringify(remote)).not.toContain("synthetic-memory-only-token");
-  failValues = true; await page.getByRole("button", { name: "다시 불러오기", exact: true }).click();
+  failValues = true; await page.getByRole("button", { name: "전체 다시 불러오기", exact: true }).click();
   await expect(page.getByRole("alert").filter({ hasText: "파일 권한" })).toBeVisible();
   await expect(page.getByRole("cell", { name: "합성 Google 값", exact: true })).toBeVisible();
   await page.reload(); await ready(page);
@@ -132,10 +132,10 @@ test("selected tabs load once, failed reads require retry and late results canno
   await page.getByRole("combobox", { name: "시트 탭", exact: true }).selectOption({ label: "다음 탭" });
   await expect(page.getByRole("cell", { name: "다음 탭 자동 값", exact: true })).toBeVisible();
   await page.getByRole("combobox", { name: "시트 탭", exact: true }).selectOption({ label: "마지막 탭" });
-  await expect(page.getByRole("button", { name: "Google 연결·불러오기", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "탭 전체 불러오기", exact: true })).toBeEnabled();
   expect(reads).toEqual(["일정", "다음 탭", "마지막 탭"]);
   fail = false;
-  await page.getByRole("button", { name: "Google 연결·불러오기", exact: true }).click();
+  await page.getByRole("button", { name: "탭 전체 불러오기", exact: true }).click();
   await expect(page.getByRole("cell", { name: "마지막 탭 자동 값", exact: true })).toBeVisible();
   expect(await page.evaluate(() => (window as Window & { oauthCalls?: number }).oauthCalls)).toBe(1);
   await expect.poll(() => remote.company.data.documents[0].sheet!.snapshots.length).toBe(3);
@@ -222,4 +222,71 @@ test("changing workspace during an automatic read discards the delayed values", 
   await expect.poll(() => remote.company.data.documents[0].sheet!.snapshots.map(s => s.values)).toEqual([[["돌아와서 새로 읽은 합성 값"]]]);
   expect(reads).toBe(2);
   expect(remote.personal.data.documents).toHaveLength(0);
+});
+
+test("whole tab reads include rows after 200 and columns after T, with scoped paging, reload and atomic failure", async ({ page }, info) => {
+  const remote = await cloud(page); remote.company.data.documents = [];
+  await mockGoogle(page);
+  let tooLarge: false | "cells" | "bytes" = false;
+  const values = Array.from({ length: 205 }, (_, r) => Array.from({ length: 21 }, (_, c) => r === 204 && c === 20 ? "끝 행 끝 열 값" : c === 0 ? `합성 ${r + 1}행` : ""));
+  await page.route("https://sheets.googleapis.com/**", route => {
+    expect(route.request().method()).toBe("GET");
+    if (route.request().url().includes("/values/")) {
+      expect(decodeURIComponent(route.request().url())).toContain("/values/'일정'?valueRenderOption");
+      return route.fulfill({ headers: { "Access-Control-Allow-Origin": "*" }, json: { values: tooLarge === "cells" ? Array.from({ length: 501 }, () => Array(1000).fill("")) : tooLarge === "bytes" ? Array.from({ length: 140 }, () => ["가".repeat(10_000)]) : values } });
+    }
+    return route.fulfill({ headers: { "Access-Control-Allow-Origin": "*" }, json: { spreadsheetId: "synthetic_sheet_123", properties: { title: "전체 읽기 합성 시트" }, sheets: [{ properties: { sheetId: 7, title: "일정", sheetType: "GRID" } }] } });
+  });
+  await page.goto("/tasks"); await ready(page);
+  await page.getByRole("button", { name: "＋ 시트 연결", exact: true }).click();
+  await expect(page.getByText(/탭 전체 · 205행 × 21열/)).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "불러올 범위" })).toHaveCount(0);
+  await page.getByRole("button", { name: "다음 구간", exact: true }).click();
+  await expect(page.getByRole("cell", { name: "끝 행 끝 열 값", exact: true })).toBeAttached();
+  await expect(page.getByRole("rowheader", { name: "205행", exact: true })).toBeAttached();
+  const panel = page.getByLabel("문서 AI 문답");
+  await expect(panel.getByText(/다른 구간·탭은 포함하지 않습니다/)).toBeVisible();
+  await panel.getByRole("textbox").fill("이 구간의 끝 값은?");
+  await panel.getByRole("button", { name: "질문 보내기 ↗" }).click();
+  await expect.poll(() => remote.company.data.documents[0].sheet!.questions.length).toBe(1);
+  const doc = remote.company.data.documents[0], question = doc.sheet!.questions[0];
+  expect(doc.sheet!.snapshots.find(s => s.id === question.snapshotId)!.range).toBe("A201:U205");
+  const previous = structuredClone(doc.sheet!.tabs[0].wholeRead);
+  await page.screenshot({ path: info.outputPath("whole-sheet-page.png"), fullPage: true });
+  tooLarge = "cells";
+  await page.getByRole("button", { name: "전체 다시 불러오기", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "한도" })).toBeVisible();
+  expect(remote.company.data.documents[0].sheet!.tabs[0].wholeRead).toEqual(previous);
+  tooLarge = "bytes";
+  await page.getByRole("button", { name: "전체 다시 불러오기", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "서버 저장 한도" }).first()).toBeVisible();
+  expect(remote.company.data.documents[0].sheet!.tabs[0].wholeRead).toEqual(previous);
+  await expect(page.getByRole("cell", { name: "끝 행 끝 열 값", exact: true })).toBeAttached();
+  await page.reload(); await ready(page);
+  await page.getByRole("button", { name: "다음 구간", exact: true }).click();
+  await expect(page.getByRole("cell", { name: "끝 행 끝 열 값", exact: true })).toBeAttached();
+  await page.getByRole("button", { name: "자료실로 보내기", exact: true }).click();
+  await page.getByRole("button", { name: "이전 구간", exact: true }).click();
+  await page.getByRole("button", { name: "다음 구간", exact: true }).click();
+  await expect(page.getByRole("cell", { name: "끝 행 끝 열 값", exact: true })).toBeAttached();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("removing a sheet requires confirmation, preserves another sheet and stays removed after reload", async ({ page }, info) => {
+  const remote = await cloud(page), target = remote.company.data.documents[0];
+  remote.company.data.documents.push({ ...structuredClone(target), id: "other-sheet", name: "후속 보존 시트" });
+  await page.goto("/tasks"); await ready(page);
+  await page.getByRole("button", { name: "자비스에서 제거", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "시트 연결을 제거할까요?" });
+  await expect(dialog.getByText(/Google 원본 파일은 그대로 남습니다/)).toBeVisible();
+  await page.screenshot({ path: info.outputPath("remove-sheet-dialog.png"), fullPage: true });
+  await dialog.getByRole("button", { name: "취소", exact: true }).click();
+  expect(remote.company.data.documents).toHaveLength(2);
+  await page.getByRole("button", { name: "자비스에서 제거", exact: true }).click();
+  await dialog.getByRole("button", { name: "연결과 보관 내용 제거", exact: true }).click();
+  await expect.poll(() => remote.company.data.documents.map(d => d.id)).toEqual(["other-sheet"]);
+  await expect(page.getByRole("heading", { name: "후속 보존 시트", exact: true })).toBeVisible();
+  await page.reload(); await ready(page);
+  await expect(page.getByRole("heading", { name: "후속 보존 시트", exact: true })).toBeVisible();
+  await expect(page.getByLabel("시트 목록").getByText("합성 업무 시트", { exact: false })).toHaveCount(0);
 });

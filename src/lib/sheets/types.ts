@@ -6,7 +6,8 @@ export type SheetSnapshot = {
   values: string[][];
   capturedAt: string;
 };
-export type SheetTab = { id: number; title: string; snapshotId?: string; checkedAt?: string };
+export type WholeSheetRead = { snapshotIds: string[]; rowCount: number; columnCount: number; capturedAt: string };
+export type SheetTab = { id: number; title: string; snapshotId?: string; checkedAt?: string; wholeRead?: WholeSheetRead };
 export type DocumentAnswer = { reply: string; rows: number[]; limitation: string };
 export type DocumentQuestion = {
   id: string;

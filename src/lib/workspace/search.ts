@@ -63,13 +63,15 @@ export function searchWorkspace(
     });
   records.push(
     ...data.documents.filter(allowed).flatMap(document => document.sheet ? document.sheet.tabs.flatMap(tab => {
-      const snapshot = document.sheet!.snapshots.find(s => s.id === tab.snapshotId);
+      return (tab.wholeRead?.snapshotIds ?? (tab.snapshotId ? [tab.snapshotId] : [])).flatMap(snapshotId => {
+      const snapshot = document.sheet!.snapshots.find(s => s.id === snapshotId);
       if (!snapshot) return [];
-      const collectedAt = tab.checkedAt ?? snapshot.capturedAt;
+      const collectedAt = tab.wholeRead?.capturedAt ?? tab.checkedAt ?? snapshot.capturedAt;
       return [{ id: `sheet:${document.id}:${snapshot.id}`, kind: "fact" as const, space: document.space, projectId: document.projectId,
         title: `${document.name} · ${snapshot.tabTitle} · ${snapshot.range}`, content: snapshot.values.map(row => row.join(" | ")).join("\n"),
         sourceUrl: sheetUrl(document.sheet!.spreadsheetId, tab.id, snapshot.range), serviceName: "Google Sheets · 보관한 범위", status: document.sheet!.archivedAt ? "보관" : "업무 중",
         updatedAt: collectedAt, collectedAt, freshness: Date.parse(stamp) - Date.parse(collectedAt) > 86_400_000 ? "stale" as const : "fresh" as const }];
+      });
     }) : []),
   );
   records.push(

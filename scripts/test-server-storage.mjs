@@ -968,6 +968,29 @@ try {
   assert.deepEqual(documentSaved.body.data.documents.find(d => d.id === documentId).sheet.questions[0].answer, documentAnswer);
   assert(!(await api("/api/workspace?space=personal", a.token)).body.data.documents.some(d => d.id === documentId));
   recordCheck("archived sheet Q&A persists without GitHub; capabilities, concurrent claims, scope/device/snapshot leases and duplicate delivery enforced by real private storage (synthetic Google/model data)");
+  const wholeDocument = documentSaved.body.data.documents.find(d => d.id === documentId);
+  const firstPage = randomUUID(), lastPage = randomUUID(), wholeQuestion = randomUUID();
+  wholeDocument.sheet.archivedAt = null;
+  wholeDocument.sheet.snapshots.push(
+    { id: firstPage, tabId: 7, tabTitle: "합성 탭", range: "A1:A200", capturedAt: autoStamp, values: Array.from({ length: 200 }, (_, i) => [`합성 ${i + 1}행`]) },
+    { id: lastPage, tabId: 7, tabTitle: "합성 탭", range: "A201:A205", capturedAt: autoStamp, values: Array.from({ length: 5 }, (_, i) => [`합성 ${i + 201}행`]) },
+  );
+  wholeDocument.sheet.tabs[0] = { id: 7, title: "합성 탭", snapshotId: firstPage, checkedAt: autoStamp,
+    wholeRead: { snapshotIds: [firstPage, lastPage], rowCount: 205, columnCount: 1, capturedAt: autoStamp } };
+  wholeDocument.sheet.questions.push({ id: wholeQuestion, snapshotId: lastPage, question: "마지막 구간의 값은?", documentName: "합성 시트", readAt: autoStamp, createdAt: autoStamp, updatedAt: autoStamp, status: "queued", attempt: 0 });
+  assert.equal((await api("/api/workspace", a.token, "PUT", { space: "company", data: documentSaved.body.data, revision: documentSaved.body.revision })).status, 200);
+  const wholeSaved = await api("/api/workspace?space=company", a.secondToken);
+  assert.deepEqual(wholeSaved.body.data.documents.find(d => d.id === documentId).sheet.tabs[0].wholeRead, wholeDocument.sheet.tabs[0].wholeRead);
+  const wholeClaim = await api("/api/automation/claim", a.token, "POST", sheetClaim);
+  assert.equal(wholeClaim.body.job.snapshot.range, "A201:A205");
+  const beforeRemove = await api("/api/workspace?space=company", a.token), remaining = beforeRemove.body.data.documents.filter(d => d.id !== documentId);
+  beforeRemove.body.data.documents = remaining;
+  assert.equal((await api("/api/workspace", a.token, "PUT", { space: "company", data: beforeRemove.body.data, revision: beforeRemove.body.revision })).status, 200);
+  const removedIdentity = { ...documentIdentity, jobId: wholeQuestion, snapshotId: lastPage, leaseToken: wholeClaim.body.job.leaseToken };
+  assert.equal((await api("/api/automation/document", a.token, "POST", { ...removedIdentity, phase: "heartbeat" })).status, 409);
+  assert.equal((await api("/api/automation/document", a.token, "POST", { ...removedIdentity, phase: "result", answer: { reply: "합성 마지막 값", rows: [205], limitation: "현재 구간" } })).status, 409);
+  assert.deepEqual((await api("/api/workspace?space=company", a.secondToken)).body.data.documents, remaining);
+  recordCheck("whole-tab pages persist across devices; current-page CLI jobs stay compatible and removing a connection fences late heartbeats/results without deleting other documents");
   console.log(
     JSON.stringify(
       {

@@ -13,9 +13,9 @@ export function enqueueDocumentQuestion(data: WorkspaceData, space: Space, docum
   if (sheet.questions.some(q => q.id === questionId)) return data;
   if (sheet.questions.length >= 500) throw new Error("이 문서의 문답 보관 한도에 도달했습니다.");
   if (sheet.questions.some(q => ["queued", "running"].includes(q.status))) throw new Error("진행 중인 답변을 기다리거나 취소한 뒤 질문해주세요.");
-  const tab = sheet.tabs.find(t => t.snapshotId === snapshotId);
+  const tab = sheet.tabs.find(t => t.wholeRead ? t.wholeRead.snapshotIds.includes(snapshotId) : t.snapshotId === snapshotId);
   const item: DocumentQuestion = { id: questionId, snapshotId, question: question.trim(), documentName: document.name,
-    readAt: tab?.checkedAt ?? snapshot.capturedAt, createdAt: stamp, updatedAt: stamp, status: "queued", attempt: 0 };
+    readAt: tab?.wholeRead?.capturedAt ?? tab?.checkedAt ?? snapshot.capturedAt, createdAt: stamp, updatedAt: stamp, status: "queued", attempt: 0 };
   return replaceSheet(data, document, { ...sheet, questions: [...sheet.questions, item] });
 }
 export function changeDocumentQuestion(data: WorkspaceData, space: Space, documentId: string, questionId: string, action: "cancel" | "retry", stamp: string) {

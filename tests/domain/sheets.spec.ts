@@ -77,3 +77,73 @@ test("backup import pauses document questions while preserving saved ranges and 
   expect(restored.data.documents[0].sheet!.questions[0].status).toBe("interrupted");
   expect(restored.data.documents[0].sheet!.snapshots).toEqual(data.documents[0].sheet!.snapshots);
 });
+
+test("whole tabs split without losing distant cells, retain old evidence and survive archive/backup/search", async () => {
+  const { splitWholeSheet } = await import("../../src/lib/sheets/whole-sheet");
+  const { saveWholeSheet } = await import("../../src/lib/sheets/documents");
+  const data = queued(), document = data.documents[0], tab = document.sheet!.tabs[0];
+  const values = Array.from({ length: 431 }, (_, r) => Array.from({ length: 55 }, (_, c) => `${r + 1}:${c + 1}`));
+  values[430][54] = "끝부분 검색 표식";
+  const loaded = splitWholeSheet(tab, values, stamp);
+  expect(loaded.wholeRead).toMatchObject({ rowCount: 431, columnCount: 55 });
+  const reconstructed = values.map(row => row.map(() => ""));
+  for (const page of loaded.snapshots) {
+    const range = parseSheetRange(page.range);
+    page.values.forEach((row, r) => row.forEach((value, c) => { reconstructed[range.startRow + r - 1][range.startColumn + c - 1] = value; }));
+  }
+  expect(reconstructed).toEqual(values);
+  const saved = saveWholeSheet(data, "company", document.id, tab.id, loaded);
+  expect(claimDocumentQuestion(saved, scope, stamp).job!.snapshot.id).toBe(snapshotId);
+  const again = saveWholeSheet(saved, "company", document.id, tab.id, splitWholeSheet(tab, values, "2026-10-17T00:01:00Z"));
+  expect(again.documents[0].sheet!.snapshots.length).toBe(saved.documents[0].sheet!.snapshots.length);
+  const archived = archiveSheet(again, "company", document.id, true, stamp);
+  expect(searchWorkspace(archived, { space: "company", query: "끝부분 검색 표식" }, stamp)).toHaveLength(1);
+  const { parseBackup } = await import("../../src/lib/workspace/backup");
+  const restored = parseBackup(JSON.stringify({ format: "jarvis-backup", version: 1, exportedAt: stamp, scope: "company", includesFiles: false, data: archived, files: [] }));
+  expect(restored.data.documents[0].sheet!.tabs[0].wholeRead).toEqual(archived.documents[0].sheet!.tabs[0].wholeRead);
+  const largeCell = splitWholeSheet(tab, [Array(9).fill("x".repeat(10_000))], stamp);
+  expect(largeCell.snapshots.length).toBeGreaterThan(1);
+  expect(() => splitWholeSheet(tab, [["x".repeat(10_001)]], stamp)).toThrow();
+  expect(() => splitWholeSheet(tab, Array.from({ length: 501 }, () => Array(1000).fill("")), stamp)).toThrow(/한도/);
+  const empty = saveWholeSheet(data, "company", document.id, tab.id, splitWholeSheet(tab, [], stamp));
+  expect(normalizeWorkspace(empty).documents[0].sheet!.tabs[0].wholeRead).toMatchObject({ rowCount: 0, columnCount: 0 });
+  const bad = structuredClone(saved); bad.documents[0].sheet!.tabs[0].wholeRead!.snapshotIds.pop();
+  expect(() => normalizeWorkspace(bad)).toThrow(/전체 보관/);
+  const full = structuredClone(data); full.documents[0].sheet!.snapshots.push(...Array.from({ length: 199 }, () => ({ ...document.sheet!.snapshots[0], id: id() })));
+  expect(() => saveWholeSheet(full, "company", document.id, tab.id, loaded)).toThrow(/보관 한도/);
+  expect(data.documents[0].sheet!.snapshots).toHaveLength(1);
+});
+
+test("removal detaches only the selected sheet, fences queued/running replies and survives concurrent saves", async () => {
+  const { removeSheet } = await import("../../src/lib/sheets/documents");
+  const { data: base, body } = claimed();
+  const target = base.documents[0];
+  base.documents.push({ ...structuredClone(target), id: id(), name: "보존할 다른 시트" });
+  base.conversations.push({ id: "conversation-a", space: "company", projectId: "sheet-project", title: "보존할 대화", createdAt: stamp, updatedAt: stamp });
+  base.messages.push({ id: "message-a", conversationId: "conversation-a", content: "보존할 대화 글", fileIds: [target.id, base.documents[1].id], createdAt: stamp });
+  expect(() => removeSheet(base, "personal", target.id)).toThrow();
+  const removed = removeSheet(base, "company", target.id);
+  expect(normalizeWorkspace(removed).documents).toEqual([base.documents[1]]);
+  expect(removed.messages[0]).toMatchObject({ content: "보존할 대화 글", fileIds: [base.documents[1].id] });
+  expect(() => reportDocumentQuestion(removed, "company", body, scope.deviceId, stamp)).toThrow("stale_job");
+  const remote = structuredClone(reportDocumentQuestion(base, "company", body, scope.deviceId, stamp));
+  remote.messages.push({ id: "message-b", conversationId: "conversation-a", content: "동시에 추가한 대화", fileIds: [target.id], createdAt: stamp });
+  for (const merged of [mergeCloudWorkspace(base, removed, remote), mergeCloudWorkspace(base, remote, removed)]) {
+    expect(merged.conflicts).toEqual([]);
+    expect(merged.data.documents.some(d => d.id === target.id)).toBe(false);
+    expect(merged.data.messages.find(m => m.id === "message-b")).toMatchObject({ content: "동시에 추가한 대화", fileIds: [] });
+  }
+});
+
+test("concurrent whole reads remain complete atomic generations", async () => {
+  const { saveWholeSheet } = await import("../../src/lib/sheets/documents");
+  const { splitWholeSheet } = await import("../../src/lib/sheets/whole-sheet");
+  const base = sheetWorkspace(), d = base.documents[0], tab = d.sheet!.tabs[0];
+  const left = saveWholeSheet(base, "company", d.id, tab.id, splitWholeSheet(tab, Array.from({ length: 205 }, () => ["왼쪽"]), stamp));
+  const right = saveWholeSheet(base, "company", d.id, tab.id, splitWholeSheet(tab, [["오른쪽", "두 열"]], stamp));
+  for (const [preference, expected] of [["local", left], ["remote", right]] as const) {
+    const merged = mergeCloudWorkspace(base, left, right, preference);
+    expect(merged.conflicts.some(path => path.endsWith("wholeRead"))).toBe(true);
+    expect(merged.data.documents[0].sheet!.tabs[0].wholeRead).toEqual(expected.documents[0].sheet!.tabs[0].wholeRead);
+  }
+});

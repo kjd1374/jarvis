@@ -31,14 +31,14 @@ function resize(sizes: Sizes, axis: Axis, index: number, value: number) {
   return { ...sizes, [axis]: values };
 }
 
-export function SheetGrid({ snapshot, preferenceKey }: { snapshot: SheetSnapshot; preferenceKey: string }) {
+export function SheetGrid({ snapshot, preferenceKey, fillRange = false }: { snapshot: SheetSnapshot; preferenceKey: string; fillRange?: boolean }) {
   const [raw, save] = useSheetViewPreference(preferenceKey);
   const stored = useMemo(() => readSizes(raw), [raw]);
   const [draft, setDraft] = useState<Sizes | null>(null);
   const [storageFailed, setStorageFailed] = useState(false);
   const drag = useRef<{ pointerId: number; axis: Axis; index: number; start: number; initial: number; base: Sizes; latest: Sizes } | null>(null);
   const sizes = draft ?? stored, selection = parseSheetRange(snapshot.range);
-  const columns = Math.max(1, ...snapshot.values.map(row => row.length));
+  const columns = fillRange ? selection.endColumn - selection.startColumn + 1 : Math.max(1, ...snapshot.values.map(row => row.length));
   const width = (index: number) => sizes.columns[index] ?? limits.columns.initial;
   const height = (index: number) => sizes.rows[index] ?? limits.rows.initial;
   const commit = (next: Sizes) => { setStorageFailed(!save(JSON.stringify(readSizes(JSON.stringify(next))))); };
