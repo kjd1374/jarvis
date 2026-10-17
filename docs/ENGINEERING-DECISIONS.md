@@ -274,3 +274,9 @@ Apple의 공식 [Creating Launch Daemons and Agents](https://developer.apple.com
 표 크기 구현 후보를 공식 저장소에서 확인했다: [TanStack Table](https://github.com/TanStack/table)의 React 패키지 9.3.1(MIT, React >=18), [AG Grid Community](https://github.com/ag-grid/ag-grid) release-36.2.0(Community MIT; 저장소 패키지 36.2.0-beta.20261016.1611, Enterprise는 별도 상용 조건). 두 프로젝트 모두 최근 유지보수되고 있으나 현재 최대 10,000셀 표시값 표에는 전체 표 모델/그리드 도입 비용이 더 크다. 기존 HTML 표·고정 colgroup·Pointer Events·React 19.3 useSyncExternalStore를 선택해 추가 패키지/비용/제3자 전송 없이 너비/높이 조절을 구현한다. 설치된 Next 16.4 Client Component 지침을 확인했다.
 
 크기는 원본 행/열 번호 기준이며 계정·영역·문서·탭별 브라우저 보기 설정으로만 저장한다. 크기 변경은 Google 원본, 서버 문서, AI 근거/스냅샷을 바꾸지 않는다. 포인터/터치/방향키, 두 번 클릭/초기화, 크기 범위 제한 및 손상된 설정 복구를 제공한다. 우측 문답은 컴포넌트를 유지한 채 접어 작성 중인 질문과 대화를 보존하고 넓어진 표를 제공한다. 접힘 상태도 브라우저 계정/영역별로 기억한다. 기존 브라우저 기록과 백업 포맷은 변경하지 않는다.
+
+### 2026-10-17 Google 파일 선택창 표시 수정 (Issue #34)
+
+공식 [DocsView.setMode](https://developers.google.com/workspace/drive/picker/reference/picker.docsview.setmode)는 `drive.file`처럼 썸네일 권한이 없는 범위에 LIST 모드를 권장한다. 기본 썸네일/영어 설정을 LIST/ko와 연결 목적 제목으로 바꾼다. [setSize](https://developers.google.com/workspace/drive/picker/reference/picker.pickerbuilder.setsize)의 566×350–1051×650 범위 안에서 큰 화면은 최대 900×560, 작은 화면은 SDK 기본 처리를 유지한다. 폐기된 setLabel이나 Google iframe 내부 CSS 변경은 사용하지 않는다.
+
+기존 SDK 표시 옵션의 작은 수정이므로 새 라이브러리 비교/도입은 생략한다. Next 16.4 Client Component 지침을 확인했으며 새 비용·인증 범위·외부 전송·저장 형식 변경은 없다. 합성 Picker 계약을 갱신하고 기존 선택/읽기·탭 이동·보기 설정·문답 회귀를 실행한다. 실제 비공개 Google 목록 렌더링과 합성 검증은 구분한다.

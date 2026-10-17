@@ -5,17 +5,19 @@ import type { SheetSnapshot, SheetTab } from "./types";
 export type GoogleConfig = { configured: true; clientId: string; apiKey: string; projectNumber: string };
 type TokenResult = { access_token?: string; expires_in?: number; error?: string; scope?: string };
 type PickerResult = { action: string; docs?: { id: string; mimeType?: string }[] };
-type PickerView = { setMimeTypes(value: string): PickerView };
+type PickerView = { setMimeTypes(value: string): PickerView; setMode(mode: string): PickerView };
 type PickerBuilder = {
   addView(view: PickerView): PickerBuilder; setOAuthToken(token: string): PickerBuilder;
   setDeveloperKey(key: string): PickerBuilder; setAppId(id: string): PickerBuilder;
   setOrigin(origin: string): PickerBuilder; setCallback(cb: (data: PickerResult) => void): PickerBuilder;
+  setLocale(locale: string): PickerBuilder; setTitle(title: string): PickerBuilder;
+  setSize(width: number, height: number): PickerBuilder;
   build(): { setVisible(value: boolean): void; dispose(): void };
 };
 type GoogleWindow = Window & {
   google?: {
     accounts: { oauth2: { initTokenClient(config: { client_id: string; scope: string; callback: (result: TokenResult) => void; error_callback: () => void }): { requestAccessToken(config: { prompt: string }): void } } };
-    picker: { DocsView: new (id: string) => PickerView; ViewId: { SPREADSHEETS: string }; PickerBuilder: new () => PickerBuilder };
+    picker: { DocsView: new (id: string) => PickerView; ViewId: { SPREADSHEETS: string }; DocsViewMode: { LIST: string }; PickerBuilder: new () => PickerBuilder };
   };
   gapi?: { load(name: string, options: { callback: () => void; onerror: () => void; timeout: number; ontimeout: () => void }): void };
 };
@@ -66,7 +68,10 @@ export function chooseSheet(config: GoogleConfig): Promise<string | null> {
   const picker = (window as GoogleWindow).google?.picker, access = accessToken(config);
   if (!picker) return Promise.reject(new Error("Google 파일 선택기를 준비해주세요."));
   return new Promise((resolve, reject) => {
-    const dialog = new picker.PickerBuilder().addView(new picker.DocsView(picker.ViewId.SPREADSHEETS).setMimeTypes(SHEET_MIME))
+    // drive.file does not grant thumbnail access. Google's recommended LIST mode
+    // also leaves more room for filenames than the default thumbnail cards.
+    const builder = new picker.PickerBuilder().addView(new picker.DocsView(picker.ViewId.SPREADSHEETS).setMimeTypes(SHEET_MIME).setMode(picker.DocsViewMode.LIST))
+      .setLocale("ko").setTitle("연결할 Google 시트 선택")
       .setOAuthToken(access).setDeveloperKey(config.apiKey).setAppId(config.projectNumber).setOrigin(window.location.origin)
       .setCallback(result => {
         if (result.action === "cancel") { dialog.dispose(); resolve(null); }
@@ -76,7 +81,12 @@ export function chooseSheet(config: GoogleConfig): Promise<string | null> {
           if (!doc || !validSpreadsheetId(doc.id) || doc.mimeType && doc.mimeType !== SHEET_MIME) reject(new Error("Google 스프레드시트를 선택해주세요."));
           else resolve(doc.id);
         }
-      }).build();
+      });
+    // setSize supports 566×350–1051×650. Let the SDK handle smaller screens.
+    if (window.innerWidth >= 598 && window.innerHeight >= 382) {
+      builder.setSize(Math.min(900, window.innerWidth - 32), Math.min(560, window.innerHeight - 32));
+    }
+    const dialog = builder.build();
     dialog.setVisible(true);
   });
 }
