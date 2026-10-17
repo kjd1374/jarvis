@@ -21,9 +21,9 @@ async function mockGoogle(page: Page) {
   await page.route("**/api/sheets/config", route => route.fulfill({ json: { configured: true, clientId: "synthetic.apps.googleusercontent.com", apiKey: "AIzaSyntheticBrowserKey", projectNumber: "12345" } }));
   await page.route("https://accounts.google.com/gsi/client", route => route.fulfill({ contentType: "application/javascript", body: `window.google = { accounts: { oauth2: { initTokenClient: (options) => ({ requestAccessToken: () => { window.oauthCalls = (window.oauthCalls || 0) + 1; options.callback({ access_token: "synthetic-memory-only-token", expires_in: 3600, scope: "https://www.googleapis.com/auth/drive.file" }); } }) } } };` }));
   await page.route("https://apis.google.com/js/api.js", route => route.fulfill({ contentType: "application/javascript", body: `window.gapi = { load: (_name, options) => {
-    class View { setMimeTypes() { return this; } }
-    class Builder { addView() { return this; } setOAuthToken() { return this; } setDeveloperKey() { return this; } setAppId() { return this; } setOrigin() { return this; } setCallback(callback) { this.callback = callback; return this; } build() { return { setVisible: () => setTimeout(() => this.callback({ action: "picked", docs: [{ id: "synthetic_sheet_123", mimeType: "application/vnd.google-apps.spreadsheet" }] }), 0), dispose() {} }; } }
-    window.google.picker = { DocsView: View, ViewId: { SPREADSHEETS: "spreadsheets" }, PickerBuilder: Builder }; options.callback();
+    class View { setMimeTypes() { return this; } setMode() { return this; } }
+    class Builder { addView() { return this; } setLocale() { return this; } setTitle() { return this; } setSize() { return this; } setOAuthToken() { return this; } setDeveloperKey() { return this; } setAppId() { return this; } setOrigin() { return this; } setCallback(callback) { this.callback = callback; return this; } build() { return { setVisible: () => setTimeout(() => this.callback({ action: "picked", docs: [{ id: "synthetic_sheet_123", mimeType: "application/vnd.google-apps.spreadsheet" }] }), 0), dispose() {} }; } }
+    window.google.picker = { DocsView: View, ViewId: { SPREADSHEETS: "spreadsheets" }, DocsViewMode: { LIST: "list" }, PickerBuilder: Builder }; options.callback();
   } };` }));
 }
 test("sheet layout preserves legacy tasks, scopes and archived content across reload", async ({ page }, info) => {
