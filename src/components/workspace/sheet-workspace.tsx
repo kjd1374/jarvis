@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import Link from "next/link";
 import { useWorkspace } from "./workspace-provider";
 import { WorkspaceControls } from "./workspace-controls";
 import { id, now, type Document } from "@/lib/workspace/types";
-import { addSheet, archiveSheet, columnName, DEFAULT_RANGE, parseSheetRange, replaceSheet, saveSheetSnapshot, sheetUrl } from "@/lib/sheets/documents";
+import { addSheet, archiveSheet, DEFAULT_RANGE, parseSheetRange, replaceSheet, saveSheetSnapshot, sheetUrl } from "@/lib/sheets/documents";
 import { changeDocumentQuestion, enqueueDocumentQuestion } from "@/lib/sheets/questions";
-import { chooseSheet, connectGoogle, forgetGoogleToken, prepareGoogle, readSheetMetadata, readSheetValues, type GoogleConfig } from "@/lib/sheets/google-browser";
+import { chooseSheet, connectGoogle, forgetGoogleToken, hasGoogleSession, prepareGoogle, readSheetMetadata, readSheetValues, type GoogleConfig } from "@/lib/sheets/google-browser";
 import type { DocumentQuestion, SheetSnapshot, SheetTab } from "@/lib/sheets/types";
+import { SheetGrid } from "./sheet-grid";
+import { useSheetViewPreference } from "./sheet-view-preference";
 import studio from "./studio.module.css";
 import styles from "./sheet-workspace.module.css";
 
@@ -19,7 +21,7 @@ const errors: Record<string, string> = { cli_login_required: "맥미니에서 Co
 export function SheetWorkspace({ initialDocument }: { initialDocument?: string }) {
   const { data, account } = useWorkspace();
   useEffect(() => () => forgetGoogleToken(), [account?.accountId]);
-  return <SheetWorkspaceView key={`${data.activeSpace}:${data.activeProjects[data.activeSpace]}:${initialDocument ?? ""}`} initialDocument={initialDocument} />;
+  return <SheetWorkspaceView key={`${account?.accountId ?? "local"}:${data.activeSpace}:${data.activeProjects[data.activeSpace]}:${initialDocument ?? ""}`} initialDocument={initialDocument} />;
 }
 function SheetWorkspaceView({ initialDocument }: { initialDocument?: string }) {
   const { data, ready, saving, account, mutate, retryLoad, error: storageError } = useWorkspace();
@@ -29,12 +31,17 @@ function SheetWorkspaceView({ initialDocument }: { initialDocument?: string }) {
   const [tabId, setTabId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loadingTab, setLoadingTab] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [config, setConfig] = useState<GoogleConfig | null>(null);
   const [googleReady, setGoogleReady] = useState(false);
   const [configChecked, setConfigChecked] = useState(false);
   const mounted = useRef(true), working = useRef(false);
+  const selectionGeneration = useRef(0), autoAttempts = useRef(new Set<string>());
+  const preferenceScope = `jarvis-sheet-view:${account?.accountId ?? "local"}:${space}`;
+  const [questionVisibility, saveQuestionVisibility] = useSheetViewPreference(`${preferenceScope}:questions`);
+  const questionsCollapsed = questionVisibility === "collapsed";
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => {
     if (!account?.authenticated) return;
@@ -56,13 +63,19 @@ function SheetWorkspaceView({ initialDocument }: { initialDocument?: string }) {
   const folders = [...new Set(visible.map(d => d.sheet!.folder || "내 시트"))];
   async function action(operation: () => Promise<void>) {
     if (working.current || saving || !ready) return;
+    const generation = selectionGeneration.current;
     working.current = true; setBusy(true); setError(""); setNotice("");
     try { await operation(); }
-    catch (e) { if (mounted.current) setError(e instanceof Error ? e.message : "처리하지 못했습니다. 기존 자료는 유지됩니다."); }
-    finally { working.current = false; if (mounted.current) setBusy(false); }
+    catch (e) { if (mounted.current && generation === selectionGeneration.current) setError(e instanceof Error ? e.message : "처리하지 못했습니다. 기존 자료는 유지됩니다."); }
+    finally { working.current = false; if (mounted.current) { setBusy(false); setLoadingTab(""); } }
+  }
+  function select(documentId: string, nextTabId: number | null) {
+    selectionGeneration.current++;
+    setSelectedId(documentId); setTabId(nextTabId); setNotice(""); setError("");
   }
   async function add() {
     if (!config) return;
+    const generation = selectionGeneration.current;
     await connectGoogle(config);
     if (!mounted.current) return;
     const spreadsheetId = await chooseSheet(config);
@@ -75,12 +88,15 @@ function SheetWorkspaceView({ initialDocument }: { initialDocument?: string }) {
       const result = addSheet(d, space, projectId, spreadsheetId, metadata.name, metadata.tabs, now());
       selected = result.documentId; return result.data;
     });
-    if (mounted.current) { setSelectedId(selected); setTabId(null); setNotice("시트를 연결했습니다. 범위를 확인한 뒤 ‘불러오기’를 눌러주세요."); }
+    if (mounted.current && generation === selectionGeneration.current) { setSelectedId(selected); setTabId(null); setNotice("시트를 연결했습니다. 선택한 탭의 내용을 자동으로 불러옵니다."); }
   }
-  async function refresh(range: string) {
+  async function refresh(range: string, interactive = true) {
     if (!config || !document?.sheet || !tab) return;
     parseSheetRange(range);
-    await connectGoogle(config);
+    const generation = selectionGeneration.current;
+    if (!interactive && !hasGoogleSession(config)) return;
+    setLoadingTab(`${document.id}:${tab.id}`);
+    if (interactive) await connectGoogle(config);
     if (!mounted.current) return;
     const metadata = await readSheetMetadata(config, document.sheet.spreadsheetId);
     const latestTab = metadata.tabs.find(t => t.id === tab.id);
@@ -89,14 +105,27 @@ function SheetWorkspaceView({ initialDocument }: { initialDocument?: string }) {
     if (!mounted.current) return;
     await mutate(d => {
       const current = d.documents.find(row => row.id === document.id && row.space === space);
-      if (!current?.sheet || !mounted.current || d.activeSpace !== space || d.activeProjects[space] !== projectId) return d;
+      if (!current?.sheet || current.sheet.archivedAt || !mounted.current || d.activeSpace !== space || d.activeProjects[space] !== projectId) return d;
       const updated = { ...current, name: metadata.name, sheet: { ...current.sheet, tabs: metadata.tabs.map(t => ({ ...current.sheet!.tabs.find(old => old.id === t.id), ...t })) } };
       const next = { ...d, documents: d.documents.map(row => row.id === current.id ? updated : row) };
       return saveSheetSnapshot(next, space, current.id, loaded);
     });
-    if (mounted.current) setNotice(`${loaded.tabTitle} · ${loaded.range}을 불러와 보관했습니다.`);
+    if (mounted.current && generation === selectionGeneration.current) setNotice(`${loaded.tabTitle} · ${loaded.range}을 불러와 보관했습니다.`);
   }
   const disabled = busy || saving || !ready;
+  const autoLoad = useEffectEvent(() => {
+    if (disabled || working.current || !mounted.current || !googleReady || !config || !document?.sheet || document.sheet.archivedAt || !tab || snapshot || !hasGoogleSession(config)) return;
+    const key = `${document.id}:${tab.id}`;
+    if (autoAttempts.current.has(key)) return;
+    // A failed read remains an explicit retry, rather than an effect retry loop.
+    autoAttempts.current.add(key);
+    void action(() => refresh(DEFAULT_RANGE, false));
+  });
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => { if (active) autoLoad(); });
+    return () => { active = false; };
+  }, [disabled, googleReady, config, document?.id, document?.sheet?.archivedAt, tab?.id, snapshot?.id]);
   return <div className={studio.studio}>
     <WorkspaceControls />
     <div className={styles.heading}>
@@ -105,15 +134,15 @@ function SheetWorkspaceView({ initialDocument }: { initialDocument?: string }) {
     </div>
     {error && <p role="alert" className={studio.formError}>{error}</p>}
     {notice && <p role="status" className={studio.notice}>{notice}</p>}
-    <section className={styles.workspace} aria-label="시트 작업 공간" aria-busy={!ready || busy}>
+    <section className={styles.workspace} aria-label="시트 작업 공간" aria-busy={!ready || busy} data-questions-collapsed={questionsCollapsed}>
       <aside className={styles.tree} aria-label="시트 목록">
         <div className={styles.treeHeading}><strong>작업 중인 시트</strong><span>{activeDocuments.length}</span></div>
         <button className={studio.primaryButton} disabled={disabled || !googleReady} onClick={() => void action(add)}>＋ 시트 연결</button>
         <input aria-label="시트 찾기" placeholder="시트 찾기" value={search} onChange={e => setSearch(e.target.value)} />
         <div className={styles.treeItems}>{folders.map(folder => <details key={folder} open><summary>{folder}</summary>
           {visible.filter(d => (d.sheet!.folder || "내 시트") === folder).map(d => <div key={d.id} className={styles.treeFile}>
-            <button aria-pressed={document?.id === d.id} onClick={() => { setSelectedId(d.id); setTabId(null); }}>{d.sheet!.pinned ? "★ " : "▤ "}{d.name}</button>
-            {document?.id === d.id && <div className={styles.tabItems}>{d.sheet!.tabs.map(t => <button key={t.id} aria-pressed={tab?.id === t.id} onClick={() => setTabId(t.id)}>└ {t.title}</button>)}</div>}
+            <button aria-pressed={document?.id === d.id} onClick={() => select(d.id, null)}>{d.sheet!.pinned ? "★ " : "▤ "}{d.name}</button>
+            {document?.id === d.id && <div className={styles.tabItems}>{d.sheet!.tabs.map(t => <button key={t.id} aria-pressed={tab?.id === t.id} onClick={() => select(d.id, t.id)}>└ {t.title}</button>)}</div>}
           </div>)}
         </details>)}{!visible.length && <p className={styles.muted}>{search ? "일치하는 시트가 없습니다." : "자주 보는 Google 시트를 연결해보세요."}</p>}</div>
         <Link href="/library" className={styles.archiveLink}>보관한 시트는 자료실에서 ↗</Link>
@@ -128,7 +157,7 @@ function SheetWorkspaceView({ initialDocument }: { initialDocument?: string }) {
             <FolderField key={`${document.id}:${document.sheet.folder}`} value={document.sheet.folder} disabled={disabled} save={folder => action(() => mutate(d => { const current = d.documents.find(row => row.id === document.id && row.space === space); return current?.sheet ? replaceSheet(d, current, { ...current.sheet, folder }) : d; }))} />
             <button disabled={disabled || !document.sheet.archivedAt && !document.sheet.snapshots.length} onClick={() => void action(async () => { setSelectedId(document.id); await mutate(d => archiveSheet(d, space, document.id, !document.sheet!.archivedAt, now())); setNotice(document.sheet!.archivedAt ? "업무 시트 목록으로 되돌렸습니다." : "불러온 범위와 문답을 자료실에 보관했습니다. 원본 파일은 그대로입니다."); })}>{document.sheet.archivedAt ? "업무로 복귀" : "자료실로 보내기"}</button>
           </div>
-          {tab && <SheetTable key={`${document.id}:${tab.id}:${snapshot?.id ?? "empty"}`} snapshot={snapshot} tab={tab} checkedAt={tab.checkedAt} archived={!!document.sheet.archivedAt} refresh={range => action(() => refresh(range))} disabled={disabled || !googleReady} />}
+          {tab && <SheetTable key={`${document.id}:${tab.id}:${snapshot?.id ?? "empty"}`} snapshot={snapshot} tab={tab} checkedAt={tab.checkedAt} archived={!!document.sheet.archivedAt} refresh={range => action(() => refresh(range))} disabled={disabled || !googleReady} loading={loadingTab === `${document.id}:${tab.id}`} preferenceKey={`${preferenceScope}:${document.id}:${tab.id}:sizes`} />}
           {!config && <GoogleSetup authenticated={!!account?.authenticated} checked={configChecked} compact />}
         </> : <div className={styles.empty}>
           <span className={styles.sheetMark}>▤</span><h2>{initialDocument ? "현재 영역에서 이 시트를 찾을 수 없습니다" : "업무의 중심에 시트를 두세요"}</h2>
@@ -137,7 +166,7 @@ function SheetWorkspaceView({ initialDocument }: { initialDocument?: string }) {
           {googleReady && <button className={studio.primaryButton} disabled={disabled} onClick={() => void action(add)}>Google 시트 선택</button>}
         </div>}
       </section>
-      <DocumentQuestions key={`${document?.id ?? "empty"}:${snapshot?.id ?? "empty"}`} document={document} snapshot={snapshot} disabled={disabled} action={action} refresh={retryLoad} />
+      <DocumentQuestions key={`${document?.id ?? "empty"}:${snapshot?.id ?? "empty"}`} document={document} snapshot={snapshot} disabled={disabled} action={action} refresh={retryLoad} collapsed={questionsCollapsed} toggle={() => saveQuestionVisibility(questionsCollapsed ? "expanded" : "collapsed")} />
     </section>
     <section className={styles.lower} aria-label="다음 작업 공간"><div><small>NEXT SPACE</small><h2>다음 작업을 위한 공간</h2><p>필요한 기능을 이어 붙일 수 있도록 비워두었습니다.</p></div><span aria-hidden="true">＋</span></section>
   </div>;
@@ -160,20 +189,16 @@ function GoogleSetup({ authenticated, checked, compact = false }: { authenticate
     <p>설정 후 ‘시트 연결’에서 허용한 파일만 선택합니다. Google 인증 토큰은 이 브라우저를 닫으면 사라집니다.</p>
   </details>;
 }
-function SheetTable({ snapshot, tab, checkedAt, archived, refresh, disabled }: { snapshot?: SheetSnapshot; tab: SheetTab; checkedAt?: string; archived: boolean; refresh: (range: string) => Promise<void>; disabled: boolean }) {
+function SheetTable({ snapshot, tab, checkedAt, archived, refresh, disabled, loading, preferenceKey }: { snapshot?: SheetSnapshot; tab: SheetTab; checkedAt?: string; archived: boolean; refresh: (range: string) => Promise<void>; disabled: boolean; loading: boolean; preferenceKey: string }) {
   const [range, setRange] = useState(snapshot?.range ?? DEFAULT_RANGE);
-  const selection = parseSheetRange(snapshot?.range ?? DEFAULT_RANGE);
-  const columns = snapshot ? Math.max(1, ...snapshot.values.map(row => row.length)) : 0;
   return <>
-    <form className={styles.rangeBar} onSubmit={e => { e.preventDefault(); void refresh(range); }}><strong>{tab.title}</strong><label>범위 <input aria-label="불러올 범위" value={range} maxLength={40} disabled={archived} onChange={e => setRange(e.target.value)} /></label>{!archived && <button disabled={disabled}>{snapshot ? "다시 불러오기" : "불러오기"}</button>}</form>
-    <p className={styles.readTime}>{snapshot ? `${snapshot.range} · ${time(checkedAt ?? snapshot.capturedAt)}에 확인 · 불러온 범위만 보관` : "불러올 범위를 선택해주세요. 최대 500행·50열, 총 10,000셀까지 읽습니다."}</p>
-    <div className={styles.tableScroll} tabIndex={0} aria-label={`${tab.title} 표`}>
-      {snapshot?.values.length ? <table><thead><tr><th aria-label="행 번호" />{Array.from({ length: columns }, (_, i) => <th key={i}>{columnName(selection.startColumn + i)}</th>)}</tr></thead><tbody>{snapshot.values.map((row, i) => <tr key={i}><th scope="row">{selection.startRow + i}</th>{Array.from({ length: columns }, (_, col) => <td key={col} title={row[col] ?? ""}>{row[col] ?? ""}</td>)}</tr>)}</tbody></table> : <div className={styles.tableEmpty}>{snapshot ? "이 범위에는 값이 없습니다." : "아직 불러온 내용이 없습니다. Google에 연결해 표를 불러오세요."}</div>}
-    </div>
+    <form className={styles.rangeBar} onSubmit={e => { e.preventDefault(); void refresh(range); }}><strong>{tab.title}</strong><label>범위 <input aria-label="불러올 범위" value={range} maxLength={40} disabled={archived || loading} onChange={e => setRange(e.target.value)} /></label>{!archived && <button disabled={disabled}>{loading ? "불러오는 중…" : snapshot ? "다시 불러오기" : "Google 연결·불러오기"}</button>}</form>
+    <p className={styles.readTime}>{snapshot ? `${snapshot.range} · ${time(checkedAt ?? snapshot.capturedAt)}에 확인 · 불러온 범위만 보관` : "연결 후 선택한 탭을 자동으로 읽습니다. 기본 A1:T200 · 최대 500행·50열, 총 10,000셀"}</p>
+    {snapshot?.values.length ? <SheetGrid snapshot={snapshot} preferenceKey={preferenceKey} /> : <div className={styles.tableScroll} tabIndex={0} aria-label={`${tab.title} 표`}><div className={styles.tableEmpty} role="status">{loading ? "선택한 탭을 불러오고 있습니다…" : snapshot ? "이 범위에는 값이 없습니다." : archived ? "이 탭은 보관한 내용이 없습니다." : "Google에 한 번 연결하면 선택하는 탭을 자동으로 불러옵니다."}</div></div>}
     {archived && <p className={styles.readTime}>보관 당시의 내용입니다. 최신 원본을 읽으려면 ‘업무로 복귀’ 후 다시 불러오세요.</p>}
   </>;
 }
-function DocumentQuestions({ document, snapshot, disabled, action, refresh }: { document?: Document; snapshot?: SheetSnapshot; disabled: boolean; action: (operation: () => Promise<void>) => Promise<void>; refresh: () => void }) {
+function DocumentQuestions({ document, snapshot, disabled, action, refresh, collapsed, toggle }: { document?: Document; snapshot?: SheetSnapshot; disabled: boolean; action: (operation: () => Promise<void>) => Promise<void>; refresh: () => void; collapsed: boolean; toggle: () => void }) {
   const { mutate, account } = useWorkspace();
   const [question, setQuestion] = useState("");
   const [showAll, setShowAll] = useState(false);
@@ -188,8 +213,12 @@ function DocumentQuestions({ document, snapshot, disabled, action, refresh }: { 
     await action(async () => { await mutate(d => enqueueDocumentQuestion(d, document.space, document.id, snapshot.id, question, now(), questionId)); setQuestion(""); });
   }
   function update(q: DocumentQuestion, change: "cancel" | "retry") { if (document) void action(() => mutate(d => changeDocumentQuestion(d, document.space, document.id, q.id, change, now()))); }
-  return <aside className={styles.questions} aria-label="문서 AI 문답">
-    <div className={styles.questionHeading}><div><small>ASK THIS SHEET</small><h2>문서에 물어보기</h2></div><button onClick={refresh} aria-label="문답 상태 새로고침">↻</button></div>
+  return <aside className={styles.questions} aria-label="문서 AI 문답" data-collapsed={collapsed}>
+    <div className={styles.questionHeading}><div hidden={collapsed}><small>ASK THIS SHEET</small><h2>문서에 물어보기</h2></div><div className={styles.questionButtons}>
+      {!collapsed && <button onClick={refresh} aria-label="문답 상태 새로고침">↻</button>}
+      <button onClick={toggle} aria-label={`문서에 물어보기 ${collapsed ? "열기" : "접기"}`} title={`문서에 물어보기 ${collapsed ? "열기" : "접기"}`} aria-expanded={!collapsed} aria-controls="sheet-question-content">{collapsed ? "‹" : "›"}<span className={styles.collapsedLabel} hidden={!collapsed}>문답 열기</span></button>
+    </div></div>
+    <div id="sheet-question-content" className={styles.questionBody} hidden={collapsed}>
     <p className={styles.runner} data-online={online}>{online ? "문답 실행기 연결됨" : "맥미니 문답 실행기 대기"}</p>
     {!online && <p className={styles.hint}>문답은 실행기 2.2.0 이상이 필요합니다. <Link href="/settings#cli-runner">맥미니 연결·업데이트</Link>에서 이 시트의 프로젝트를 포함해주세요.</p>}
     <div className={styles.conversation} aria-live="polite">
@@ -213,5 +242,6 @@ function DocumentQuestions({ document, snapshot, disabled, action, refresh }: { 
       <button className={studio.primaryButton} disabled={disabled || pending || !snapshot || !question.trim() || !account?.authenticated}>질문 보내기 ↗</button>
       <small>선택한 범위와 질문을 맥미니의 Codex 구독 CLI로 보냅니다. 구독 사용 한도가 적용됩니다.</small>
     </form>
+    </div>
   </aside>;
 }

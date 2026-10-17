@@ -24,6 +24,7 @@ const scripts = new Map<string, Promise<void>>();
 let token: { value: string; until: number; clientId: string } | undefined;
 let session = 0;
 export function forgetGoogleToken() { token = undefined; session++; }
+export function hasGoogleSession(config: GoogleConfig) { return !!token && token.clientId === config.clientId && token.until > Date.now(); }
 function script(src: string) {
   if (!scripts.has(src)) scripts.set(src, new Promise<void>((resolve, reject) => {
     const element = document.createElement("script");
