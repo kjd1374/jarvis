@@ -280,3 +280,7 @@ Apple의 공식 [Creating Launch Daemons and Agents](https://developer.apple.com
 공식 [DocsView.setMode](https://developers.google.com/workspace/drive/picker/reference/picker.docsview.setmode)는 `drive.file`처럼 썸네일 권한이 없는 범위에 LIST 모드를 권장한다. 기본 썸네일/영어 설정을 LIST/ko와 연결 목적 제목으로 바꾼다. [setSize](https://developers.google.com/workspace/drive/picker/reference/picker.pickerbuilder.setsize)의 566×350–1051×650 범위 안에서 큰 화면은 최대 900×560, 작은 화면은 SDK 기본 처리를 유지한다. 폐기된 setLabel이나 Google iframe 내부 CSS 변경은 사용하지 않는다.
 
 기존 SDK 표시 옵션의 작은 수정이므로 새 라이브러리 비교/도입은 생략한다. Next 16.4 Client Component 지침을 확인했으며 새 비용·인증 범위·외부 전송·저장 형식 변경은 없다. 합성 Picker 계약을 갱신하고 기존 선택/읽기·탭 이동·보기 설정·문답 회귀를 실행한다. 실제 비공개 Google 목록 렌더링과 합성 검증은 구분한다.
+
+### 2026-10-17 시트 목록의 세부 탭 이동 (Issue #36)
+
+파일 아래에 모든 탭을 펼치던 목록을 파일 단위로 줄이고 기존 탭 전환을 표 상단의 네이티브 select로 옮긴다. 작은 UI 배치 변경으로 새 라이브러리 비교/도입은 생략하며 Next 16.4 Client Component 지침과 기존 선택/비동기 읽기 처리를 재사용한다. 키보드·모바일 선택은 브라우저 기본 컨트롤을 사용한다. 탭이 하나인 경우 이름만 표시하고, 여러 탭은 메뉴를 열었을 때 목록을 보여준다. 원본·저장 구조·인증·실행기는 바꾸지 않는다.

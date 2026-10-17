@@ -5,10 +5,10 @@
 .workspace { display:grid; grid-template-columns:190px minmax(0,1fr) 285px; min-height:580px; height:80vh; max-height:1000px; background:var(--surface); border:1px solid var(--border); border-radius:18px; overflow:hidden; }
 .workspace[data-questions-collapsed=true] { grid-template-columns:190px minmax(0,1fr) 44px; }
 .workspace * { min-width:0; }
-.workspace button, .workspace input, .workspace textarea { font:inherit; font-size:12px; }
+.workspace button, .workspace input, .workspace textarea, .workspace select { font:inherit; font-size:12px; }
 .workspace button { cursor:pointer; }
 .workspace button:disabled { cursor:default; opacity:.5; }
-.workspace input, .workspace textarea { background:var(--background); border:1px solid var(--border); border-radius:8px; color:var(--foreground); padding:9px 10px; }
+.workspace input, .workspace textarea, .workspace select { background:var(--background); border:1px solid var(--border); border-radius:8px; color:var(--foreground); padding:9px 10px; }
 .tree { display:flex; flex-direction:column; padding:18px 12px; gap:14px; background:rgba(11,17,30,.4); border-right:1px solid var(--border); overflow:auto; }
 .treeHeading { display:flex; align-items:center; justify-content:space-between; font-size:13px; }
 .treeHeading span { color:var(--muted); font-size:11px; }
@@ -18,9 +18,6 @@
 .treeItems summary { font-size:11px; color:var(--muted); padding:8px 4px; cursor:pointer; overflow-wrap:anywhere; }
 .treeFile button { width:100%; text-align:left; border:0; border-radius:7px; padding:9px 8px; background:none; color:var(--foreground); overflow-wrap:anywhere; line-height:1.5; }
 .treeFile > button[aria-pressed=true] { background:#243359; color:#c8d6ff; }
-.tabItems { padding-left:9px; }
-.tabItems button { color:var(--muted); font-size:11px; }
-.tabItems button[aria-pressed=true] { color:#baacff; }
 .archiveLink { color:var(--muted); font-size:11px; line-height:1.7; }
 .sheet { display:flex; flex-direction:column; overflow:hidden; }
 .documentHeading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:20px 20px 12px; }
@@ -36,6 +33,8 @@
 .rangeBar strong { margin-right:auto; overflow-wrap:anywhere; }
 .rangeBar label { display:flex; align-items:center; gap:7px; color:var(--muted); }
 .rangeBar input { width:105px; padding:5px 7px; }
+.rangeBar .tabPicker { flex:1 1 200px; margin-right:auto; }
+.tabPicker select { width:100%; max-width:320px; padding:6px 8px; text-overflow:ellipsis; color-scheme:dark; }
 .readTime { font-size:10px; color:var(--muted); padding:8px 20px; margin:0; line-height:1.7; }
 .tableScroll { flex:1; overflow:auto; background:var(--background); min-height:160px; }
 .tableScroll table { border-collapse:separate; border-spacing:0; table-layout:fixed; font-size:12px; }
@@ -101,4 +100,4 @@
 .lower > span { font-size:30px; color:#3f4c68; }
 @media (max-width:1150px) { .workspace { grid-template-columns:155px minmax(0,1fr) 255px; } .workspace[data-questions-collapsed=true] { grid-template-columns:155px minmax(0,1fr) 44px; } .documentHeading { flex-direction:column; padding:16px; } .documentActions, .rangeBar { padding-inline:16px; } }
 @media (max-width:950px) { .workspace, .workspace[data-questions-collapsed=true] { height:auto; max-height:none; grid-template-columns:165px minmax(0,1fr); } .sheet { min-height:520px; max-height:650px; } .questions { grid-column:1/-1; min-height:380px; max-height:650px; border-left:0; border-top:1px solid var(--border); } .questions[data-collapsed=true] { min-height:0; } .questions[data-collapsed=true] .questionHeading { justify-content:flex-end; padding:6px 12px; } .collapsedLabel:not([hidden]) { display:inline; writing-mode:horizontal-tb; margin:0 0 0 6px; } .heading { align-items:flex-start; flex-direction:column; } .tree { max-height:650px; } .lower { height:auto; } }
-@media (max-width:550px) { .workspace { display:flex; flex-direction:column; border-radius:12px; } .tree { border-right:0; border-bottom:1px solid var(--border); max-height:250px; } .treeItems { min-height:45px; } .tree > button { align-self:flex-start; } .sheet { min-height:480px; max-height:690px; } .documentActions { gap:6px; } .empty { padding:20px; } .empty h2 { font-size:18px; } .questions { min-height:430px; } .lower { padding:22px; } .heading h1 { font-size:26px; } }
+@media (max-width:550px) { .workspace { display:flex; flex-direction:column; border-radius:12px; } .tree { border-right:0; border-bottom:1px solid var(--border); max-height:320px; } .treeItems { min-height:80px; } .tree > button { align-self:flex-start; } .sheet { min-height:480px; max-height:690px; } .documentActions { gap:6px; } .empty { padding:20px; } .empty h2 { font-size:18px; } .questions { min-height:430px; } .lower { padding:22px; } .heading h1 { font-size:26px; } }

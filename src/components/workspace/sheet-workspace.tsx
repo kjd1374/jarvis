@@ -142,7 +142,6 @@ function SheetWorkspaceView({ initialDocument }: { initialDocument?: string }) {
         <div className={styles.treeItems}>{folders.map(folder => <details key={folder} open><summary>{folder}</summary>
           {visible.filter(d => (d.sheet!.folder || "내 시트") === folder).map(d => <div key={d.id} className={styles.treeFile}>
             <button aria-pressed={document?.id === d.id} onClick={() => select(d.id, null)}>{d.sheet!.pinned ? "★ " : "▤ "}{d.name}</button>
-            {document?.id === d.id && <div className={styles.tabItems}>{d.sheet!.tabs.map(t => <button key={t.id} aria-pressed={tab?.id === t.id} onClick={() => select(d.id, t.id)}>└ {t.title}</button>)}</div>}
           </div>)}
         </details>)}{!visible.length && <p className={styles.muted}>{search ? "일치하는 시트가 없습니다." : "자주 보는 Google 시트를 연결해보세요."}</p>}</div>
         <Link href="/library" className={styles.archiveLink}>보관한 시트는 자료실에서 ↗</Link>
@@ -157,11 +156,11 @@ function SheetWorkspaceView({ initialDocument }: { initialDocument?: string }) {
             <FolderField key={`${document.id}:${document.sheet.folder}`} value={document.sheet.folder} disabled={disabled} save={folder => action(() => mutate(d => { const current = d.documents.find(row => row.id === document.id && row.space === space); return current?.sheet ? replaceSheet(d, current, { ...current.sheet, folder }) : d; }))} />
             <button disabled={disabled || !document.sheet.archivedAt && !document.sheet.snapshots.length} onClick={() => void action(async () => { setSelectedId(document.id); await mutate(d => archiveSheet(d, space, document.id, !document.sheet!.archivedAt, now())); setNotice(document.sheet!.archivedAt ? "업무 시트 목록으로 되돌렸습니다." : "불러온 범위와 문답을 자료실에 보관했습니다. 원본 파일은 그대로입니다."); })}>{document.sheet.archivedAt ? "업무로 복귀" : "자료실로 보내기"}</button>
           </div>
-          {tab && <SheetTable key={`${document.id}:${tab.id}:${snapshot?.id ?? "empty"}`} snapshot={snapshot} tab={tab} checkedAt={tab.checkedAt} archived={!!document.sheet.archivedAt} refresh={range => action(() => refresh(range))} disabled={disabled || !googleReady} loading={loadingTab === `${document.id}:${tab.id}`} preferenceKey={`${preferenceScope}:${document.id}:${tab.id}:sizes`} />}
+          {tab && <SheetTable key={`${document.id}:${tab.id}:${snapshot?.id ?? "empty"}`} snapshot={snapshot} tab={tab} tabs={document.sheet.tabs} selectTab={nextTabId => select(document.id, nextTabId)} checkedAt={tab.checkedAt} archived={!!document.sheet.archivedAt} refresh={range => action(() => refresh(range))} disabled={disabled || !googleReady} loading={loadingTab === `${document.id}:${tab.id}`} preferenceKey={`${preferenceScope}:${document.id}:${tab.id}:sizes`} />}
           {!config && <GoogleSetup authenticated={!!account?.authenticated} checked={configChecked} compact />}
         </> : <div className={styles.empty}>
           <span className={styles.sheetMark}>▤</span><h2>{initialDocument ? "현재 영역에서 이 시트를 찾을 수 없습니다" : "업무의 중심에 시트를 두세요"}</h2>
-          <p>왼쪽에 파일과 탭을 정리하고, 가운데에서 내용을 확인하세요.<br />오른쪽 AI 문답은 선택한 범위를 함께 읽습니다.</p>
+          <p>왼쪽에서 파일을 선택하고, 가운데에서 내용을 확인하세요.<br />오른쪽 AI 문답은 선택한 범위를 함께 읽습니다.</p>
           {!config && <GoogleSetup authenticated={!!account?.authenticated} checked={configChecked} />}
           {googleReady && <button className={studio.primaryButton} disabled={disabled} onClick={() => void action(add)}>Google 시트 선택</button>}
         </div>}
@@ -189,10 +188,13 @@ function GoogleSetup({ authenticated, checked, compact = false }: { authenticate
     <p>설정 후 ‘시트 연결’에서 허용한 파일만 선택합니다. Google 인증 토큰은 이 브라우저를 닫으면 사라집니다.</p>
   </details>;
 }
-function SheetTable({ snapshot, tab, checkedAt, archived, refresh, disabled, loading, preferenceKey }: { snapshot?: SheetSnapshot; tab: SheetTab; checkedAt?: string; archived: boolean; refresh: (range: string) => Promise<void>; disabled: boolean; loading: boolean; preferenceKey: string }) {
+function SheetTable({ snapshot, tab, tabs, selectTab, checkedAt, archived, refresh, disabled, loading, preferenceKey }: { snapshot?: SheetSnapshot; tab: SheetTab; tabs: SheetTab[]; selectTab: (tabId: number) => void; checkedAt?: string; archived: boolean; refresh: (range: string) => Promise<void>; disabled: boolean; loading: boolean; preferenceKey: string }) {
   const [range, setRange] = useState(snapshot?.range ?? DEFAULT_RANGE);
   return <>
-    <form className={styles.rangeBar} onSubmit={e => { e.preventDefault(); void refresh(range); }}><strong>{tab.title}</strong><label>범위 <input aria-label="불러올 범위" value={range} maxLength={40} disabled={archived || loading} onChange={e => setRange(e.target.value)} /></label>{!archived && <button disabled={disabled}>{loading ? "불러오는 중…" : snapshot ? "다시 불러오기" : "Google 연결·불러오기"}</button>}</form>
+    <form className={styles.rangeBar} onSubmit={e => { e.preventDefault(); void refresh(range); }}>
+      {tabs.length > 1 ? <label className={styles.tabPicker}>탭 <select aria-label="시트 탭" title={tab.title} value={tab.id} onChange={e => selectTab(Number(e.target.value))}>{tabs.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}</select></label> : <strong>{tab.title}</strong>}
+      <label>범위 <input aria-label="불러올 범위" value={range} maxLength={40} disabled={archived || loading} onChange={e => setRange(e.target.value)} /></label>{!archived && <button disabled={disabled}>{loading ? "불러오는 중…" : snapshot ? "다시 불러오기" : "Google 연결·불러오기"}</button>}
+    </form>
     <p className={styles.readTime}>{snapshot ? `${snapshot.range} · ${time(checkedAt ?? snapshot.capturedAt)}에 확인 · 불러온 범위만 보관` : "연결 후 선택한 탭을 자동으로 읽습니다. 기본 A1:T200 · 최대 500행·50열, 총 10,000셀"}</p>
     {snapshot?.values.length ? <SheetGrid snapshot={snapshot} preferenceKey={preferenceKey} /> : <div className={styles.tableScroll} tabIndex={0} aria-label={`${tab.title} 표`}><div className={styles.tableEmpty} role="status">{loading ? "선택한 탭을 불러오고 있습니다…" : snapshot ? "이 범위에는 값이 없습니다." : archived ? "이 탭은 보관한 내용이 없습니다." : "Google에 한 번 연결하면 선택하는 탭을 자동으로 불러옵니다."}</div></div>}
     {archived && <p className={styles.readTime}>보관 당시의 내용입니다. 최신 원본을 읽으려면 ‘업무로 복귀’ 후 다시 불러오세요.</p>}
