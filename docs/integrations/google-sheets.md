@@ -33,3 +33,9 @@ OAuth access token은 브라우저 메모리에만 두며 Jarvis 서버·Indexed
 CI는 합성 Sheets API/Picker/CLI 응답과 일회용 로컬 Supabase로 실제 인증·CAS 저장·기기 범위·응답 전달·브라우저 새로고침을 검증한다. 실제 Google 동의와 사용자 구독 호출을 CI에서 수행하지 않는다. API 사용 정책·쿼터는 [Google 공식 한도](https://developers.google.com/workspace/sheets/api/limits)를 확인하며 무제한 무료로 약속하지 않는다.
 
 공식 근거: [token model](https://developers.google.com/identity/oauth2/web/guides/use-token-model), [Picker sample](https://developers.google.com/workspace/drive/picker/guides/sample), [Sheets scopes](https://developers.google.com/workspace/sheets/api/scopes), [values](https://developers.google.com/workspace/sheets/api/guides/values).
+
+## 탭 자동 읽기와 보기 설정 (Issue #32)
+
+Google 연결 직후 첫 탭, 이후 처음 선택하는 탭은 기본 A1:T200을 자동으로 읽는다. 기존 보관본은 즉시 표시하고 다시 불러오기로 최신 값/지정 범위를 갱신한다. 연결이 만료되거나 페이지를 다시 연 경우 보관본은 계속 볼 수 있고, 읽기 버튼으로 Google에 한 번 다시 연결한다. 자동 읽기가 실패하면 버튼으로 재시도하며 자동 팝업/재시도 반복은 하지 않는다. 보관한 문서는 자동 갱신하지 않는다.
+
+열 머리글 오른쪽/행 번호 아래 경계를 드래그하거나 포커스 후 방향키로 크기를 조절한다. 두 번 클릭 또는 Home으로 해당 크기를, 크기 초기화로 탭의 모든 크기를 되돌린다. 크기와 문답 접힘 상태는 브라우저 보기 설정이며 Google 원본과 서버에 저장된 내용/AI 질문 범위에는 영향을 주지 않는다. 문답 접기/열기는 작성 중 질문과 답변을 유지한다.
