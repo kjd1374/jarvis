@@ -35,6 +35,13 @@ export function mergeCloudWorkspace(
       if (l === undefined) return r;
       if (r === undefined) return l;
     }
+    // Removing a connected sheet also removes its in-flight work; a late runner
+    // heartbeat or another browser's save must not resurrect that connection.
+    if (base && path.length === 2 && path[0] === "documents" && object(b) && object(b.sheet) && (l === undefined || r === undefined)) return undefined;
+    if (path.length === 6 && path[0] === "documents" && path[2] === "sheet" && path[3] === "tabs" && path[5] === "wholeRead") {
+      conflicts.push(path.join("."));
+      return preference === "remote" ? r : l;
+    }
     const turn = path.length === 5 && path[0] === "projects" && path[2] === "automation" && path[3] === "turns";
     const question = path.length === 5 && path[0] === "documents" && path[2] === "sheet" && path[3] === "questions";
     const job = path.length === 4 && path[0] === "services" && path[2] === "monitoring" && path[3] === "job";
@@ -73,5 +80,8 @@ export function mergeCloudWorkspace(
     conflicts.push(path.join("."));
     return preference === "remote" ? r : l;
   }
-  return { data: normalizeWorkspace(merge(base, local, remote, [])), conflicts };
+  const merged = merge(base, local, remote, []) as WorkspaceData;
+  const removedSheets = new Set(base?.documents.filter(d => d.sheet && !merged.documents.some(row => row.id === d.id)).map(d => d.id));
+  const cleaned = removedSheets.size ? { ...merged, messages: merged.messages.map(m => ({ ...m, fileIds: m.fileIds.filter(id => !removedSheets.has(id)) })) } : merged;
+  return { data: normalizeWorkspace(cleaned), conflicts };
 }

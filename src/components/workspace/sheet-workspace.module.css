@@ -35,6 +35,11 @@
 .rangeBar input { width:105px; padding:5px 7px; }
 .rangeBar .tabPicker { flex:1 1 200px; margin-right:auto; }
 .tabPicker select { width:100%; max-width:320px; padding:6px 8px; text-overflow:ellipsis; color-scheme:dark; }
+.pageBar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:5px 20px; font-size:11px; }
+.pageBar label { display:flex; flex:1 1 180px; align-items:center; gap:6px; color:var(--muted); }
+.pageBar select { flex:1; max-width:100%; padding:6px; color-scheme:dark; }
+.pageBar button { border:1px solid var(--border); border-radius:6px; padding:6px 8px; background:transparent; color:var(--muted); }
+.removalName { overflow-wrap:anywhere; }
 .readTime { font-size:10px; color:var(--muted); padding:8px 20px; margin:0; line-height:1.7; }
 .tableScroll { flex:1; overflow:auto; background:var(--background); min-height:160px; }
 .tableScroll table { border-collapse:separate; border-spacing:0; table-layout:fixed; font-size:12px; }

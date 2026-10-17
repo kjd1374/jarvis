@@ -1,6 +1,7 @@
 import { id, now } from "../workspace/types";
 import { parseSheetRange, validSpreadsheetId, validateSnapshot, SHEET_MIME } from "./documents";
 import type { SheetSnapshot, SheetTab } from "./types";
+import { splitWholeSheet } from "./whole-sheet";
 
 export type GoogleConfig = { configured: true; clientId: string; apiKey: string; projectNumber: string };
 type TokenResult = { access_token?: string; expires_in?: number; error?: string; scope?: string };
@@ -90,7 +91,7 @@ export function chooseSheet(config: GoogleConfig): Promise<string | null> {
     dialog.setVisible(true);
   });
 }
-async function googleGet(config: GoogleConfig, path: string) {
+async function googleGet(config: GoogleConfig, path: string, maxBytes = 500_000) {
   const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${path}`, {
     headers: { Authorization: `Bearer ${accessToken(config)}` }, credentials: "omit", cache: "no-store", redirect: "error", signal: AbortSignal.timeout(25_000),
   });
@@ -103,7 +104,7 @@ async function googleGet(config: GoogleConfig, path: string) {
   const reader = response.body?.getReader();
   if (!reader) throw new Error("시트 응답이 없습니다.");
   const chunks: Uint8Array[] = []; let size = 0;
-  try { while (true) { const part = await reader.read(); if (part.done) break; size += part.value.length; if (size > 500_000) { await reader.cancel(); throw new Error("내용이 너무 큽니다. 불러올 범위를 줄여주세요."); } chunks.push(part.value); } }
+  try { while (true) { const part = await reader.read(); if (part.done) break; size += part.value.length; if (size > maxBytes) { await reader.cancel(); throw new Error("탭 전체를 읽기에는 내용이 너무 큽니다. 기존 내용은 유지됩니다. Google에서 원본을 열어주세요."); } chunks.push(part.value); } }
   finally { reader.releaseLock(); }
   const bytes = new Uint8Array(size); let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
@@ -125,4 +126,11 @@ export async function readSheetValues(config: GoogleConfig, spreadsheetId: strin
   const snapshot = { id: id(), tabId: tab.id, tabTitle: tab.title, range: selection, capturedAt: now(), values: raw.values ?? [] };
   validateSnapshot(snapshot);
   return snapshot;
+}
+export async function readWholeSheet(config: GoogleConfig, spreadsheetId: string, tab: SheetTab) {
+  if (!validSpreadsheetId(spreadsheetId)) throw new Error("시트 주소를 확인해주세요.");
+  // A quoted sheet name requests the entire tab; Google omits trailing empty cells.
+  const a1 = `'${tab.title.replaceAll("'", "''")}'`;
+  const raw = await googleGet(config, `${spreadsheetId}/values/${encodeURIComponent(a1)}?valueRenderOption=FORMATTED_VALUE&majorDimension=ROWS`, 8_000_000) as { values?: unknown };
+  return splitWholeSheet(tab, raw.values ?? [], now());
 }

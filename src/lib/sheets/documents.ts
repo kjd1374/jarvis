@@ -1,5 +1,5 @@
 import { id, assertLinks, type Document, type Space, type WorkspaceData } from "../workspace/types";
-import type { DocumentAnswer, SheetDocument, SheetSnapshot, SheetTab } from "./types";
+import type { DocumentAnswer, SheetDocument, SheetSnapshot, SheetTab, WholeSheetRead } from "./types";
 
 export const SHEET_MIME = "application/vnd.google-apps.spreadsheet";
 export const DEFAULT_RANGE = "A1:T200";
@@ -51,6 +51,7 @@ export function validateSheetDocument(document: Document) {
     if (!object(tab) || !Number.isSafeInteger(tab.id) || tab.id < 0 || tabIds.has(tab.id) || !text(tab.title, 200) || !tab.title ||
       tab.snapshotId !== undefined && (!sheet.snapshots.some(s => s.id === tab.snapshotId && s.tabId === tab.id) || !date(tab.checkedAt))) throw new Error("시트 탭 연결을 확인해주세요.");
     tabIds.add(tab.id);
+    if (tab.wholeRead !== undefined) validateWholeRead(tab.wholeRead, tab.id, sheet.snapshots);
   }
   for (const q of sheet.questions) {
     const snapshot = sheet.snapshots.find(s => s.id === q.snapshotId);
@@ -92,7 +93,7 @@ export function saveSheetSnapshot(data: WorkspaceData, space: Space, documentId:
   if (!document || !sheet || sheet.archivedAt || !sheet.tabs.some(t => t.id === snapshot.tabId)) throw new Error("현재 작업 중인 시트와 탭을 확인해주세요.");
   const duplicate = sheet.snapshots.find(s => s.tabId === snapshot.tabId && s.tabTitle === snapshot.tabTitle && s.range === snapshot.range && JSON.stringify(s.values) === JSON.stringify(snapshot.values));
   const selected = duplicate ?? snapshot;
-  const tabs = sheet.tabs.map(t => t.id === snapshot.tabId ? { ...t, title: snapshot.tabTitle, snapshotId: selected.id, checkedAt: snapshot.capturedAt } : t);
+  const tabs = sheet.tabs.map(t => t.id === snapshot.tabId ? { ...t, title: snapshot.tabTitle, snapshotId: selected.id, checkedAt: snapshot.capturedAt, wholeRead: undefined } : t);
   // Immutable snapshots also protect questions queued concurrently on another device.
   if (!duplicate && sheet.snapshots.length >= 200) throw new Error("이 문서의 보관 범위 한도에 도달했습니다. 기존 내용은 유지됩니다.");
   return replaceSheet(data, document, { ...sheet, tabs, snapshots: [...sheet.snapshots, ...(duplicate ? [] : [snapshot])] });
@@ -101,4 +102,51 @@ export function archiveSheet(data: WorkspaceData, space: Space, documentId: stri
   const document = data.documents.find(d => d.id === documentId && d.space === space), sheet = document?.sheet;
   if (!document || !sheet || archived && !sheet.tabs.some(t => t.snapshotId)) throw new Error("내용을 먼저 불러온 뒤 자료실로 보내주세요.");
   return replaceSheet(data, document, { ...sheet, archivedAt: archived ? stamp : null });
+}
+function validateWholeRead(raw: unknown, tabId: number, snapshots: SheetSnapshot[]): asserts raw is WholeSheetRead {
+  const fail = () => { throw new Error("탭 전체 보관 구간을 확인해주세요."); };
+  if (!object(raw) || !Array.isArray(raw.snapshotIds) || !raw.snapshotIds.length || raw.snapshotIds.length > 200 ||
+    raw.snapshotIds.some(value => typeof value !== "string") || new Set(raw.snapshotIds).size !== raw.snapshotIds.length ||
+    !Number.isSafeInteger(raw.rowCount) || !Number.isSafeInteger(raw.columnCount) || Number(raw.rowCount) < 0 || Number(raw.columnCount) < 0 ||
+    Number(raw.rowCount) > 100_000 || Number(raw.columnCount) > 18_278 || Number(raw.rowCount) * Number(raw.columnCount) > 500_000 || !date(raw.capturedAt)) return fail();
+  const rows = Number(raw.rowCount), cols = Number(raw.columnCount);
+  const ranges = raw.snapshotIds.map(key => {
+    const snapshot = snapshots.find(s => s.id === key && s.tabId === tabId);
+    if (!snapshot) return fail();
+    return { ...parseSheetRange(snapshot.range), snapshot };
+  });
+  if (!rows || !cols) {
+    if (rows !== 0 || cols !== 0 || ranges.length !== 1 || ranges[0].range !== "A1:A1" || ranges[0].snapshot.values.length) return fail();
+    return;
+  }
+  let area = 0;
+  for (let i = 0; i < ranges.length; i++) {
+    const a = ranges[i];
+    if (a.endRow > rows || a.endColumn > cols) return fail();
+    area += (a.endRow - a.startRow + 1) * (a.endColumn - a.startColumn + 1);
+    for (const b of ranges.slice(0, i)) if (a.startRow <= b.endRow && b.startRow <= a.endRow && a.startColumn <= b.endColumn && b.startColumn <= a.endColumn) return fail();
+  }
+  if (area !== rows * cols) return fail();
+}
+export function saveWholeSheet(data: WorkspaceData, space: Space, documentId: string, tabId: number, loaded: { snapshots: SheetSnapshot[]; wholeRead: WholeSheetRead }) {
+  const document = data.documents.find(d => d.id === documentId && d.space === space), sheet = document?.sheet;
+  if (!document || !sheet || sheet.archivedAt || !sheet.tabs.some(t => t.id === tabId)) throw new Error("현재 작업 중인 시트와 탭을 확인해주세요.");
+  loaded.snapshots.forEach(validateSnapshot);
+  validateWholeRead(loaded.wholeRead, tabId, loaded.snapshots);
+  if (loaded.snapshots.length !== loaded.wholeRead.snapshotIds.length || loaded.snapshots.some(s => s.tabId !== tabId || !loaded.wholeRead.snapshotIds.includes(s.id))) throw new Error("탭 전체 보관 구간을 확인해주세요.");
+  const snapshots = [...sheet.snapshots], snapshotIds: string[] = [];
+  for (const snapshot of loaded.snapshots) {
+    const duplicate = snapshots.find(s => s.tabId === tabId && s.tabTitle === snapshot.tabTitle && s.range === snapshot.range && JSON.stringify(s.values) === JSON.stringify(snapshot.values));
+    if (!duplicate) snapshots.push(snapshot);
+    snapshotIds.push((duplicate ?? snapshot).id);
+  }
+  if (snapshots.length > 200) throw new Error("이 문서의 보관 한도에 도달해 전체를 저장하지 못했습니다. 기존 내용은 유지됩니다.");
+  const wholeRead = { ...loaded.wholeRead, snapshotIds };
+  return replaceSheet(data, document, { ...sheet, snapshots, tabs: sheet.tabs.map(t => t.id === tabId ? { ...t, snapshotId: snapshotIds[0], checkedAt: wholeRead.capturedAt, wholeRead } : t) });
+}
+export function removeSheet(data: WorkspaceData, space: Space, documentId: string) {
+  const document = data.documents.find(d => d.id === documentId && d.space === space);
+  if (!document?.sheet) throw new Error("제거할 시트 연결을 확인해주세요.");
+  return { ...data, documents: data.documents.filter(d => d.id !== documentId),
+    messages: data.messages.map(m => m.fileIds.includes(documentId) ? { ...m, fileIds: m.fileIds.filter(value => value !== documentId) } : m) };
 }
