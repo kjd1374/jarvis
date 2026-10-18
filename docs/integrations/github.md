@@ -80,3 +80,10 @@ Mac에서 실행 중인 runner를 `Ctrl+C`로 종료한 후 Jarvis 설정에서 
 런타임 파일 변경 후 `npm run runtime:manifest`로 해시를 갱신한다. 일반 CI는 배포 manifest와 파일 일치 여부를 검사한다. `npm run test:preview`는 실제 Docker/Chromium에서 합성 SQLite 앱과 연결·격리를 검사한다. 실제 사용자 Mac 설치와 구독 호출은 최초 사용 시 별도로 확인해야 한다.
 
 이미 결과가 저장된 요청은 업데이트만으로 재실행하거나 성공으로 바꾸지 않는다. 사용자가 새 프로젝트 요청을 보내 새 검사 결과를 받아야 한다. 의존성 준비 성공과 대상 앱 CLI 통합·계정 호출·CI·병합·배포 완료는 각각 실제 결과로 확인한다. 이번 수정이 대상 앱의 미완료 연동을 대신 구현하지는 않는다.
+
+
+### Remote checks and selected revisions (2.4.0)
+
+Use the project's **테스트 실행** for supported repository checks and **화면 준비** for interactive HTTP preview. Both actions run on the registered execution server. An unmerged recent change is selectable as the source; subsequent edits reuse its PR. The runner revalidates that PR and commit before using it, and does not silently substitute main for a changed/closed PR. Already merged PRs resolve to current main. Old runners skip test/source-aware requests until updated with the existing scope-preserving installer.
+
+Checks use a sanitized local Docker image and public locked npm dependencies with installation hooks disabled. Execution has no external network, host mounts or provider credentials. npm test/lint/typecheck (or check when those are absent), then Node test-file discovery are supported. Missing prerequisites/zero tests remain not-run; real exit failures remain failures. These checks do not establish external AI/provider/microphone functionality. A project's missing GitHub CI still prevents automatic merge. No CI workflow or authentication change is inferred from a test request.

@@ -30,7 +30,8 @@ export type ProjectTurn = {
   serviceId: string;
   repository: string;
   request: string;
-  mode: "ask" | "change" | "preview";
+  mode: "ask" | "change" | "preview" | "test";
+  sourceTurnId?: string;
   publish: "pr" | "merge";
   status: "queued" | "running" | "completed" | "failed" | "interrupted" | "cancelled";
   phase: "queued" | "preparing" | "coding" | "testing" | "publishing" | "reporting";

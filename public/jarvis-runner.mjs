@@ -8,7 +8,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 
-export const VERSION = "2.3.0";
+export const VERSION = "2.4.0";
 export class RunnerError extends Error {
   constructor(code) { super(code); this.code = code; }
 }
@@ -371,6 +371,8 @@ export async function runCodexWork(job, cwd, controlDir, { run = runCommand, sig
     "Never run git commit/push/merge, gh, deployment commands, database migrations, network requests, browser/session access or modify authentication/access policies. The runner handles authorized publishing separately.",
     "Do not change .git, .github/workflows, .codex, AGENTS.md or CI/security policy. Do not install packages or run install hooks. Do not weaken checks, disable tests or fabricate completion.",
     "runnerPreparation.checks records the runner's actual dependency preparation. Explain failed or skipped preparation separately from checks you ran. A preparation failure does not mean the host CLI is disconnected. Do not claim unexecuted checks passed.",
+    "Jarvis is a remote development workspace. The user operates a browser on another PC; the Mac is the execution server. Do not hand routine development/testing back to the user as terminal commands (node/npm, JSON config execution, localhost links). For automated checks direct them to Jarvis 테스트 실행; for interactive checks use 화면 준비 then 이 PC에서 화면 열기. The runner attaches observed test results and the verified screen separately after your response. Never invent a URL or claim external AI/service integration was tested in an offline sandbox.",
+    "runnerPreparation.revision identifies the actual selected checkout and whether an earlier PR is still unmerged. Compare history to that revision; a past claim of implementation is not proof it exists on the default branch. If tests or a supported start script are missing and the user requested implementation, prepare them in this checkout within scope instead of asking the user to run setup manually.",
     job.mode === "ask" ? "Answer the user's question using this repository. Do not edit files or execute project scripts." : "Implement the requested code changes in this checkout. Inspect code before editing, make minimal changes and preserve unrelated behavior. You may run relevant local checks within the sandbox. Dependency installation is handled separately. If scope/credentials/data are missing or the requested change is not completed, set blocked=true, explain the blocker and record a follow-up. Set blocked=false only when the request was fulfilled within the allowed scope.",
     "Your final reply must describe what you actually did, limitations and next steps. Avoid claiming GitHub publication, CI success, merge or deployment: those are observed by the runner after you finish. Follow-ups are recorded as Jarvis tasks, not automatically executed. Keep followUps <= 10; title <= 160, reason <= 2000; reply <= 8000, summary <= 4000, currentStatus/nextAction <= 2000 characters.",
   ].join("\n");
@@ -406,8 +408,8 @@ function dependencyFailureDetail(install) {
   const reason = Object.hasOwn(reasons, code) ? `${reasons[code]} (${code})` : `npm 실행 실패 (종료 코드 ${Number.isInteger(install.code) ? install.code : "확인 불가"})`;
   return `의존성 준비 실패: ${reason}. 의존성이 필요한 로컬 검사는 완료로 판단할 수 없습니다.`;
 }
-export async function executeProjectWork(client, job, { stateDir, run = runCommand, model = runCodexWork, get = githubGet, delay = wait, log = console.log, previewEnabled = false, previewTools, remotePreview } = {}) {
-  if (!stateDir || !/^[a-f0-9-]{36}$/.test(job.id) || !/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/.test(job.repository) || job.repository.includes("..") || !["ask", "change", "preview"].includes(job.mode) || !["pr", "merge"].includes(job.publish)) throw new RunnerError("invalid_work_scope");
+export async function executeProjectWork(client, job, { stateDir, run = runCommand, model = runCodexWork, get = githubGet, delay = wait, log = console.log, previewEnabled = false, previewTools, testTools, remotePreview } = {}) {
+  if (!stateDir || !/^[a-f0-9-]{36}$/.test(job.id) || !/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/.test(job.repository) || job.repository.includes("..") || !["ask", "change", "preview", "test"].includes(job.mode) || !["pr", "merge"].includes(job.publish)) throw new RunnerError("invalid_work_scope");
   const identity = { space: job.space, projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken };
   const abort = new AbortController();
   let progress = "preparing";
@@ -420,7 +422,7 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
   const key = createHash("sha256").update(`${job.space}:${job.projectId}:${job.repository}:${job.id}`).digest("hex");
   const directory = join(stateDir, `work-${key}`), cwd = join(directory, "repository"), journalFile = join(directory, "journal.json");
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  const digest = createHash("sha256").update(JSON.stringify([job.repository, job.request, job.mode, job.publish])).digest("hex");
+  const digest = createHash("sha256").update(JSON.stringify([job.repository, job.request, job.mode, job.publish, ...(job.source ? [job.source] : [])])).digest("hex");
   let journal = { digest };
   const save = async () => privateWrite(journalFile, journal);
   const cliEnv = cliEnvironment();
@@ -451,6 +453,22 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
       if (!/^[a-f0-9]{40,64}$/.test(commit.sha)) throw new RunnerError("github_unavailable");
       journal.baseSha = commit.sha; journal.baseBranch = meta.default_branch;
       journal.branch = `jarvis/work-${job.id}`;
+      journal.checkoutSha = commit.sha;
+      if (job.source) {
+        const source = job.source;
+        const prefix = `https://github.com/${job.repository}/pull/`;
+        const number = typeof source.prUrl === "string" && source.prUrl.startsWith(prefix) ? source.prUrl.slice(prefix.length) : "";
+        if (!/^[1-9][0-9]*$/.test(number) || !/^[a-f0-9]{40,64}$/.test(source.headSha ?? "") || !/^[a-f0-9]{40,64}$/.test(source.baseSha ?? "") || !/^jarvis\/work-[a-f0-9-]{36}$/.test(source.branch ?? "")) throw new RunnerError("work_source_changed");
+        const previous = await get(`repos/${job.repository}/pulls/${number}`);
+        if (previous.head?.sha !== source.headSha || previous.head?.ref !== source.branch || previous.head?.repo?.full_name?.toLowerCase() !== job.repository || previous.base?.ref !== journal.baseBranch) throw new RunnerError("work_source_changed");
+        if (!previous.merged) {
+          if (previous.state !== "open") throw new RunnerError("work_source_changed");
+          journal.checkoutSha = source.headSha;
+          if (job.mode === "change") { journal.baseSha = source.baseSha; journal.branch = source.branch; journal.sourcePr = Number(number); }
+          else journal.baseSha = source.headSha;
+          journal.selectedPr = Number(number);
+        }
+      }
       await save();
     }
     if (!journal.prepared) {
@@ -458,7 +476,7 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
       await rm(cwd, { recursive: true, force: true });
       const cloned = await run("git", [...gitArgs, "clone", "--no-checkout", "--no-recurse-submodules", `https://github.com/${job.repository}.git`, cwd], { env: gitEnv, signal: abort.signal, timeout: 180_000 });
       if (cloned.code !== 0) throw new RunnerError("github_auth_required");
-      await git(["checkout", "-b", journal.branch, journal.baseSha]);
+      await git(["checkout", "-b", journal.branch, journal.checkoutSha ?? journal.baseSha]);
       // Remove tracked sensitive files and symlinks from the model's visible checkout.
       const tracked = (await git(["ls-files", "-z"])).out.split("\0").filter(Boolean);
       journal.omittedPaths = [];
@@ -490,6 +508,24 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
         return { state: "failed", kind: "mac", url: null, sha, checkedAt: new Date().toISOString(), expiresAt: null, message: "미리보기 모듈 또는 실행 환경을 확인하지 못했습니다. 맥미니 실행기를 설치한 뒤 다시 준비해주세요." };
       }
     };
+    const executeChecks = async () => {
+      let tools;
+      try { tools = testTools ?? await import("./jarvis-preview.mjs"); }
+      catch { return [{ name: "자동 테스트", status: "not_run", detail: "검사 모듈이 설치되지 않았습니다. 기존 실행기를 최신 Mac 설치기로 업데이트하면 Jarvis에서 테스트할 수 있습니다." }]; }
+      const files = (await git(["ls-files", "-z"])).out.split("\0").filter(Boolean);
+      const untracked = (await git(["ls-files", "--others", "--exclude-standard", "-z"])).out.split("\0").filter(Boolean);
+      return tools.runProjectTests({ cwd, files: [...new Set([...files, ...untracked])], stateDir, identity: `${key}:checks`, run, signal: abort.signal, redact });
+    };
+    if (job.mode === "test") {
+      progress = "testing"; await pulse();
+      if (!journal.testChecks) { journal.testChecks = await executeChecks(); await save(); }
+      const passed = journal.testChecks.length > 0 && journal.testChecks.every(c => c.status === "passed");
+      const result = { reply: passed ? "선택한 코드의 자동 검증 명령을 실행했습니다. 각 명령의 결과를 아래에서 확인할 수 있습니다." : "선택한 코드의 자동 검증 결과에 실패 또는 미실행 항목이 있습니다. 아래 결과를 확인해주세요.",
+        summary: passed ? "자동 검증 통과" : "자동 검증 확인 필요", currentStatus: "실제 AI·외부 서비스 연결과 사용자 기기의 마이크 동작은 이 검사에 포함되지 않습니다.", nextAction: "화면 준비에서 같은 수정본을 열어 확인할 수 있습니다.",
+        changes: [], checks: journal.testChecks, followUps: [], outcome: passed ? "answered" : "blocked", branch: null, baseSha: journal.baseSha, headSha: null, prUrl: null, deployment: { state: "not_configured", url: null, sha: null } };
+      await pulse(); journal.result = result; await save();
+      await client.request("/api/automation/work", { ...identity, phase: "result", result }); return;
+    }
     if (job.mode === "preview") {
       const preview = await prepareScreen(journal.baseSha);
       const result = { reply: preview.message, summary: preview.state === "ready" ? "웹 화면 준비 완료" : "웹 화면 준비 필요", currentStatus: "", nextAction: "", changes: [], checks: [], followUps: [],
@@ -526,7 +562,7 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
       }
       if (!journal.model) {
         journal.modelStarted = true; journal.modelAttempt = job.attempt ?? 1; await save();
-        const modelJob = { ...job, context: { ...job.context, runnerPreparation: { checks: checks.map(check => ({ ...check })) } } };
+        const modelJob = { ...job, context: { ...job.context, runnerPreparation: { checks: checks.map(check => ({ ...check })), revision: { sha: journal.checkoutSha ?? journal.baseSha, baseBranch: journal.baseBranch, unmergedPr: journal.selectedPr ?? null } } } };
         journal.model = validModelWork(await model(modelJob, cwd, directory, { run, signal: abort.signal }));
       }
       await save();
@@ -535,9 +571,11 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
       branch: null, baseSha: journal.baseSha, headSha: null, prUrl: null, deployment: { state: "not_configured", url: null, sha: null } };
     if (job.mode === "change" && !journal.model.blocked) {
       progress = "testing"; await pulse();
+      if (!journal.testChecks) { journal.testChecks = await executeChecks(); await save(); }
+      result.checks.push(...journal.testChecks);
       // Restore excluded tracked paths without exposing their contents to the model.
       const tracked = (await git(["ls-files", "-z"])).out.split("\0").filter(Boolean);
-      for (const path of tracked) if (!allowedWorkPath(path) || journal.omittedPaths?.includes(path)) await git(["restore", "--source", journal.baseSha, "--worktree", "--", path]);
+      for (const path of tracked) if (!allowedWorkPath(path) || journal.omittedPaths?.includes(path)) await git(["restore", "--source", journal.checkoutSha ?? journal.baseSha, "--worktree", "--", path]);
       const changed = (await git(["diff", "--name-only", "--no-renames", "-z", journal.baseSha])).out.split("\0").filter(Boolean);
       const untracked = (await git(["ls-files", "--others", "--exclude-standard", "-z"])).out.split("\0").filter(Boolean);
       const paths = [...new Set([...changed, ...untracked])];
@@ -554,8 +592,8 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
       if (paths.length) {
         result.branch = journal.branch;
         if (!journal.headSha) {
-          const existingHead = (await git(["rev-parse", "HEAD"])).out.trim();
-          if (existingHead === journal.baseSha) {
+          const localChanges = (await git(["diff", "--name-only", "HEAD"])).out.trim();
+          if (localChanges || untracked.length) {
             await git(["add", "--", ...paths]);
             await git(["-c", "user.name=Jarvis CLI", "-c", "user.email=jarvis-cli@users.noreply.github.com", "commit", "-m", `Apply requested project update (${job.id.slice(0, 8)})`]);
           }
@@ -564,8 +602,15 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
         result.headSha = journal.headSha;
         progress = "publishing"; await pulse();
         const remote = await git(["ls-remote", "--heads", "origin", `refs/heads/${journal.branch}`]);
-        if (remote.out.trim() && remote.out.split(/\s/)[0] !== journal.headSha) throw new RunnerError("branch_changed");
-        if (!remote.out.trim()) await git(["push", "origin", `HEAD:refs/heads/${journal.branch}`]);
+        const remoteSha = remote.out.trim() ? remote.out.split(/\s/)[0] : null;
+        if (remoteSha && remoteSha !== journal.headSha && !(journal.sourcePr && remoteSha === journal.checkoutSha)) throw new RunnerError("branch_changed");
+        if (remoteSha !== journal.headSha) {
+          if (journal.sourcePr) {
+            const fresh = await get(`repos/${job.repository}/pulls/${journal.sourcePr}`);
+            if (fresh.state !== "open" || fresh.merged || fresh.head?.sha !== remoteSha) throw new RunnerError("work_source_changed");
+          }
+          await git(["push", "origin", `HEAD:refs/heads/${journal.branch}`]);
+        }
         const pulls = await get(`repos/${job.repository}/pulls?state=all&head=${encodeURIComponent(job.repository.split("/")[0] + ":" + journal.branch)}`);
         let pr = Array.isArray(pulls) ? pulls.find(p => p.head?.ref === journal.branch) : null;
         if (!pr) {
@@ -628,7 +673,7 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
             if (result.outcome === "merged") result.followUps.push({ title: "반영한 커밋의 배포 상태 확인", reason: "코드 병합은 확인했습니다. GitHub에서 해당 커밋의 성공한 운영 배포를 아직 확인하지 못했습니다.", kind: "decision" });
           }
         } else {
-          result.followUps.push({ title: ciPassed ? "수정 PR 검토·반영" : "수정 PR 검증 결과 확인", reason: ciPassed ? "요청한 PR 검토 방식에 따라 코드와 검사 결과를 확인한 뒤 반영합니다." : "성공한 검증 근거가 충분하지 않아 병합을 진행하지 않았습니다.", kind: "decision" });
+          result.followUps.push({ title: ciPassed ? "수정 PR 검토·반영" : "수정 PR 검증 결과 확인", reason: ciPassed ? "요청한 PR 검토 방식에 따라 코드와 검사 결과를 확인한 뒤 반영합니다." : "성공한 GitHub 검증 근거가 충분하지 않아 병합을 진행하지 않았습니다. 최근 수정본의 테스트·화면 확인은 Jarvis에서 계속할 수 있습니다.", kind: "decision" });
         }
       }
     }
@@ -758,7 +803,7 @@ export async function main(argv = process.argv.slice(2)) {
   console.log(`Jarvis 실행기 ${VERSION} 연결됨 · 선택한 영역/프로젝트만 점검합니다. 구독 사용 한도가 적용됩니다.`);
   do {
     for (const scope of config.scopes) {
-      const claimed = await resilientRequest("/api/automation/claim", { ...scope, provider: config.provider, workVersion: 1, documentVersion: 1, previewVersion: config.preview?.enabled === true ? 1 : 0 });
+      const claimed = await resilientRequest("/api/automation/claim", { ...scope, provider: config.provider, workVersion: 1, remoteWorkVersion: 1, documentVersion: 1, previewVersion: config.preview?.enabled === true ? 1 : 0 });
       if (claimed.job?.kind === "document") await executeDocumentQuestion(client, claimed.job, { stateDir });
       else if (claimed.job?.kind === "work") await executeProjectWork(client, claimed.job, { stateDir, previewEnabled: config.preview?.enabled === true,
         remotePreview: config.preview?.remote === true ? { origin, binary: join(dirname(fileURLToPath(import.meta.url)), "cloudflared") } : undefined });

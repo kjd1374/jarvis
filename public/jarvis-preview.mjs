@@ -72,6 +72,74 @@ export function previewPlan(files, pkg, lock) {
   const root = files.includes("index.html") ? "." : files.includes("public/index.html") ? "public" : null;
   return root ? { kind: "static", root, install: false, build: false } : null;
 }
+async function copyProject(cwd, files, app) {
+  await mkdir(app, { recursive: true, mode: 0o700 });
+  const source = await realpath(cwd), copied = [];
+  let total = 0;
+  if (files.length > 15_000) throw new Error("project_too_large");
+  for (const path of files) {
+    if (!previewFile(path)) continue;
+    const from = join(cwd, path), info = await lstat(from).catch(() => null);
+    if (!info || !info.isFile() || info.isSymbolicLink() || !(await realpath(from)).startsWith(source + "/")) continue;
+    total += info.size;
+    if (info.size > 10_000_000 || total > 100_000_000) throw new Error("project_too_large");
+    const dest = join(app, path); await mkdir(dirname(dest), { recursive: true }); await copyFile(from, dest); copied.push(path);
+  }
+  return copied;
+}
+export function projectTestPlan(files, pkg, lock) {
+  const scripts = pkg?.scripts ?? {};
+  const names = ["test", "lint", "typecheck"].filter(name => typeof scripts[name] === "string" && scripts[name].trim());
+  const commands = names.map(name => ({ name: `npm run ${name}`, args: ["npm", "run", name, "--ignore-scripts"] }));
+  if (!commands.length && typeof scripts.check === "string" && scripts.check.trim()) commands.push({ name: "npm run check", args: ["npm", "run", "check", "--ignore-scripts"] });
+  if (!commands.length && files.some(path => /(?:\.test|\.spec)\.(?:mjs|cjs|js)$/.test(path))) commands.push({ name: "node --test", args: ["node", "--test", ...files.filter(path => /(?:\.test|\.spec)\.(?:mjs|cjs|js)$/.test(path)).map(path => `./${path}`)] });
+  if (!commands.length) return { reason: "자동 검증 명령이 없습니다. Jarvis 수정 요청으로 테스트를 추가한 뒤 다시 실행해주세요." };
+  if (commands.some(c => c.args.length > 2048)) return { reason: "테스트 파일 한도를 넘었습니다. 저장소의 test 스크립트로 실행 범위를 정해주세요." };
+  if (Object.keys({ ...pkg?.dependencies, ...pkg?.devDependencies }).length && !lock) return { reason: "의존성 잠금 파일이 없어 실행하지 않았습니다. Jarvis 수정 요청으로 실행 조건을 준비해주세요." };
+  if (lock && (!lock.packages || Object.values(lock.packages).some(p => !p || p.link || p.resolved && (!/^https:\/\/registry\.npmjs\.org\//.test(p.resolved) || !p.integrity)))) return { reason: "공개 npm 잠금 파일만 자동 설치할 수 있습니다." };
+  return { commands, install: !!lock };
+}
+export async function runProjectTests({ cwd, files, stateDir, identity, run, signal, redact = value => value }) {
+  const key = createHash("sha256").update(`${identity}:${randomUUID()}`).digest("hex").slice(0, 24);
+  const name = `jarvis-test-${key}`, image = `${name}:app`, directory = join(stateDir, name), app = join(directory, "app");
+  const checks = [], omitted = detail => [{ name: "자동 테스트", status: "not_run", detail }];
+  const docker = (args, timeout = 30_000, cleanup = false) => run("docker", args, { signal: cleanup ? undefined : signal, timeout, maxBytes: 2_000_000 });
+  try {
+    if ((await docker(["version", "--format", "{{.Server.Version}}"])).code !== 0) return omitted("실행 서버의 Docker가 응답하지 않습니다. 테스트는 실행되지 않았습니다.");
+    await rm(directory, { recursive: true, force: true });
+    const copied = await copyProject(cwd, files, app);
+    const json = async path => JSON.parse(await readFile(join(app, path), "utf8").catch(() => "null"));
+    const plan = projectTestPlan(copied, await json("package.json"), await json("package-lock.json"));
+    if (plan.reason) return omitted(plan.reason);
+    // PID 1 bounds execution even if the host runner disappears mid-command.
+    await writeFile(join(directory, "test-exec.mjs"), "import {spawn} from 'node:child_process';\nconst [bin,...args]=process.argv.slice(2);\nconst child=spawn(bin,args,{stdio:'inherit'});\nchild.on('error',()=>process.exit(127));child.on('exit',code=>process.exit(Number.isInteger(code)?code:1));\nsetTimeout(()=>process.exit(124),285000);\n");
+    await writeFile(join(directory, "Dockerfile"), [
+      `FROM ${IMAGE}`, "WORKDIR /app", "COPY app/ /app/",
+      ...(plan.install ? ["RUN npm ci --ignore-scripts --no-audit --no-fund"] : []),
+      "COPY test-exec.mjs /runtime/test-exec.mjs", "RUN chown -R node:node /app && chmod -R a+rX /runtime", "USER node", "",
+    ].join("\n"));
+    const built = await docker(["build", "--pull", "--tag", image, directory], 300_000);
+    if (built.code !== 0) return omitted("격리 테스트 환경 준비에 실패했습니다. 설치 조건·잠금 파일을 확인해야 합니다. 테스트는 실행되지 않았습니다.");
+    for (const command of plan.commands) {
+      if (signal?.aborted) throw new Error("test_cancelled");
+      const result = await docker(["run", "--rm", "--name", name, "--network", "none", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+        "--memory", "1g", "--cpus", "1", "--pids-limit", "128", "--env", "CI=true", "--env", "HOME=/tmp", "--env", "NEXT_TELEMETRY_DISABLED=1", image, "node", "/runtime/test-exec.mjs", ...command.args], 300_000);
+      const output = `${result.out ?? ""}\n${result.err ?? ""}`;
+      const empty = /(?:^|\n)\s*(?:# |ℹ )?(?:tests\s+0\b|1\.\.0\b)|No tests (?:found|specified)/im.test(output);
+      const detail = redact(output.replace(/\x1b\[[0-9;]*m/g, "")).slice(-1600);
+      checks.push({ name: command.name, status: empty ? "not_run" : result.code === 0 ? "passed" : "failed", detail: `격리 실행 · 종료 코드 ${result.code ?? "없음"}${empty ? " · 실행한 테스트 없음" : ""}\n${detail}` });
+      await docker(["rm", "-f", name], 30_000, true).catch(() => {});
+    }
+    return checks;
+  } catch {
+    if (signal?.aborted) throw new Error("test_cancelled");
+    return [...checks, { name: "자동 테스트", status: "not_run", detail: "테스트 실행을 완료하지 못했습니다. 시간·자원 한도 또는 실행 조건을 확인해주세요." }];
+  } finally {
+    await docker(["rm", "-f", name], 30_000, true).catch(() => {});
+    await docker(["image", "rm", "--force", image], 30_000, true).catch(() => {});
+    await rm(directory, { recursive: true, force: true });
+  }
+}
 // The relay permits loopback-only applications to run without changing their source.
 // It is inside a network-disabled container; a host loopback bridge uses docker exec stdio.
 export const previewServerSource = String.raw`
@@ -196,19 +264,7 @@ export async function startMacPreview({ cwd, files, sha, stateDir, identity, gro
     }
     if (all.length - old.length >= 3) return unavailable(sha, "다른 프로젝트의 미리보기 3개가 실행 중입니다. 만료 후 다시 준비해주세요.");
     await rm(directory, { recursive: true, force: true });
-    await mkdir(app, { recursive: true, mode: 0o700 });
-    const source = await realpath(cwd);
-    let total = 0;
-    const copied = [];
-    if (files.length > 15_000) return unavailable(sha, "자동 미리보기 파일 한도를 넘었습니다.");
-    for (const path of files) {
-      if (!previewFile(path)) continue;
-      const from = join(cwd, path), info = await lstat(from).catch(() => null);
-      if (!info || !info.isFile() || info.isSymbolicLink() || !(await realpath(from)).startsWith(source + "/")) continue;
-      total += info.size;
-      if (info.size > 10_000_000 || total > 100_000_000) return unavailable(sha, "자동 미리보기 크기 한도를 넘었습니다.");
-      const dest = join(app, path); await mkdir(dirname(dest), { recursive: true }); await copyFile(from, dest); copied.push(path);
-    }
+    const copied = await copyProject(cwd, files, app);
     const json = async path => JSON.parse(await readFile(join(app, path), "utf8").catch(() => "null"));
     const plan = previewPlan(copied, await json("package.json"), await json("package-lock.json"));
     if (!plan) return unavailable(sha, "자동 실행 방법을 확인하지 못했습니다. 정적 index.html 또는 npm start와 공개 npm 잠금 파일을 준비하거나 기존 웹 배포를 연결해주세요.");

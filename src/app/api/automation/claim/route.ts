@@ -28,7 +28,7 @@ export async function POST(request: Request) {
       if (supportsWork) {
         data = { ...data, services: data.services.map(s => s.space === space && projects.includes(s.projectId) && s.monitoring &&
           (!s.monitoring.runnerSeenAt || Date.parse(stamp) - Date.parse(s.monitoring.runnerSeenAt) >= 60_000) ? { ...s, monitoring: { ...s.monitoring, runnerSeenAt: stamp, runnerVersion: "2.0.0" } } : s) };
-        const work = claimProjectWork(data, { space, projectIds: projects, deviceId, previews: body.previewVersion === 1 }, stamp);
+        const work = claimProjectWork(data, { space, projectIds: projects, deviceId, previews: body.previewVersion === 1, remoteWork: body.remoteWorkVersion === 1 }, stamp);
         data = work.data;
         if (work.job) return { data, result: { job: work.job } };
       }

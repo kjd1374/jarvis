@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useRef, useState } from "react";
-import { enqueueWork, changeWorkState } from "@/lib/automation/work";
+import { enqueueWork, changeWorkState, latestWorkSource } from "@/lib/automation/work";
 import { repositoryFor } from "@/lib/automation/state";
 import { dateLabel, id, now, type Project } from "@/lib/workspace/types";
 import type { ProjectTurn } from "@/lib/automation/work-types";
@@ -23,11 +23,13 @@ const errors: Record<string, string> = {
   base_changed: "작업 중 기본 브랜치가 변경돼 병합을 멈췄습니다. PR에서 최신 변경과 함께 확인해주세요.",
   branch_changed: "작업 브랜치가 변경돼 자동 반영을 멈췄습니다.", change_scope_exceeded: "자동 변경 범위를 벗어난 파일이 있어 확인이 필요합니다.",
   secret_in_change: "변경 파일에 인증값으로 보이는 내용이 있어 게시를 멈췄습니다.",
+  work_source_changed: "선택한 PR이 변경되거나 닫혔습니다. 확인할 코드를 다시 선택해 요청해주세요.",
 };
 function turnStatus(turn: ProjectTurn) {
   if (turn.status === "cancelled") return "요청 취소됨";
   if (turn.error || turn.status === "failed" || turn.status === "interrupted") return "확인 필요";
   if (turn.mode === "preview") return turn.result?.preview?.state === "ready" ? "화면 준비 완료" : turn.result ? "화면 준비 필요" : "화면 준비 중";
+  if (turn.mode === "test") return turn.result ? turn.result.outcome === "answered" ? "자동 검증 통과" : "자동 검증 확인 필요" : "자동 테스트 대기·실행 중";
   return turn.result ? outcomes[turn.result.outcome] : phases[turn.phase];
 }
 function WorkTurn({ turn, project, saving, onAction }: { turn: ProjectTurn; project: Project; saving: boolean; onAction: (turn: ProjectTurn, action: "cancel" | "retry") => void }) {
@@ -36,13 +38,19 @@ function WorkTurn({ turn, project, saving, onAction }: { turn: ProjectTurn; proj
     <BriefText text={turn.request} label="요청 전문" limit={100} />
     <div className={styles.agentReply}>
       {turn.result ? <><BriefText text={turn.result.reply} label="답변 전문" />
+        {turn.result.checks.length > 0 && <details className={styles.compactDisclosure} open={turn.mode === "test"}>
+          <summary>실행한 검사 · 통과 {turn.result.checks.filter(c => c.status === "passed").length} · 실패 {turn.result.checks.filter(c => c.status === "failed").length} · 미실행 {turn.result.checks.filter(c => c.status === "not_run").length}</summary>
+          <ul>{turn.result.checks.map((check, index) => <li key={index}><strong>{check.name} · {check.status === "passed" ? "통과" : check.status === "failed" ? "실패" : "미실행"}</strong><BriefText text={check.detail} label="검사 실행 결과" /></li>)}</ul>
+        </details>}
+        {turn.result.outcome === "pr_open" && <p>수정본은 PR에 있으며 아직 기본 브랜치에 반영되지 않았습니다. ‘최근 수정본’을 선택해 테스트하거나 작업을 이어갈 수 있습니다.</p>}
+        {turn.mode === "test" && <p>실제 AI·외부 서비스 연결과 마이크 동작은 별도 확인이 필요합니다.</p>}
         {turn.result.preview && <details className={styles.compactDisclosure}><summary>이 작업의 화면</summary><PreviewResult preview={turn.result.preview} project={project} turnId={turn.id} /></details>}
         {turn.result.prUrl && <a href={turn.result.prUrl} target="_blank" rel="noopener noreferrer">변경 PR 열기 ↗</a>}
         {turn.result.deployment.url && <a href={turn.result.deployment.url} target="_blank" rel="noopener noreferrer">반영된 화면 열기 ↗</a>}
       </> : !turn.error && <p>{turn.status === "queued" ? "CLI가 연결되면 자동으로 시작합니다." : turn.status === "cancelled" ? "이미 반영된 변경은 유지됩니다." : "작업 중입니다. 결과는 자동으로 갱신됩니다."}</p>}
       {turn.error && <p role="status">{errors[turn.error] ?? "실행을 마치지 못했습니다. 저장된 결과를 확인한 뒤 이어서 시도해주세요."}</p>}
       <div className={styles.agentTurnActions}>
-        <span>{turn.mode === "preview" ? "화면 준비 · AI 호출 없음" : turn.mode === "ask" ? "질문" : turn.publish === "merge" ? "수정·검증 후 반영" : "수정 후 PR 검토"}</span>
+        <span>{turn.mode === "test" ? "자동 테스트 · 코드 게시·AI 호출 없음" : turn.mode === "preview" ? "화면 준비 · AI 호출 없음" : turn.mode === "ask" ? "질문" : turn.publish === "merge" ? "수정·검증 후 반영" : "수정 후 PR 검토"}</span>
         {["failed", "interrupted"].includes(turn.status) && <button className={styles.textButton} disabled={saving} onClick={() => onAction(turn, "retry")}>이어서 실행</button>}
         {["queued", "running", "failed", "interrupted"].includes(turn.status) && <button className={styles.textButton} disabled={saving} onClick={() => onAction(turn, "cancel")}>요청 취소</button>}
       </div>
@@ -59,6 +67,9 @@ export function ProjectAgent({ project }: { project: Project }) {
   const [mode, setMode] = useState<"change" | "ask">("change");
   const [publish, setPublish] = useState<"merge" | "pr">("merge");
   const [error, setError] = useState("");
+  const [revision, setRevision] = useState("latest");
+  const recent = service && latestWorkSource(project, service.id, repositoryFor(service)!);
+  const source = revision === "latest" ? recent : undefined;
   const pending = useRef(false), requestId = useRef(id());
   const turns = project.automation?.turns ?? [];
   const [historyLimit, setHistoryLimit] = useState(10);
@@ -73,7 +84,7 @@ export function ProjectAgent({ project }: { project: Project }) {
     event.preventDefault(); if (pending.current || saving || !message.trim() || !service) return;
     pending.current = true; setError("");
     try {
-      await mutate(d => enqueueWork(d, project.space, project.id, service.id, message, mode, publish, now(), requestId.current));
+      await mutate(d => enqueueWork(d, project.space, project.id, service.id, message, mode, publish, now(), requestId.current, source?.id));
       setMessage(""); requestId.current = id();
     } catch (e) { setError(e instanceof Error ? e.message : "요청을 저장하지 못했습니다."); }
     finally { pending.current = false; }
@@ -91,11 +102,13 @@ export function ProjectAgent({ project }: { project: Project }) {
       <textarea id="project-agent-message" value={message} onChange={e => setMessage(e.target.value)} maxLength={8000} rows={2} placeholder="원하는 변경이나 질문을 적어주세요." disabled={!service} />
       <div className={styles.agentComposerActions}>
         {services.length > 1 && <label>대상 저장소<select aria-label="대상 저장소" value={service?.id ?? ""} onChange={e => setServiceId(e.target.value)}>{services.map(s => <option key={s.id} value={s.id}>{repositoryFor(s)}</option>)}</select></label>}
+        {recent && <label>작업할 코드<select aria-label="작업할 코드" value={revision} onChange={e => setRevision(e.target.value)}><option value="latest">최근 수정본 · PR 이어가기</option><option value="main">기본 브랜치</option></select></label>}
         <label>요청 방식<select aria-label="요청 방식" value={mode} onChange={e => setMode(e.target.value as "ask" | "change")}><option value="change">수정 요청</option><option value="ask">질문하기</option></select></label>
         {mode === "change" && <label>반영 범위<select aria-label="반영 범위" value={publish} onChange={e => setPublish(e.target.value as "pr" | "merge")}><option value="merge">검증 후 병합·자동 배포</option><option value="pr">PR 작성 후 내가 검토</option></select></label>}
         <button type="submit" className={styles.primaryButton} disabled={saving || !service || !message.trim()}>요청 보내기 <Icon name="arrow" size={16} /></button>
       </div>
       <p className={styles.detailFootnote}>{!service ? "먼저 이 프로젝트에 GitHub를 연결해주세요." : mode === "ask" ? "선택한 저장소를 읽고 답변합니다." : publish === "merge" ? "코드 수정 → 검증 통과 후 병합 · 기존 자동 배포 확인" : "코드 수정·검증 → PR 작성 · 병합은 직접 결정"}</p>
+      {source && <p className={styles.detailFootnote}>최근 수정본 {source.result!.headSha!.slice(0, 8)}에서 이어갑니다. 실행기 2.4.0 이상이 필요합니다.</p>}
       {error && <p role="alert" className={styles.formError}>{error}</p>}
     </form>
     {latest && <div className={styles.agentLatest} aria-label="최근 요청"><WorkTurn key={latest.id} turn={latest} project={project} saving={saving} onAction={act} /></div>}

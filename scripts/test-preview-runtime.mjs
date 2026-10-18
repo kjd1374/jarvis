@@ -1,17 +1,30 @@
 // Disposable synthetic Docker/browser integration; no GitHub, model, account or production data.
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { chromium } from "@playwright/test";
 import { runCommand } from "../public/jarvis-runner.mjs";
-import { startMacPreview, createPreviewBridge } from "../public/jarvis-preview.mjs";
+import { startMacPreview, createPreviewBridge, runProjectTests } from "../public/jarvis-preview.mjs";
 const dir = await mkdtemp(join(tmpdir(), "jarvis-preview-smoke-")), identity = randomUUID();
 const name = `jarvis-preview-${createHash("sha256").update(identity).digest("hex").slice(0, 24)}`;
 let browser, activeBridge;
 try {
   const cwd = join(dir, "repo"); await mkdir(cwd);
+  await writeFile(join(cwd, "package.json"), JSON.stringify({ type: "module", scripts: { test: "node --test workflow.test.mjs", pretest: "node -e 'process.exit(9)'", lint: "node -e 'process.exit(2)'" } }));
+  await writeFile(join(cwd, ".env"), "SYNTHETIC_SECRET=must-not-enter-container");
+  await writeFile(join(cwd, "workflow.test.mjs"), `import { test } from 'node:test'; import assert from 'node:assert/strict'; import { existsSync, writeFileSync } from 'node:fs'; import net from 'node:net';
+test('isolated project behavior', async()=>{
+ assert.notEqual(process.getuid(),0); assert.equal(existsSync('/app/.env'),false); assert.equal(process.env.GH_TOKEN,undefined); assert.equal(process.env.OPENAI_API_KEY,undefined);
+ writeFileSync('/app/only-in-container.txt','temporary');
+ await new Promise((resolve,reject)=>{const socket=net.connect(443,'203.0.113.1');socket.on('connect',()=>{socket.destroy();reject(Error('network available'));});socket.on('error',()=>resolve());socket.setTimeout(3000,()=>{socket.destroy();reject(Error('network timeout'));});});
+});`);
+  const checks = await runProjectTests({ cwd, files: ["package.json", "workflow.test.mjs", ".env"], stateDir: dir, identity, run: runCommand });
+  assert.deepEqual(checks.map(check => check.status), ["passed", "failed"], JSON.stringify(checks));
+  assert.match(checks[0].detail, /tests 1/); assert.match(checks[1].detail, /종료 코드 2/);
+  await assert.rejects(readFile(join(cwd, "only-in-container.txt")), /ENOENT/);
+  console.log("PASS: actual project tests run in a credential-free/offline Docker container; real success/failure captured; install/pretest hooks skipped; checkout unchanged.");
   await writeFile(join(cwd, "package.json"), JSON.stringify({ type: "module", scripts: { start: "node server.mjs" } }));
   await writeFile(join(cwd, ".env"), "SYNTHETIC_SECRET=must-not-enter-container");
   await writeFile(join(cwd, "server.mjs"), `import http from 'node:http';

@@ -220,7 +220,7 @@ test("화면 준비 요청과 맥미니 전용 링크·만료 상태를 저장�
   const screen = page.getByRole("region", { name: "수정된 화면 확인", exact: true });
   await screen.getByRole("button", { name: "화면 준비", exact: true }).click();
   await expect(screen).toContainText("요청을 저장했습니다");
-  await expect(screen.getByRole("button")).toBeDisabled();
+  await expect(screen.getByRole("button", { name: "화면 준비 대기·진행 중" })).toBeDisabled();
   const saved = (await state(page))!;
   expect(saved.projects[0].automation!.turns[0].mode).toBe("preview"); expect(saved.tasks).toHaveLength(0);
   const { claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
@@ -248,4 +248,39 @@ test("화면 준비 요청과 맥미니 전용 링크·만료 상태를 저장�
   await expect(screen).toContainText("미리보기 시간 만료");
   await expect(screen.getByRole("link", { name: "맥미니에서만 열기" })).toHaveCount(0);
   await expect(remoteLink).toHaveCount(0);
+});
+
+test("최근 수정본으로 원격 테스트·화면 준비·후속 요청을 저장하고 검사 결과를 보여준다", async ({ page }) => {
+  const { enqueueWork, claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
+  const stamp = new Date().toISOString();
+  const initial = enqueueWork(automationWorkspace(stamp), "company", "auto-project", "auto-service", "합성 수정", "change", "pr", stamp);
+  const scope = { space: "company" as const, projectIds: ["auto-project"], deviceId: "runner", remoteWork: true, previews: true };
+  const first = claimProjectWork(initial, scope, stamp), job = first.job!;
+  const data = reportProjectWork(first.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: {
+    reply: "합성 수정본", summary: "수정", currentStatus: "", nextAction: "", changes: ["app.js"], checks: [], followUps: [], outcome: "pr_open", branch: `jarvis/work-${job.id}`, baseSha: "a".repeat(40), headSha: "b".repeat(40), prUrl: "https://github.com/example/synthetic/pull/1", deployment: { state: "not_configured", url: null, sha: null },
+  } }, "runner", stamp);
+  await seed(page, data); await page.goto("/projects/auto-project"); await ready(page);
+  const screen = page.getByRole("region", { name: "수정된 화면 확인", exact: true });
+  await expect(screen.getByLabel("확인할 코드")).toHaveValue("latest");
+  await screen.getByRole("button", { name: "테스트 실행", exact: true }).click();
+  let saved = (await state(page))!;
+  expect(saved.projects[0].automation!.turns.at(-1)).toMatchObject({ mode: "test", sourceTurnId: job.id });
+  expect(saved.tasks).toHaveLength(1);
+  const testing = claimProjectWork(saved, scope, stamp), testJob = testing.job!;
+  const complete = reportProjectWork(testing.data, "company", { projectId: testJob.projectId, jobId: testJob.id, leaseToken: testJob.leaseToken, phase: "result", result: {
+    reply: "합성 검증 결과", summary: "실패", currentStatus: "", nextAction: "", changes: [], checks: [{ name: "npm run test", status: "failed", detail: "격리 실행 · 종료 코드 1" }], followUps: [], outcome: "blocked", branch: null, baseSha: "b".repeat(40), headSha: null, prUrl: null, deployment: { state: "not_configured", url: null, sha: null },
+  } }, "runner", stamp);
+  await seed(page, complete); await page.goto("/projects/auto-project"); await ready(page);
+  await expect(page.getByText("npm run test · 실패", { exact: true })).toBeVisible();
+  await screen.getByRole("button", { name: "화면 준비", exact: true }).click();
+  saved = (await state(page))!;
+  expect(saved.projects[0].automation!.turns.at(-1)).toMatchObject({ mode: "preview", sourceTurnId: job.id });
+  const agent = page.getByRole("region", { name: "프로젝트 AI 작업실", exact: true });
+  await agent.getByLabel("AI에게 요청", { exact: true }).fill("합성 후속 수정");
+  await agent.getByRole("button", { name: "요청 보내기" }).click();
+  expect((await state(page))!.projects[0].automation!.turns.at(-1)).toMatchObject({ mode: "change", sourceTurnId: job.id });
+  await page.reload(); await ready(page);
+  await expect(screen.getByLabel("확인할 코드")).toHaveValue("latest");
+  await page.setViewportSize({ width: 320, height: 740 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
