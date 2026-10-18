@@ -20,7 +20,12 @@ const appOrigin = "https://jarvis-preview-validation.invalid", viewer = randomUU
 const key = generateKeyPairSync("ed25519").privateKey.export({ format: "der", type: "pkcs8" }).toString("base64");
 const publicKey = ticketPublicKey(key), sha = "a".repeat(40);
 const scope = { space: "personal", projectId: "synthetic-live-check", turnId: randomUUID() };
-let approved = true, writes = 0, cleanup, browser, diagnostics = "";
+let approved = true, writes = 0, cleanup, browser, diagnostics = "", syntheticHost;
+async function diagnoseDns(name, label) {
+  const results = await Promise.allSettled([lookup(name, { all: true }), resolve4(name), resolve6(name),
+    fetch(`https://cloudflare-dns.com/dns-query?name=${name}&type=A`, { headers: { accept: "application/dns-json" }, signal: AbortSignal.timeout(5000) }).then(r => r.json()).then(r => ({ status: r.Status, answers: r.Answer?.length ?? 0 }))]);
+  console.log("DNS evidence", label, results.map(r => r.status === "fulfilled" ? (Array.isArray(r.value) ? { answers: r.value.length } : r.value) : { code: r.reason.code ?? r.reason.cause?.code ?? r.reason.name }));
+}
 const app = http.createServer((req, res) => {
   if (req.url === "/api") { res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify({ writes: req.method === "POST" ? ++writes : writes })); return; }
   res.setHeader("Content-Type", "text/html");
@@ -44,10 +49,10 @@ try {
       // Diagnose synthetic-host resolution separately from tunnel registration.
       // Only outcome codes/counts are logged, never credentials or user data.
       const host = new URL(tunnel.url).hostname;
+      syntheticHost = host;
+      await new Promise(resolve => setTimeout(resolve, 5000));
       for (const name of [host, "api.trycloudflare.com"]) {
-        const results = await Promise.allSettled([lookup(name, { all: true }), resolve4(name), resolve6(name),
-          fetch(`https://cloudflare-dns.com/dns-query?name=${name}&type=A`, { headers: { accept: "application/dns-json" }, signal: AbortSignal.timeout(5000) }).then(r => r.json()).then(r => ({ status: r.Status, answers: r.Answer?.length ?? 0 }))]);
-        console.log("DNS evidence", name === host ? "synthetic-host" : "provider-api", results.map(r => r.status === "fulfilled" ? (Array.isArray(r.value) ? { answers: r.value.length } : r.value) : { code: r.reason.code ?? r.reason.cause?.code ?? r.reason.name }));
+        await diagnoseDns(name, name === host ? "synthetic-host-after-5s" : "provider-api");
       }
       return tunnel;
     },
@@ -70,6 +75,7 @@ try {
   assert.equal((await page.reload()).status(), 403);
   console.log("PASS: real HTTPS browser entry, write/reload, copied-link denial and viewer revocation; production calls=0");
 } catch (error) {
+  if (syntheticHost) await diagnoseDns(syntheticHost, "synthetic-host-at-failure");
   console.error(diagnostics.replace(/https?:\/\/\S+/g, "[provider URL]").replace(/\b[a-f0-9-]{32,}\b/gi, "[ephemeral ID]").slice(-8000));
   throw error;
 } finally {
