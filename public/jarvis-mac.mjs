@@ -212,6 +212,6 @@ export async function main(args = process.argv.slice(2)) {
   console.log(`실행기 ${version} 자동 시작을 등록했습니다. 설정·승인·이력은 기존 것을 사용합니다.\n맥미니에서 로그아웃하지 말고 Docker를 켜두세요. 재부팅 뒤 사용자 로그인이 필요합니다.\nJarvis 프로젝트의 ‘화면 준비’를 눌러 실제 연결과 웹 응답을 확인해주세요.\n기기 확인이 필요한 경우 ${join(directory, "runner.log")}에 12자리 번호가 표시됩니다.`);
 }
 // macOS /tmp aliases /private/tmp; Node resolves the module URL, but not argv.
-if (process.argv[1] && await realpath(process.argv[1]) === await realpath(fileURLToPath(import.meta.url))) main().catch(error => {
+if (process.argv[1] && await realpath(process.argv[1]).catch(() => null) === await realpath(fileURLToPath(import.meta.url))) main().catch(error => {
   console.error(error.message); process.exitCode = 1;
 });

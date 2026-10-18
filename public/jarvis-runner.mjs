@@ -8,7 +8,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const VERSION = "2.4.1";
+export const VERSION = "2.4.2";
 export class RunnerError extends Error {
   constructor(code) { super(code); this.code = code; }
 }
@@ -814,6 +814,6 @@ export async function main(argv = process.argv.slice(2)) {
   } while (true);
 }
 // Canonicalize both paths so aliases such as macOS /tmp execute normally.
-if (process.argv[1] && await realpath(process.argv[1]) === await realpath(fileURLToPath(import.meta.url))) {
+if (process.argv[1] && await realpath(process.argv[1]).catch(() => null) === await realpath(fileURLToPath(import.meta.url))) {
   main().catch(error => { console.error(`실행기를 시작하지 못했습니다: ${error instanceof RunnerError ? error.code : "runner_unavailable"}. 토큰/인증값은 출력하지 않았습니다.`); process.exitCode = 1; });
 }

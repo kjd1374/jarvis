@@ -1,0 +1,30 @@
+name: Live preview provider check
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, labeled]
+permissions:
+  contents: read
+jobs:
+  live-preview:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'verify-live-preview')
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - name: Verify official pinned tunnel binary
+        run: |
+          curl -fL https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-linux-amd64 -o "$RUNNER_TEMP/cloudflared"
+          printf '%s  %s\n' '3bfc539f45d2620c71debb7a86be0efa737ed5ccbad9eb85c787116900e5c586' "$RUNNER_TEMP/cloudflared" | sha256sum --check
+          chmod 700 "$RUNNER_TEMP/cloudflared"
+      - name: Exercise real provider with synthetic data only
+        run: node scripts/test-live-remote-preview.mjs
+        env:
+          JARVIS_LIVE_PREVIEW_CHECK: '1'
+          CLOUDFLARED_PATH: ${{ runner.temp }}/cloudflared
