@@ -7,8 +7,9 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { completeWithSubscription } from "./jarvis-preview-cli.mjs";
 
-export const VERSION = "2.4.4";
+export const VERSION = "2.5.0";
 export class RunnerError extends Error {
   constructor(code) { super(code); this.code = code; }
 }
@@ -409,7 +410,7 @@ function dependencyFailureDetail(install) {
   return `의존성 준비 실패: ${reason}. 의존성이 필요한 로컬 검사는 완료로 판단할 수 없습니다.`;
 }
 export async function executeProjectWork(client, job, { stateDir, run = runCommand, model = runCodexWork, get = githubGet, delay = wait, log = console.log, previewEnabled = false, previewTools, testTools, remotePreview } = {}) {
-  if (!stateDir || !/^[a-f0-9-]{36}$/.test(job.id) || !/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/.test(job.repository) || job.repository.includes("..") || !["ask", "change", "preview", "test"].includes(job.mode) || !["pr", "merge"].includes(job.publish)) throw new RunnerError("invalid_work_scope");
+  if (!stateDir || !/^[a-f0-9-]{36}$/.test(job.id) || !/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/.test(job.repository) || job.repository.includes("..") || !["ask", "change", "preview", "test"].includes(job.mode) || !["pr", "merge"].includes(job.publish) || job.previewAI !== undefined && (job.previewAI !== "codex" || job.mode !== "preview")) throw new RunnerError("invalid_work_scope");
   const identity = { space: job.space, projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken };
   const abort = new AbortController();
   let progress = "preparing";
@@ -422,7 +423,7 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
   const key = createHash("sha256").update(`${job.space}:${job.projectId}:${job.repository}:${job.id}`).digest("hex");
   const directory = join(stateDir, `work-${key}`), cwd = join(directory, "repository"), journalFile = join(directory, "journal.json");
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  const digest = createHash("sha256").update(JSON.stringify([job.repository, job.request, job.mode, job.publish, ...(job.source ? [job.source] : [])])).digest("hex");
+  const digest = createHash("sha256").update(JSON.stringify([job.repository, job.request, job.mode, job.publish, ...(job.source ? [job.source] : []), ...(job.previewAI ? [job.previewAI] : [])])).digest("hex");
   let journal = { digest };
   const save = async () => privateWrite(journalFile, journal);
   const cliEnv = cliEnvironment();
@@ -490,9 +491,10 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
       let tools;
       try {
         tools = previewTools ?? await import("./jarvis-preview.mjs");
-        const deployed = await tools.findDeploymentPreview(job.repository, sha, get, publicWebUrl);
+        const deployed = job.previewAI ? null : await tools.findDeploymentPreview(job.repository, sha, get, publicWebUrl);
         if (deployed) return deployed;
         if (!previewEnabled) return { state: "unavailable", kind: "mac", url: null, sha, checkedAt: new Date().toISOString(), expiresAt: null, message: "맥미니 미리보기 설정이 필요합니다. 설정에서 맥미니 실행기를 설치해주세요." };
+        if (job.previewAI && !remotePreview) throw Object.assign(new Error("preview_cli_remote_required"), { code: "preview_cli_remote_required", stage: "ai" });
         // Preview exactly the observed commit, including the merge commit, in a fresh sanitized container.
         await pulse();
         const current = (await git(["rev-parse", "HEAD"])).out.trim();
@@ -502,9 +504,11 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
           const remote = await import("./jarvis-remote-preview.mjs");
           return remote.publishRemotePreview({ local, appOrigin: remotePreview.origin, client,
             scope: { space: job.space, projectId: job.projectId, turnId: job.id }, binary: remotePreview.binary,
-            directory: stateDir, attachCleanup: tools.attachPreviewCleanup, signal: abort.signal });
+            directory: stateDir, attachCleanup: tools.attachPreviewCleanup, attachCliAuthorization: tools.attachPreviewCliAuthorization, signal: abort.signal });
         } : undefined;
-        return await tools.startMacPreview({ cwd, files, sha, stateDir, identity: `${job.space}:${job.projectId}:${job.id}`, group: `${job.space}:${job.projectId}:${job.repository}`, run, signal: abort.signal, publish });
+        return await tools.startMacPreview({ cwd, files, sha, stateDir, identity: `${job.space}:${job.projectId}:${job.id}`, group: `${job.space}:${job.projectId}:${job.repository}`, run, signal: abort.signal, publish,
+          ...(job.previewAI === "codex" ? { cliInference: (body, options) => completeWithSubscription(body, { run, env: cliEnv, signal: options.signal }),
+            authorizeCliPreparation: async () => { await pulse(); return true; } } : {}) });
       } catch (error) {
         if (tools?.previewFailure) return tools.previewFailure(sha, error, "application", !!remotePreview);
         return { state: "failed", kind: remotePreview ? "remote" : "mac", url: null, sha, checkedAt: new Date().toISOString(), expiresAt: null,
@@ -806,7 +810,8 @@ export async function main(argv = process.argv.slice(2)) {
   console.log(`Jarvis 실행기 ${VERSION} 연결됨 · 선택한 영역/프로젝트만 점검합니다. 구독 사용 한도가 적용됩니다.`);
   do {
     for (const scope of config.scopes) {
-      const claimed = await resilientRequest("/api/automation/claim", { ...scope, provider: config.provider, runnerVersion: VERSION, workVersion: 1, remoteWorkVersion: 1, documentVersion: 1, previewVersion: config.preview?.enabled === true ? 1 : 0 });
+      const claimed = await resilientRequest("/api/automation/claim", { ...scope, provider: config.provider, runnerVersion: VERSION, workVersion: 1, remoteWorkVersion: 1, documentVersion: 1, previewVersion: config.preview?.enabled === true ? 1 : 0,
+        previewCliVersion: config.preview?.enabled === true && config.preview?.remote === true ? 1 : 0 });
       if (claimed.job?.kind === "document") await executeDocumentQuestion(client, claimed.job, { stateDir });
       else if (claimed.job?.kind === "work") await executeProjectWork(client, claimed.job, { stateDir, previewEnabled: config.preview?.enabled === true,
         remotePreview: config.preview?.remote === true ? { origin, binary: join(dirname(fileURLToPath(import.meta.url)), "cloudflared") } : undefined });

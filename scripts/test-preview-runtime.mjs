@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { chromium } from "@playwright/test";
 import { runCommand } from "../public/jarvis-runner.mjs";
-import { startMacPreview, createPreviewBridge, runProjectTests } from "../public/jarvis-preview.mjs";
+import { startMacPreview, createPreviewBridge, runProjectTests, attachPreviewCliAuthorization } from "../public/jarvis-preview.mjs";
 import { createRemoteGate } from "../public/jarvis-remote-preview.mjs";
 import { appOrigin, remoteUrl, publicKey, remoteId, scope, viewer, ticket } from "../tests/support/remote-preview.mjs";
 import { withPreviewHttps } from "../tests/support/preview-https.mjs";
@@ -90,15 +90,18 @@ const s=net.connect(443,'203.0.113.1');s.on('connect',()=>process.exit(2));s.on(
   activeBridge.close(); await runCommand("docker", ["rm", "-f", name]);
   const standalone = join(dir, "standalone");
   await mkdir(join(standalone, "public"), { recursive: true }); await mkdir(join(standalone, "data"));
-  await writeFile(join(standalone, "config.example.json"), '{"label":"Backend ready"}');
+  await writeFile(join(standalone, "config.example.json"), '{"label":"Backend ready","profiles":{}}');
   await writeFile(join(standalone, ".env"), "SYNTHETIC_SECRET=must-not-enter-container");
   await writeFile(join(standalone, "data/records.json"), '{"n":999}');
-  await writeFile(join(standalone, "public/index.html"), `<h1>Loading</h1><button>Save record</button><output></output><script>
+  await writeFile(join(standalone, "public/index.html"), `<h1>Loading</h1><button>Save record</button><output></output><button id="translate">Translate</button><p id="translation"></p><script>
 async function load(){const config=await(await fetch('/api/config')).json();document.querySelector('h1').textContent=config.label;document.querySelector('output').textContent=(await(await fetch('/api/records')).json()).n;}
+document.querySelector('#translate').onclick=async()=>{document.querySelector('#translation').textContent=(await(await fetch('/api/translate',{method:'POST'})).json()).translation;};
 document.querySelector('button').onclick=async()=>{await fetch('/api/records',{method:'POST'});await load();};load();</script>`);
   await writeFile(join(standalone, "server.js"), `const http=require('node:http'),fs=require('node:fs'),path=require('node:path');
 const config=path.join(__dirname,'config.json'),data=path.join(__dirname,'data/records.json');
-http.createServer((req,res)=>{
+http.createServer(async(req,res)=>{
+ if(req.url==='/api/isolation'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({credentials:!!(process.env.GH_TOKEN||process.env.OPENAI_API_KEY||process.env.JARVIS_PREVIEW_CLI_TOKEN)}));return;}
+ if(req.url.startsWith('/api/translate')){const controller=new AbortController();res.once('close',()=>{if(!res.writableEnded)controller.abort();});try{const profile=JSON.parse(fs.readFileSync(config)).profiles.jarvis;const r=await fetch(profile.baseUrl+'/chat/completions',{method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:req.url.includes('cancel=1')?'cancel':'안녕하세요'}],stream:false})});const answer=await r.json();res.writeHead(r.status,{'Content-Type':'application/json'});res.end(JSON.stringify(r.ok?{translation:answer.choices[0].message.content}:answer));}catch{if(!res.destroyed){res.writeHead(502,{'Content-Type':'application/json'});res.end('{}');}}return;}
  if(req.url==='/api/config'){if(!fs.existsSync(config))fs.copyFileSync(path.join(__dirname,'config.example.json'),config);res.setHeader('Content-Type','application/json');res.end(fs.readFileSync(config));return;}
  if(req.url==='/api/records'){let value=fs.existsSync(data)?JSON.parse(fs.readFileSync(data)):{n:0};if(req.method==='POST'){value.n++;fs.mkdirSync(path.dirname(data),{recursive:true});fs.writeFileSync(data,JSON.stringify(value));}res.setHeader('Content-Type','application/json');res.end(JSON.stringify(value));return;}
  res.setHeader('Content-Type','text/html');res.end(fs.readFileSync(path.join(__dirname,'public/index.html')));
@@ -144,6 +147,48 @@ http.createServer((req,res)=>{
     });
   } finally { gate.close(); }
   console.log("PASS: Docker Node server → bridge → authenticated HTTPS → browser initialization and save/reload; copied links and revoked viewers denied.");
+  let inferenceCalls = 0, cancelling = false, cancelled = false;
+  const cliOptions = { cwd: standalone, files: ["server.js", "public/index.html", "config.example.json", ".env", "data/records.json"], sha: "b".repeat(40), stateDir: dir, identity, run: runCommand,
+    cliInference: async (input, { signal }) => { inferenceCalls++;
+      if(input.messages.some(m => m.content === "cancel")) { cancelling = true; return await new Promise((_, reject) => signal.addEventListener("abort", () => { cancelled = true; reject(Object.assign(new Error("cancelled"), { code: "preview_cli_cancelled" })); }, { once: true })); }
+      return "Xin chào"; }, authorizeCliPreparation: async () => true,
+    bridge: async (...args) => activeBridge = await createPreviewBridge(...args) };
+  const cliPreview = await startMacPreview(cliOptions);
+  assert.equal(cliPreview.state, "ready", JSON.stringify(cliPreview)); assert.equal(cliPreview.ai.sample, "Xin chào");
+  assert.equal(inferenceCalls, 1, "explicit CLI preparation must verify an actual inference response through the queue");
+  let cliClock = Date.now(), cliApproved = true;
+  const cliGate = await createRemoteGate({ localUrl: cliPreview.url, appOrigin, publicKey, remoteId, scope, sha: cliPreview.sha, cli: true,
+    expiresAt: cliPreview.expiresAt, clock: () => cliClock, checkAccess: async id => cliApproved && id === viewer });
+  cliGate.setOrigin(remoteUrl); assert(attachPreviewCliAuthorization(cliPreview.url, () => cliGate.authorizeCli()));
+  try {
+    await withPreviewHttps({ gate: cliGate, ticket: () => ticket({ sha: cliPreview.sha }) }, async b => {
+      const context = await b.newContext({ ignoreHTTPSErrors: true }), page = await context.newPage();
+      await page.goto(appOrigin, { waitUntil: "commit" }); await page.waitForURL(remoteUrl);
+      await page.waitForFunction(() => document.querySelector("h1").textContent === "Backend ready");
+      await page.getByRole("button", { name: "Translate", exact: true }).click();
+      await page.waitForFunction(() => document.querySelector("#translation").textContent === "Xin chào");
+      assert.equal(inferenceCalls, 2);
+      assert.equal(await page.evaluate(async () => (await (await fetch('/api/isolation')).json()).credentials), false);
+      assert.equal((await context.request.get(remoteUrl + '__jarvis_cli/next')).status(), 404);
+      await page.evaluate(() => { globalThis.cancelTranslation = new AbortController(); void fetch('/api/translate?cancel=1', { method: 'POST', signal: globalThis.cancelTranslation.signal }).catch(() => {}); });
+      for(let i=0; i<60 && !cancelling; i++) await new Promise(r => setTimeout(r,100));
+      assert(cancelling, "the test must reach inference before cancelling");
+      await page.evaluate(() => globalThis.cancelTranslation.abort());
+      for(let i=0; i<60 && !cancelled; i++) await new Promise(r => setTimeout(r,100));
+      assert(cancelled, "browser cancellation must reach the host inference signal");
+      cliApproved = false; cliClock += 10_001;
+      assert.equal((await page.reload()).status(), 403);
+      const callsBefore = inferenceCalls, denied = await fetch(cliPreview.url + 'api/translate', { method: 'POST' });
+      assert.equal(denied.status, 503); assert.equal(inferenceCalls, callsBefore, "revocation must prevent model invocation, including backend-originated calls");
+    });
+  } finally { cliGate.close(); }
+  let failedCalls = 0;
+  const unavailable = await startMacPreview({ ...cliOptions, cliInference: async () => { failedCalls++; throw Object.assign(new Error('private login evidence'), { code: 'cli_login_required', stage: 'ai' }); } });
+  console.log('Synthetic failure-path evidence:', JSON.stringify({ calls: failedCalls, diagnostic: unavailable.diagnostic }));
+  assert.equal(unavailable.state, "failed"); assert.equal(unavailable.url, null); assert.equal(unavailable.diagnostic.stage, "ai");
+  assert.equal(unavailable.diagnostic.code, "cli_login_required"); assert.equal(failedCalls, 1);
+  assert(!JSON.stringify(unavailable).includes('private login evidence'));
+  console.log("PASS MODEL MOCK: explicit CLI inference probe, app API through authenticated HTTPS, credentials excluded, private controls hidden, revocation blocks model calls, login failure cannot become ready. No real subscription/model used in CI.");
 } finally {
   await browser?.close(); activeBridge?.close();
   await runCommand("docker", ["rm", "-f", name]).catch(() => {});

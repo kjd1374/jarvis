@@ -83,7 +83,8 @@ export function ProjectAgent({ project }: { project: Project }) {
   const monitoring = service?.monitoring?.repository === (service ? repositoryFor(service) : null) ? service?.monitoring : undefined;
   const seen = monitoring?.runnerSeenAt;
   const online = runnerOnline(monitoring, clock);
-  const updateNeeded = online && monitoring?.runnerConnection?.remoteWork === false;
+  const cliUpdateNeeded = turns.some(t => t.serviceId === service?.id && t.status === "queued" && t.previewAI === "codex") && !monitoring?.runnerConnection?.previewCli;
+  const updateNeeded = online && (monitoring?.runnerConnection?.remoteWork === false || cliUpdateNeeded);
   const turnMonitoring = (turn: ProjectTurn) => services.find(s => s.id === turn.serviceId && s.monitoring?.repository === turn.repository)?.monitoring;
   async function submit(event: React.FormEvent) {
     event.preventDefault(); if (pending.current || saving || !message.trim() || !service) return;
@@ -101,7 +102,7 @@ export function ProjectAgent({ project }: { project: Project }) {
   return <section id="project-ai" className={`${styles.detailSection} ${styles.projectAgent}`} aria-label="프로젝트 AI 작업실">
     <div className={styles.detailHeading}><h2><Icon name="message" size={18} /> AI와 프로젝트 작업</h2><span role="status" className={styles.runnerStatus} data-online={online && !updateNeeded}>{updateNeeded ? "CLI 연결됨 · 새 기능 업데이트 필요" : online ? "Jarvis CLI 연결됨" : seen ? "Jarvis CLI 최근 응답 없음" : monitoring?.lastSuccessAt ? "CLI 실행 기록 있음 · 접속 미확인" : "CLI 연결 대기"}</span></div>
     {seen && <p className={styles.runnerEvidence}>실행기 최근 응답 {dateLabel(seen)} · 버전 {monitoring?.runnerConnection?.version ?? "미확인"} · 아래 답변은 대상 저장소의 작업 결과입니다.</p>}
-    {updateNeeded && <p className={styles.agentConnection}>최근 응답한 실행기는 자동 테스트·수정본 선택을 지원하지 않습니다. <Link href="/settings#cli-runner">실행기 업데이트 안내 →</Link></p>}
+    {updateNeeded && <p className={styles.agentConnection}>{cliUpdateNeeded ? "구독 CLI 미리보기에는 실행기 2.5.0 이상이 필요합니다." : "최근 응답한 실행기는 자동 테스트·수정본 선택을 지원하지 않습니다."} <Link href="/settings#cli-runner">실행기 업데이트 안내 →</Link></p>}
     {!online && <p className={styles.agentConnection}>{account?.authenticated ? "요청은 저장되며, 실행기가 연결되면 순서대로 처리합니다." : "CLI 자동 실행은 서버에 연결된 업무실에서 사용할 수 있습니다. 현재 요청은 이 브라우저에 저장됩니다."} <Link href="/settings#cli-runner">CLI 연결 안내 →</Link></p>}
     <form onSubmit={submit} className={styles.agentComposer}>
       <label htmlFor="project-agent-message">AI에게 요청</label>

@@ -30,14 +30,22 @@ export function parseWorkPreview(raw: unknown): WorkPreview {
   let diagnostic: WorkPreview["diagnostic"];
   if (raw.diagnostic !== undefined) {
     const d = raw.diagnostic;
-    if (!object(d) || raw.state === "ready" || !["docker", "build", "application", "configuration", "provisioning", "connection", "health", "module"].includes(String(d.stage)) ||
+    if (!object(d) || raw.state === "ready" || !["docker", "build", "application", "configuration", "provisioning", "connection", "health", "module", "ai"].includes(String(d.stage)) ||
       typeof d.code !== "string" || !/^[a-z_]{1,80}$/.test(d.code) ||
       d.statusCode !== undefined && (!Number.isInteger(d.statusCode) || (d.statusCode as number) < 100 || (d.statusCode as number) > 599) ||
       d.exitCode !== undefined && (!Number.isInteger(d.exitCode) || (d.exitCode as number) < 0 || (d.exitCode as number) > 255)) invalid();
     diagnostic = { stage: d.stage as NonNullable<WorkPreview["diagnostic"]>["stage"], code: d.code,
       ...(d.statusCode === undefined ? {} : { statusCode: d.statusCode as number }), ...(d.exitCode === undefined ? {} : { exitCode: d.exitCode as number }) };
   }
+  let ai: WorkPreview["ai"];
+  if (raw.ai !== undefined) {
+    const a = raw.ai;
+    if (raw.state !== "ready" || raw.kind === "deployment" || !object(a) || a.provider !== "codex" || !date(a.verifiedAt) || !text(a.sample, 160) || !a.sample.trim() ||
+      Date.parse(a.verifiedAt as string) < Date.parse(raw.checkedAt as string) || Date.parse(a.verifiedAt as string) >= Date.parse(raw.expiresAt as string)) invalid();
+    ai = { provider: "codex", verifiedAt: a.verifiedAt as string, sample: a.sample };
+  }
   return { state: raw.state as WorkPreview["state"], kind: raw.kind as WorkPreview["kind"], url: raw.url as string | null, sha: raw.sha,
+    ...(ai ? { ai } : {}),
     ...(diagnostic ? { diagnostic } : {}),
     ...(raw.kind === "remote" && raw.state === "ready" ? { remoteId: raw.remoteId as string } : {}),
     checkedAt: raw.checkedAt as string, expiresAt: raw.expiresAt as string | null, message: clean(raw.message) };
@@ -74,6 +82,7 @@ export function validateProjectAutomation(project: Project, data: WorkspaceData)
     if (!object(turn) || !text(turn.id, 100) || !/^[a-f0-9-]{36}$/.test(turn.id) || ids.has(turn.id) || !repo(turn.repository) ||
       !text(turn.serviceId, 2048) || !text(turn.request, 8000) || !turn.request.trim() || !["ask", "change", "preview", "test"].includes(turn.mode) || !["pr", "merge"].includes(turn.publish) ||
       turn.sourceTurnId !== undefined && (!text(turn.sourceTurnId, 100) || !/^[a-f0-9-]{36}$/.test(turn.sourceTurnId) || turn.sourceTurnId === turn.id) ||
+      turn.previewAI !== undefined && (turn.mode !== "preview" || turn.previewAI !== "codex") ||
       !["queued", "running", "completed", "failed", "interrupted", "cancelled"].includes(turn.status) || !phaseValues.includes(turn.phase) ||
       !date(turn.createdAt) || !date(turn.updatedAt) || !Number.isInteger(turn.attempt) || turn.attempt < 0 || turn.attempt > 100 ||
       turn.executionDevice !== undefined && !text(turn.executionDevice, 200) || turn.leaseOwner !== undefined && !text(turn.leaseOwner, 200) || turn.leaseToken !== undefined && !text(turn.leaseToken, 100) ||
@@ -81,6 +90,7 @@ export function validateProjectAutomation(project: Project, data: WorkspaceData)
     // Deleted connections may leave historical turns, but never a cross-scope connection.
     if (data.services.some(s => s.id === turn.serviceId && (s.space !== project.space || s.projectId !== project.id))) invalid();
     if (turn.result) parseWorkResult(turn.result, turn.repository, turn.mode);
+    if (turn.result?.preview?.ai && turn.previewAI !== "codex" || turn.previewAI === "codex" && turn.result?.preview?.state === "ready" && !turn.result.preview.ai) invalid();
     ids.add(turn.id);
   }
 }
@@ -91,16 +101,17 @@ export function latestWorkSource(project: Project, serviceId: string, repository
   const latest = [...(project.automation?.turns ?? [])].reverse().find(t => t.serviceId === serviceId && t.repository === repository && t.mode === "change" && t.result?.headSha && t.result.prUrl);
   return latest?.result?.outcome === "pr_open" ? latest : undefined;
 }
-export function enqueueWork(data: WorkspaceData, space: Space, projectId: string, serviceId: string, request: string, mode: ProjectTurn["mode"], publish: ProjectTurn["publish"], stamp: string, turnId = id(), sourceTurnId?: string) {
+export function enqueueWork(data: WorkspaceData, space: Space, projectId: string, serviceId: string, request: string, mode: ProjectTurn["mode"], publish: ProjectTurn["publish"], stamp: string, turnId = id(), sourceTurnId?: string, previewAI?: "codex") {
   const project = data.projects.find(p => p.id === projectId && p.space === space);
   const service = data.services.find(s => s.id === serviceId && s.space === space && s.projectId === projectId);
   const repository = service && repositoryFor(service);
   if (!project || !repository || !request.trim() || request.length > 8000) throw new Error("현재 프로젝트의 GitHub 연결과 요청 내용을 확인해주세요.");
+  if (previewAI !== undefined && (previewAI !== "codex" || mode !== "preview")) invalid();
   const turns = project.automation?.turns ?? [];
   if (turns.some(t => t.id === turnId)) return data;
   if (sourceTurnId && !turns.some(t => t.id === sourceTurnId && t.serviceId === serviceId && t.repository === repository && t.mode === "change" && t.result?.prUrl && t.result.headSha && t.result.branch)) throw new Error("선택한 수정본의 프로젝트·저장소를 확인해주세요.");
   if (turns.length >= 500) throw new Error("프로젝트 대화 기록 한도에 도달했습니다. 백업 후 기록을 정리해주세요.");
-  const turn: ProjectTurn = { id: turnId, serviceId, repository, request: request.trim(), mode, publish, ...(sourceTurnId ? { sourceTurnId } : {}), status: "queued", phase: "queued", createdAt: stamp, updatedAt: stamp, attempt: 0 };
+  const turn: ProjectTurn = { id: turnId, serviceId, repository, request: request.trim(), mode, publish, ...(sourceTurnId ? { sourceTurnId } : {}), ...(previewAI ? { previewAI } : {}), status: "queued", phase: "queued", createdAt: stamp, updatedAt: stamp, attempt: 0 };
   return { ...data, projects: data.projects.map(p => p.id === projectId ? { ...p, automation: { turns: [...turns, turn] } } : p),
     tasks: mode === "change" ? [...data.tasks, { id: `work-${turnId}`, sourceMessageId: turnId, space, projectId, title: request.trim().slice(0, 160), status: "todo" as const, dueDate: "", createdAt: stamp }] : data.tasks };
 }
@@ -110,7 +121,7 @@ export function changeWorkState(data: WorkspaceData, space: Space, projectId: st
   const next = updateTurn(data, project, { ...turn, status: action === "cancel" ? "cancelled" : "queued", phase: "queued", updatedAt: stamp, error: undefined, leaseOwner: undefined, leaseToken: undefined, leaseUntil: undefined });
   return { ...next, tasks: next.tasks.map(t => t.id === `work-${turn.id}` ? { ...t, status: action === "cancel" ? "decision" as const : "todo" as const } : t) };
 }
-export function claimProjectWork(data: WorkspaceData, scope: { space: Space; projectIds: (string | null)[]; deviceId: string; previews?: boolean; remoteWork?: boolean }, stamp: string) {
+export function claimProjectWork(data: WorkspaceData, scope: { space: Space; projectIds: (string | null)[]; deviceId: string; previews?: boolean; remoteWork?: boolean; previewCli?: boolean }, stamp: string) {
   let current = data;
   for (const project of current.projects.filter(p => p.space === scope.space && scope.projectIds.includes(p.id))) {
     const turns = project.automation?.turns ?? [];
@@ -123,6 +134,7 @@ export function claimProjectWork(data: WorkspaceData, scope: { space: Space; pro
     if (turns.some(t => ["running", "interrupted"].includes(t.status))) continue;
     for (const turn of turns.filter(t => t.status === "queued")) {
       if (turn.mode === "preview" && !scope.previews) continue;
+      if (turn.previewAI === "codex" && !scope.previewCli) continue;
       if ((turn.mode === "test" || turn.sourceTurnId) && !scope.remoteWork) continue;
       if (turn.executionDevice && turn.executionDevice !== scope.deviceId) continue;
       const service = current.services.find(s => s.id === turn.serviceId && s.space === project.space && s.projectId === project.id);
@@ -141,7 +153,7 @@ export function claimProjectWork(data: WorkspaceData, scope: { space: Space; pro
       current = { ...current, tasks: current.tasks.map(t => t.id === `work-${turn.id}` ? { ...t, status: "in_progress" as const } : t) };
       const history = turns.filter(t => t.status === "completed" && t.serviceId === turn.serviceId && t.repository === turn.repository).slice(-6).map(t => ({ request: t.request, reply: t.result?.reply, outcome: t.result?.outcome, baseSha: t.result?.baseSha, headSha: t.result?.headSha, prUrl: t.result?.prUrl, checks: t.result?.checks, preview: t.result?.preview }));
       return { data: current, job: { kind: "work", id: turn.id, space: project.space, projectId: project.id, serviceId: service.id, repository: turn.repository,
-        provider: "codex", leaseToken: claimed.leaseToken, attempt: claimed.attempt, request: turn.request, mode: turn.mode, publish: turn.publish,
+        provider: "codex", leaseToken: claimed.leaseToken, attempt: claimed.attempt, request: turn.request, mode: turn.mode, publish: turn.publish, ...(turn.previewAI ? { previewAI: turn.previewAI } : {}),
         ...(source ? { source: { prUrl: source.prUrl!, headSha: source.headSha!, branch: source.branch!, baseSha: source.baseSha! } } : {}),
         context: { executionContext: {
           jarvisRunner: { connectedAt: stamp, provider: "codex", projectId: project.id, space: project.space },
@@ -177,6 +189,7 @@ export function reportProjectWork(data: WorkspaceData, space: Space, body: Recor
   }
   if (body.phase !== "result") invalid();
   const result = parseWorkResult(body.result, turn.repository, turn.mode);
+  if (result.preview?.ai && turn.previewAI !== "codex" || turn.previewAI === "codex" && result.outcome === "answered" && !result.preview?.ai) invalid();
   if (turn.publish === "pr" && ["merged", "deployed"].includes(result.outcome)) invalid();
   const next = updateTurn(data, project, { ...turn, status: "completed", phase: "reporting", result, error: undefined, updatedAt: stamp, leaseOwner: undefined, leaseToken: undefined, leaseUntil: undefined });
   const tasks = next.tasks.map(t => t.id === `work-${turn.id}` ? { ...t, status: result.outcome === "deployed" || result.outcome === "merged" && result.deployment.state === "not_configured" ? "done" as const : result.outcome === "merged" ? "in_progress" as const : "decision" as const } : t);

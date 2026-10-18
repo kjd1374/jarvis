@@ -31,7 +31,7 @@ async function bodyOf(request, limit) {
   return Buffer.concat(parts);
 }
 
-export async function createRemoteGate({ localUrl, appOrigin, publicKey, remoteId, scope, sha, expiresAt, checkAccess, clock = Date.now }) {
+export async function createRemoteGate({ localUrl, appOrigin, publicKey, remoteId, scope, sha, expiresAt, checkAccess, cli = false, clock = Date.now }) {
   const upstream = new URL(localUrl);
   if (upstream.protocol !== "http:" || upstream.hostname !== "127.0.0.1" || !upstream.port || upstream.pathname !== "/" || upstream.username || upstream.password || upstream.search || upstream.hash)
     throw new Error("invalid_preview_upstream");
@@ -59,6 +59,7 @@ export async function createRemoteGate({ localUrl, appOrigin, publicKey, remoteI
     if (closed || clock() >= Date.parse(expiresAt)) { deny(410); return; }
     if (!origin || req.headers.host !== new URL(origin).host || !req.url?.startsWith("/") || req.url.startsWith("//")) { deny(); return; }
     if (req.method === "GET" && req.url === "/_jarvis/health") { res.setHeader("Content-Type", "text/plain"); res.end(remoteId); return; }
+    if (req.url.startsWith("/__jarvis_cli/")) { deny(404); return; }
     if (++active > 32) { active--; deny(429); return; }
     res.once("close", () => { active--; });
     try {
@@ -81,6 +82,7 @@ export async function createRemoteGate({ localUrl, appOrigin, publicKey, remoteI
       const cookie = (req.headers.cookie ?? "").split(";").map(s => s.trim()).find(s => s.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
       const session = cookie && sessions.get(digest(cookie));
       if (!session || !await allowed(session)) { deny(); return; }
+      session.seenAt = clock();
       const entry = req.method === "GET" && req.url === "/" && req.headers["sec-fetch-mode"] === "navigate" && req.headers["sec-fetch-dest"] === "document";
       if (req.headers.origin && req.headers.origin !== origin || ["cross-site", "same-site"].includes(req.headers["sec-fetch-site"]) && !entry) { deny(); return; }
       if (!["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"].includes(req.method)) { deny(405); return; }
@@ -112,7 +114,7 @@ export async function createRemoteGate({ localUrl, appOrigin, publicKey, remoteI
         response.on("data", chunk => { bytes += chunk.length; if (bytes > 32_000_000) { response.destroy(); res.destroy(); } });
         response.on("error", () => res.destroy()); response.pipe(res);
       });
-      request.setTimeout(30_000, () => request.destroy());
+      request.setTimeout(cli ? 75_000 : 30_000, () => request.destroy());
       request.on("error", () => { if (!res.headersSent) deny(502); else res.destroy(); });
       res.once("close", () => request.destroy());
       request.end(body);
@@ -124,6 +126,11 @@ export async function createRemoteGate({ localUrl, appOrigin, publicKey, remoteI
   const close = () => { if (closed) return; closed = true; clearTimeout(timer); server.close(); for (const socket of sockets) socket.destroy(); sessions.clear(); used.clear(); };
   const timer = setTimeout(close, Math.max(1, Date.parse(expiresAt) - clock())); timer.unref();
   return { localUrl: `http://127.0.0.1:${server.address().port}/`, close,
+    async authorizeCli() {
+      if (!cli || closed || clock() >= Date.parse(expiresAt)) return false;
+      for (const session of sessions.values()) if (clock() - (session.seenAt ?? 0) < 120_000 && await allowed(session)) return true;
+      return false;
+    },
     setOrigin(value) { const checked = previewOrigin(value); if (!checked || origin && origin !== checked) throw new Error("invalid_preview_origin"); origin = checked; } };
 }
 
@@ -228,7 +235,7 @@ export async function waitForRemoteHealth({ url, remoteId, signal, transport = f
   throw remoteFailure(code, "health", Number.isInteger(statusCode) ? { statusCode } : {});
 }
 
-export async function publishRemotePreview({ local, appOrigin, client, scope, binary, directory, attachCleanup, signal, transport = fetch, tunnel = startQuickTunnel }) {
+export async function publishRemotePreview({ local, appOrigin, client, scope, binary, directory, attachCleanup, attachCliAuthorization, signal, transport = fetch, tunnel = startQuickTunnel }) {
   const remoteId = randomUUID();
   let config;
   try { config = await client.request("/api/preview/config"); }
@@ -239,7 +246,7 @@ export async function publishRemotePreview({ local, appOrigin, client, scope, bi
   signal?.addEventListener("abort", cancel, { once: true });
   try {
     if (signal?.aborted) throw new Error("preview_cancelled");
-    gateway = await createRemoteGate({ localUrl: local.url, appOrigin, publicKey: config.publicKey, remoteId, scope, sha: local.sha, expiresAt: local.expiresAt,
+    gateway = await createRemoteGate({ localUrl: local.url, appOrigin, publicKey: config.publicKey, remoteId, scope, sha: local.sha, expiresAt: local.expiresAt, cli: !!local.ai,
       checkAccess: async deviceId => (await client.request("/api/preview/access", { ...scope, remoteId, url: remote.url, sha: local.sha, deviceId })).allowed === true });
     for (let attempt = 0; attempt < 2; attempt++) {
       try { remote = await tunnel({ binary, localUrl: gateway.localUrl, directory, signal }); break; }
@@ -249,6 +256,7 @@ export async function publishRemotePreview({ local, appOrigin, client, scope, bi
       }
     }
     gateway.setOrigin(remote.url);
+    if (local.ai && !attachCliAuthorization?.(local.url, () => gateway.authorizeCli())) throw remoteFailure("preview_cli_unavailable", "ai");
     let alive = true;
     remote.onExit(() => { alive = false; gateway.close(); });
     const close = () => { remote.close(); gateway.close(); clearTimeout(timer); };
@@ -257,7 +265,8 @@ export async function publishRemotePreview({ local, appOrigin, client, scope, bi
     try { await waitForRemoteHealth({ url: remote.url, remoteId, transport, signal, alive: () => alive }); }
     catch (error) { close(); throw error; }
     return { ...local, kind: "remote", remoteId, url: remote.url,
-      message: "이 PC에서 열 수 있습니다. 승인된 Jarvis 기기에서만 접근하며, 맥미니가 켜져 있어야 합니다. 별도 임시 데이터로 화면·기본 기능을 확인하며, 실제 AI·외부 서비스는 연결되지 않습니다." };
+      message: local.ai ? "이 PC에서 열 수 있습니다. 맥미니의 구독 CLI로 실제 번역 응답을 확인했습니다. 앱은 별도 임시 데이터로 실행하며, 요청마다 구독 사용량이 소모됩니다."
+        : "이 PC에서 열 수 있습니다. 승인된 Jarvis 기기에서만 접근하며, 맥미니가 켜져 있어야 합니다. 별도 임시 데이터로 화면·기본 기능을 확인하며, 실제 AI·외부 서비스는 연결되지 않습니다." };
   } catch (error) { cancel(); throw error; }
   finally { signal?.removeEventListener("abort", cancel); }
 }

@@ -5,17 +5,23 @@ import http from "node:http";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile, lstat, realpath, copyFile, rm } from "node:fs/promises";
 import { join, dirname } from "node:path";
+import { previewCliQueueSource, previewCliProfile, startPreviewCliWorker } from "./jarvis-preview-cli.mjs";
 
 const IMAGE = "node:24.19.0-bookworm-slim";
 const TTL = 2 * 60 * 60_000;
 // A request/commit can outlive a runner update. Reuse only containers built by
 // this exact runtime so older static/server recipes cannot survive a retry.
-const RUNTIME_ID = createHash("sha256").update(await readFile(new URL(import.meta.url))).digest("hex").slice(0, 24);
+const RUNTIME_ID = createHash("sha256").update(await readFile(new URL(import.meta.url))).update(await readFile(new URL("./jarvis-preview-cli.mjs", import.meta.url))).digest("hex").slice(0, 24);
 const bridges = new Map();
 export function attachPreviewCleanup(url, cleanup) {
   const bridge = [...bridges.values()].find(item => item.url === url);
   if (!bridge) return false;
   bridge.cleanups.add(cleanup); return true;
+}
+export function attachPreviewCliAuthorization(url, authorize) {
+  const bridge = [...bridges.values()].find(item => item.url === url);
+  if (!bridge?.cliWorker) return false;
+  bridge.cliWorker.setAuthorization(authorize); return true;
 }
 export function directProbe(url, { signal } = {}) {
   return new Promise((resolveResult, reject) => {
@@ -152,10 +158,12 @@ export async function runProjectTests({ cwd, files, stateDir, identity, run, sig
 export const previewServerSource = String.raw`
 import http from 'node:http';
 import { spawn } from 'node:child_process';
-import { readFile, realpath, stat, cp } from 'node:fs/promises';
+import { readFile, realpath, stat, cp, writeFile } from 'node:fs/promises';
 import { resolve, extname } from 'node:path';
+import { startCliQueue } from '/runtime/cli-queue.mjs';
 const plan=JSON.parse(await readFile('/runtime/plan.json','utf8'));
 const token=process.env.JARVIS_PREVIEW_ID;
+const cli=plan.cli?startCliQueue(process.env.JARVIS_PREVIEW_CLI_TOKEN):null;
 const types={'.html':'text/html; charset=utf-8','.js':'text/javascript','.mjs':'text/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.ico':'image/x-icon','.woff2':'font/woff2'};
 const root=resolve('/app',plan.root||'.');
 let child;
@@ -164,6 +172,7 @@ if(plan.kind==='node') {
   // disposable copy in bounded tmpfs; the image and original checkout stay read-only.
   const cwd=plan.entry?'/tmp/jarvis-preview-app':'/app';
   if(plan.entry) await cp('/app',cwd,{recursive:true});
+  if(plan.cli) await writeFile(cwd+'/config.json',await readFile('/runtime/cli-profile.json'));
   child=spawn(plan.entry?'node':'npm',plan.entry?[plan.entry]:plan.start,{cwd,env:{PATH:process.env.PATH,HOME:'/tmp',TMPDIR:'/tmp',NODE_ENV:'production',HOST:'127.0.0.1',HOSTNAME:'127.0.0.1',PORT:'3000',DATA_DIR:'/tmp/app-data',NEXT_TELEMETRY_DISABLED:'1'},stdio:'ignore'});
   child.on('error',()=>process.exit(1)); child.on('exit',()=>process.exit(1));
 }
@@ -171,6 +180,8 @@ const server=http.createServer(async(req,res)=>{
   res.setHeader('Cache-Control','no-store');
   res.setHeader('X-Content-Type-Options','nosniff');
   const requestUrl=new URL(req.url,'http://preview');
+  if(cli&&await cli.control(req,res))return;
+  if(requestUrl.pathname.startsWith('/__jarvis_cli/')){res.statusCode=404;res.end();return;}
   if(requestUrl.pathname==='/__jarvis_preview_health') {
     if(plan.kind==='static'){res.end(token);return;}
     const check=http.get('http://127.0.0.1:3000/',response=>{
@@ -203,7 +214,7 @@ const server=http.createServer(async(req,res)=>{
     const out={...response.headers};
     if(out.location?.startsWith('http://127.0.0.1:3000/'))out.location=out.location.slice('http://127.0.0.1:3000'.length);
     res.writeHead(response.statusCode,out);response.pipe(res);
-  });upstream.on('error',()=>{if(!res.headersSent)res.writeHead(502);res.end('Preview starting');});req.pipe(upstream);
+  });upstream.on('error',()=>{if(!res.destroyed){if(!res.headersSent)res.writeHead(502);res.end('Preview starting');}});res.once('close',()=>upstream.destroy());req.pipe(upstream);
 });
 server.listen(3001,'0.0.0.0');
 setTimeout(()=>process.exit(0),Number(process.env.JARVIS_PREVIEW_TTL)||7200000);
@@ -214,7 +225,7 @@ function unavailable(sha, message, state = "unavailable", kind = "mac", diagnost
   return { state, kind, url: null, sha, checkedAt: new Date().toISOString(), expiresAt: null, message, ...(diagnostic ? { diagnostic } : {}) };
 }
 export function previewFailure(sha, error, stage, remote = false) {
-  const stages = ["docker", "build", "application", "configuration", "provisioning", "connection", "health", "module"];
+  const stages = ["docker", "build", "application", "configuration", "provisioning", "connection", "health", "module", "ai"];
   stage = stages.includes(error?.stage) ? error.stage : stage;
   const candidate = error?.code ?? error?.message;
   const code = /^[a-z_]{1,80}$/.test(candidate ?? "") ? candidate : "preview_failed";
@@ -230,6 +241,7 @@ export function previewFailure(sha, error, stage, remote = false) {
     connection: "맥미니와 Cloudflare 사이의 연결을 완료하지 못했습니다. 연결 진단에 원인을 기록했습니다.",
     health: "임시 주소는 발급됐지만 외부에서 화면 연결을 확인하지 못했습니다. 연결 진단에 응답 상태를 기록했습니다.",
     module: "미리보기 실행 모듈을 불러오지 못했습니다. 실행기 설치 파일을 확인해야 합니다.",
+    ai: "구독 CLI의 실제 응답을 확인하지 못했습니다. 연결 진단에 로그인·사용 한도·응답 상태를 기록했습니다. 준비 완료로 처리하지 않았습니다.",
   };
   return unavailable(sha, messages[stage], "failed", remote ? "remote" : "mac", diagnostic);
 }
@@ -249,7 +261,7 @@ export async function findDeploymentPreview(repository, sha, get, publicUrl) {
   return null;
 }
 
-export async function startMacPreview({ cwd, files, sha, stateDir, identity, group = identity, run, signal, transport = directProbe, bridge = createPreviewBridge, publish, delay = ms => new Promise(r => setTimeout(r, ms)) }) {
+export async function startMacPreview({ cwd, files, sha, stateDir, identity, group = identity, run, signal, transport = directProbe, bridge = createPreviewBridge, publish, cliInference, authorizeCliPreparation, delay = ms => new Promise(r => setTimeout(r, ms)) }) {
   if (!shaPattern.test(sha)) throw new Error("invalid_preview_sha");
   const docker = async (args, timeout = 30_000, cleanup = false) => {
     const result = await run("docker", args, { signal: cleanup ? undefined : signal, timeout, maxBytes: 2_000_000 });
@@ -262,11 +274,24 @@ export async function startMacPreview({ cwd, files, sha, stateDir, identity, gro
   const groupKey = createHash("sha256").update(group).digest("hex").slice(0, 24);
   const name = `jarvis-preview-${key}`, image = `${name}:app`;
   const directory = join(stateDir, name), app = join(directory, "app");
+  const prepareCli = async (ready, info) => {
+    if (!cliInference) return ready;
+    const item = bridges.get(name), token = info.Config?.Env?.find(value => value.startsWith("JARVIS_PREVIEW_CLI_TOKEN="))?.slice("JARVIS_PREVIEW_CLI_TOKEN=".length);
+    if (!item || !/^[a-f0-9-]{36}$/.test(token ?? "") || typeof authorizeCliPreparation !== "function") throw Object.assign(new Error("preview_cli_unavailable"), { code: "preview_cli_unavailable", stage: "ai" });
+    await item.cliWorker?.close();
+    const worker = startPreviewCliWorker({ url: ready.url, token, inference: cliInference, authorize: authorizeCliPreparation });
+    item.cliWorker = worker; item.cleanups.add(worker.close);
+    const stop = () => worker.close(); signal?.addEventListener("abort", stop, { once: true });
+    try { const ai = await worker.probe(); worker.setAuthorization(async () => false); return { ...ready, ai }; }
+    catch(error) { worker.close(); throw error; }
+    finally { signal?.removeEventListener("abort", stop); }
+  };
   let existing;
   try { existing = JSON.parse(await docker(["inspect", name]))[0]; } catch {}
   const probe = async (info) => {
     if (!info?.State?.Running || info.Config?.Labels?.["jarvis.preview.key"] !== key || info.Config.Labels["jarvis.preview.sha"] !== sha) return null;
     if (info.Config.Labels["jarvis.preview.runtime"] !== RUNTIME_ID) return null;
+    if (info.Config.Labels["jarvis.preview.ai"] !== (cliInference ? "codex" : "none")) return null;
     const expiresAt = info.Config.Labels["jarvis.preview.expires"];
     if (!(Date.parse(expiresAt) > Date.now())) return null;
     const { url } = await bridge(name, expiresAt);
@@ -279,8 +304,8 @@ export async function startMacPreview({ cwd, files, sha, stateDir, identity, gro
     let ready;
     try { ready = await probe(existing); } catch {}
     if (ready) {
-      try { return publish ? await publish(ready) : ready; }
-      catch (error) { return previewFailure(sha, error, "connection", !!publish); }
+      try { ready = await prepareCli(ready, existing); return publish ? await publish(ready) : ready; }
+      catch (error) { bridges.get(name)?.cliWorker?.close(); return previewFailure(sha, error, "connection", !!publish); }
     }
     // Only a container bearing our exact request/commit labels may be replaced.
     if (existing.Config?.Labels?.["jarvis.preview.key"] !== key) return unavailable(sha, "같은 이름의 실행 환경이 있어 미리보기를 시작하지 못했습니다.", "failed");
@@ -301,30 +326,40 @@ export async function startMacPreview({ cwd, files, sha, stateDir, identity, gro
     const json = async path => JSON.parse(await readFile(join(app, path), "utf8").catch(() => "null"));
     const plan = previewPlan(copied, await json("package.json"), await json("package-lock.json"));
     if (!plan) return unavailable(sha, "자동 실행 방법을 확인하지 못했습니다. 정적 index.html, 단독 Node server.js/server.mjs/server.cjs 또는 npm start와 공개 npm 잠금 파일을 지원합니다. Jarvis 수정 요청으로 실행 조건을 준비할 수 있습니다.");
+    let cliProfile = null;
+    if (cliInference) {
+      if (!plan.entry) throw Object.assign(new Error("preview_cli_config_unavailable"), { code: "preview_cli_config_unavailable", stage: "ai" });
+      cliProfile = previewCliProfile(await json("config.example.json")); plan.cli = true;
+    }
     await writeFile(join(directory, "server.mjs"), previewServerSource);
     await writeFile(join(directory, "bridge.mjs"), bridgeSource);
     await writeFile(join(directory, "plan.json"), JSON.stringify(plan));
+    await writeFile(join(directory, "cli-queue.mjs"), previewCliQueueSource);
+    await writeFile(join(directory, "cli-profile.json"), JSON.stringify(cliProfile));
     await writeFile(join(directory, "Dockerfile"), [
       `FROM ${IMAGE}`, "WORKDIR /app", "COPY app/ /app/",
       ...(plan.install ? ["RUN npm ci --ignore-scripts --no-audit --no-fund"] : []),
       ...(plan.build ? ["RUN --network=none npm run build --ignore-scripts"] : []),
-      "COPY server.mjs bridge.mjs plan.json /runtime/", "RUN chmod -R a+rX /app /runtime", "USER node", 'CMD ["node", "/runtime/server.mjs"]', "",
+      "COPY server.mjs bridge.mjs plan.json cli-queue.mjs cli-profile.json /runtime/", "RUN chmod -R a+rX /app /runtime", "USER node", 'CMD ["node", "/runtime/server.mjs"]', "",
     ].join("\n"));
     // Only this sanitized context is uploaded to Docker, never the checkout or home directory.
     await docker(["build", "--pull", "--tag", image, directory], 300_000);
     stage = "application";
-    const expiresAt = new Date(Date.now() + TTL).toISOString(), token = randomUUID();
+    const expiresAt = new Date(Date.now() + TTL).toISOString(), token = randomUUID(), cliToken = randomUUID();
     await docker(["run", "--detach", "--rm", "--name", name, "--label", `jarvis.preview.key=${key}`, "--label", `jarvis.preview.sha=${sha}`,
       "--label", `jarvis.preview.runtime=${RUNTIME_ID}`,
+      "--label", `jarvis.preview.ai=${cliInference ? "codex" : "none"}`,
       "--label", `jarvis.preview.group=${groupKey}`, "--label", `jarvis.preview.expires=${expiresAt}`, "--label", `jarvis.preview.id=${token}`,
       "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
       "--memory", "1g", "--cpus", "1", "--pids-limit", "128", "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m",
-      "--env", `JARVIS_PREVIEW_ID=${token}`, "--env", `JARVIS_PREVIEW_TTL=${TTL}`, image]);
+      "--env", `JARVIS_PREVIEW_ID=${token}`, "--env", `JARVIS_PREVIEW_TTL=${TTL}`, ...(cliInference ? ["--env", `JARVIS_PREVIEW_CLI_TOKEN=${cliToken}`] : []), image]);
     for (let attempt = 0; attempt < 45; attempt++) {
       if (signal?.aborted) throw new Error("preview_cancelled");
       let ready;
       try { ready = await probe(JSON.parse(await docker(["inspect", name]))[0]); } catch {}
       if (ready) {
+        stage = "ai";
+        ready = await prepareCli(ready, JSON.parse(await docker(["inspect", name]))[0]);
         // Retain the previous screen until the new authenticated HTTPS path works.
         stage = "connection";
         const published = publish ? await publish(ready) : ready;

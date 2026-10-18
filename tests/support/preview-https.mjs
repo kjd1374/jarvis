@@ -24,7 +24,7 @@ export async function withPreviewHttps(f, run) {
       const target = new URL(f.gate.localUrl);
       const upstream = http.request({ hostname: target.hostname, port: target.port, path: req.url, method: req.method, headers: req.headers }, response => {
         res.writeHead(response.statusCode, response.headers); response.pipe(res);
-      }); upstream.on("error", () => res.destroy()); req.pipe(upstream);
+      }); upstream.on("error", () => res.destroy()); res.once("close", () => upstream.destroy()); req.pipe(upstream);
     });
     await new Promise(r => web.listen(0, "127.0.0.1", r));
     // A local test-only CONNECT proxy maps precisely two synthetic hosts. No

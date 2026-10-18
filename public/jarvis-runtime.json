@@ -1,9 +1,10 @@
 {
-  "version": "2.4.4",
+  "version": "2.5.0",
   "files": {
-    "jarvis-runner.mjs": "7dbb93eb9eb9237a8898beaa93a9f28306d2c999545b3a10892117d0982cfaf1",
-    "jarvis-preview.mjs": "af45ff5e49d507b8375c9df13d3bb8171ce87b6d3b925a153e6ff1ba0edd38aa",
-    "jarvis-remote-preview.mjs": "bcd2ebba1032a5f7c57707417f3c5d68ae2c16b81e6992e2e1799c1d4ec5bf2a",
-    "jarvis-preview-auth.mjs": "5fe9b1442b41e860e053c58a45592aabd65c406c20a5f655c4e18da18baa4572"
+    "jarvis-runner.mjs": "9ce6dc61682f99abccd48401ff183ef6e551b3bbe937f1b5ce219debfee932f5",
+    "jarvis-preview.mjs": "ae736f001131f57c786cc5165c50e3a2237c20758521de833eae406928742755",
+    "jarvis-remote-preview.mjs": "659748de926841e0640a69404d543b8962884a3588dbe9cfc70da7a0aad78deb",
+    "jarvis-preview-auth.mjs": "5fe9b1442b41e860e053c58a45592aabd65c406c20a5f655c4e18da18baa4572",
+    "jarvis-preview-cli.mjs": "8c7732d37fc3150e41d6f0aa32a9d6e9ce20f89bf2e4e0cbd7787c76b83c1967"
   }
 }

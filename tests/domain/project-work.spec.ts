@@ -9,6 +9,24 @@ const scope = { space: "company" as const, projectIds: ["auto-project"], deviceI
 const uuid = "11111111-1111-4111-8111-111111111111";
 const result = { reply: "실제 변경과 검증을 정리했습니다.", summary: "화면 개선", currentStatus: "PR 검토", nextAction: "추가 회귀 검증", changes: ["src/page.tsx"], checks: [{ name: "CI", status: "passed", detail: "합성 검사" }], followUps: [{ title: "추가 회귀 검증", reason: "화면 범위를 넓혀 확인", kind: "todo" }], outcome: "pr_open", branch: `jarvis/work-${uuid}`, baseSha: "a".repeat(40), headSha: "b".repeat(40), prUrl: "https://github.com/example/synthetic/pull/10", deployment: { state: "not_configured", url: null, sha: null } };
 function queued() { return enqueueWork(automationWorkspace(), "company", "auto-project", "auto-service", "모바일 버튼 수정", "change", "pr", stamp, uuid); }
+test("구독 CLI 미리보기는 명시적으로 저장하며 지원 실행기와 실제 응답 증거가 필요하다", () => {
+  const data = enqueueWork(automationWorkspace(), "company", "auto-project", "auto-service", "구독 CLI 통역 확인", "preview", "pr", stamp, uuid, undefined, "codex");
+  expect(normalizeWorkspace(data).projects[0].automation!.turns[0].previewAI).toBe("codex");
+  expect(claimProjectWork(data, { ...scope, previews: true, remoteWork: true }, stamp).job).toBeNull();
+  const claimed = claimProjectWork(data, { ...scope, previews: true, remoteWork: true, previewCli: true }, stamp), job = claimed.job!;
+  expect(job.previewAI).toBe("codex");
+  const preview = { state: "ready", kind: "remote", remoteId: uuid, url: "https://synthetic-cli.trycloudflare.com/", sha: "a".repeat(40), checkedAt: stamp, expiresAt: new Date(Date.parse(stamp) + 3600_000).toISOString(), message: "합성 CLI 응답 확인" };
+  const report = { ...result, outcome: "answered", changes: [], followUps: [], prUrl: null, branch: null, headSha: null, preview };
+  expect(() => reportProjectWork(claimed.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: report }, scope.deviceId, stamp)).toThrow();
+  const ai = { provider: "codex", verifiedAt: stamp, sample: "Xin chào" };
+  expect(parseWorkPreview({ ...preview, ai }).ai).toEqual(ai);
+  const completed = reportProjectWork(claimed.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: { ...report, preview: { ...preview, ai } } }, scope.deviceId, stamp);
+  expect(normalizeWorkspace(completed).projects[0].automation!.turns[0].result?.preview?.ai?.provider).toBe("codex");
+  const observed = observeWorkRunner(data, scope, { runnerVersion: "2.5.0", previewVersion: 1, previewCliVersion: 1 }, stamp);
+  expect(observed.services[0].monitoring!.runnerConnection?.previewCli).toBe(true);
+  expect(queuedWorkMessage(data.projects[0].automation!.turns[0], observeWorkRunner(data, scope, { previewVersion: 1 }, stamp).services[0].monitoring, Date.parse(stamp))).toContain("2.5.0");
+  expect(() => enqueueWork(automationWorkspace(), "company", "auto-project", "auto-service", "수정", "change", "pr", stamp, uuid, undefined, "codex")).toThrow();
+});
 test("실패한 원격 미리보기는 원인·단계·응답 코드를 보존하고 원문 로그는 받지 않는다", () => {
   const preview = { state: "failed", kind: "remote", url: null, sha: "a".repeat(40), checkedAt: stamp, expiresAt: null, message: "외부 응답 실패", diagnostic: { stage: "health", code: "remote_health_http", statusCode: 530, rawLog: "must-not-persist" } };
   const parsed = parseWorkPreview(preview);
