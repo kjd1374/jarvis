@@ -5,10 +5,17 @@ on:
     types: [opened, synchronize, labeled]
 permissions:
   contents: read
+concurrency:
+  group: live-preview-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   live-preview:
     if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'verify-live-preview')
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
@@ -20,8 +27,15 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: Verify official pinned tunnel binary
         run: |
-          curl -fL https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/cloudflared-linux-amd64 -o "$RUNNER_TEMP/cloudflared"
-          printf '%s  %s\n' '3bfc539f45d2620c71debb7a86be0efa737ed5ccbad9eb85c787116900e5c586' "$RUNNER_TEMP/cloudflared" | sha256sum --check
+          case "$(uname -s)-$(uname -m)" in
+            Linux-x86_64) asset=cloudflared-linux-amd64; digest=3bfc539f45d2620c71debb7a86be0efa737ed5ccbad9eb85c787116900e5c586 ;;
+            Darwin-arm64) asset=cloudflared-darwin-arm64.tgz; digest=647615df99d49cd179ea5e13ef760b9bbfb33630f6ae62f87e33dfadda60adcc ;;
+            Darwin-x86_64) asset=cloudflared-darwin-amd64.tgz; digest=3b0dbaf378337e9d7fb6cd235a76d1d6a7dee434c2d8edf9281164fb6a3837ab ;;
+            *) exit 1 ;;
+          esac
+          curl -fL "https://github.com/cloudflare/cloudflared/releases/download/2026.10.1/$asset" -o "$RUNNER_TEMP/tunnel-download"
+          printf '%s  %s\n' "$digest" "$RUNNER_TEMP/tunnel-download" | shasum -a 256 --check
+          if [[ "$asset" == *.tgz ]]; then tar -xzf "$RUNNER_TEMP/tunnel-download" -C "$RUNNER_TEMP" cloudflared; else mv "$RUNNER_TEMP/tunnel-download" "$RUNNER_TEMP/cloudflared"; fi
           chmod 700 "$RUNNER_TEMP/cloudflared"
       - name: Exercise real provider with synthetic data only
         run: node scripts/test-live-remote-preview.mjs

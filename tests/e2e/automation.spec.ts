@@ -3,6 +3,27 @@ import { analyzed, collected, analysisRaw, automationWorkspace } from "../suppor
 import { applyAnalysis } from "../../src/lib/automation/state";
 import { parseAnalysis } from "../../src/lib/automation/facts";
 test.setTimeout(60_000);
+test("실패한 원격 준비에 구버전 주소 안내를 붙이지 않고 단계별 진단을 보여준다", async ({ page }) => {
+  const { enqueueWork, claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
+  const stamp = new Date().toISOString();
+  const initial = enqueueWork(automationWorkspace(stamp), "company", "auto-project", "auto-service", "합성 화면 준비", "preview", "pr", stamp);
+  const claim = claimProjectWork(initial, { space: "company", projectIds: ["auto-project"], deviceId: "runner", previews: true }, stamp), job = claim.job!;
+  const preview = { state: "failed", kind: "mac", url: null, sha: "a".repeat(40), checkedAt: stamp, expiresAt: null, message: "원격 미리보기 연결에 실패했습니다. 맥미니 실행기 업데이트·Docker·인터넷 연결을 확인해주세요." };
+  const data = reportProjectWork(claim.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: {
+    reply: preview.message, summary: "화면 준비 필요", currentStatus: "", nextAction: "", changes: [], checks: [], followUps: [], outcome: "blocked", branch: null, baseSha: preview.sha, headSha: null, prUrl: null,
+    deployment: { state: "not_configured", url: null, sha: null }, preview,
+  } }, "runner", stamp);
+  await seed(page, data); await page.goto("/projects/auto-project"); await ready(page);
+  const screen = page.getByRole("region", { name: "수정된 화면 확인", exact: true });
+  await expect(screen).toContainText("상세 원인은 저장되지 않았습니다");
+  await expect(screen).not.toContainText("이전 실행기가 만든 주소");
+  await expect(page.getByRole("region", { name: "프로젝트 AI 작업실", exact: true })).not.toContainText("업데이트·Docker");
+  data.projects[0].automation!.turns[0].result!.preview = { ...data.projects[0].automation!.turns[0].result!.preview!, kind: "remote", message: "외부 주소의 응답을 확인하지 못했습니다.", diagnostic: { stage: "health", code: "remote_health_http", statusCode: 530 } };
+  await seed(page, data); await page.goto("/projects/auto-project"); await ready(page);
+  await screen.getByText("연결 진단", { exact: true }).click();
+  await expect(screen).toContainText("외부 주소 응답 · remote_health_http · HTTP 530");
+  await expect(screen.getByRole("link", { name: "이 PC에서 화면 열기" })).toHaveCount(0);
+});
 test("접속 중인 구버전의 대기 이유와 업데이트 후 실제 버전을 표시한다", async ({ page }, info) => {
   const { enqueueWork } = await import("../../src/lib/automation/work");
   const { observeWorkRunner } = await import("../../src/lib/automation/runner-status");

@@ -126,20 +126,35 @@ export async function createRemoteGate({ localUrl, appOrigin, publicKey, remoteI
     setOrigin(value) { const checked = previewOrigin(value); if (!checked || origin && origin !== checked) throw new Error("invalid_preview_origin"); origin = checked; } };
 }
 
-export async function startQuickTunnel({ binary, localUrl, directory, signal, launch = spawn }) {
+export function remoteFailure(code, stage, detail = {}) {
+  return Object.assign(new Error(code), { code, stage, ...detail });
+}
+export function tunnelFailure(output, allocated, exitCode) {
+  const stage = allocated ? "connection" : "provisioning";
+  const code = /no such host|lookup .* (?:failed|timeout)|DNS resolver/i.test(output) ? "tunnel_dns_failed"
+    : /x509:|certificate|TLS handshake/i.test(output) ? "tunnel_tls_failed"
+    : /429|too many requests/i.test(output) ? "tunnel_rate_limited"
+    : /timeout|deadline exceeded/i.test(output) ? "tunnel_timeout"
+    : /connection refused|network is unreachable|no route to host/i.test(output) ? "tunnel_network_failed"
+    : allocated ? "tunnel_connection_failed" : "tunnel_provision_failed";
+  return remoteFailure(code, stage, Number.isInteger(exitCode) ? { exitCode } : {});
+}
+
+export async function startQuickTunnel({ binary, localUrl, directory, signal, launch = spawn, timeoutMs = 90_000 }) {
   if (signal?.aborted) throw new Error("preview_cancelled");
   const home = await mkdtemp(join(directory, "tunnel-"));
   const config = join(home, "config.yml");
   await writeFile(config, "{}\n", { mode: 0o600 });
   const proxyEnv = Object.fromEntries(["HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "all_proxy", "no_proxy", "SSL_CERT_FILE", "SSL_CERT_DIR"].filter(key => process.env[key]).map(key => [key, process.env[key]]));
   let child;
-  try { child = launch(binary, ["tunnel", "--config", config, "--no-autoupdate", "--protocol", "http2", "--url", localUrl, "--metrics", "127.0.0.1:0", "--grace-period", "1s"], {
+  try { child = launch(binary, ["tunnel", "--config", config, "--no-autoupdate", "--protocol", "auto", "--url", localUrl, "--metrics", "127.0.0.1:0", "--grace-period", "1s"], {
     shell: false, cwd: home, env: { PATH: process.env.PATH, HOME: home, ...proxyEnv }, stdio: ["ignore", "pipe", "pipe"],
   }); } catch (error) { await rm(home, { recursive: true, force: true }); throw error; }
-  let closed = false;
+  let closed = false, exited = false, rejectStartup;
   const close = () => { if (closed) return; closed = true; runningTunnels.delete(close); child.kill("SIGTERM"); void rm(home, { recursive: true, force: true }).catch(() => {}); };
+  const abort = () => { rejectStartup?.(remoteFailure("preview_cancelled", "connection")); close(); };
   runningTunnels.add(close);
-  signal?.addEventListener("abort", close, { once: true });
+  signal?.addEventListener("abort", abort, { once: true });
   if (!signalHandlers) {
     signalHandlers = true;
     process.once("exit", () => { for (const stop of runningTunnels) stop(); });
@@ -148,26 +163,70 @@ export async function startQuickTunnel({ binary, localUrl, directory, signal, la
   }
   try {
     const url = await new Promise((resolve, reject) => {
-      let output = "", settled = false;
-      const timer = setTimeout(() => finish(new Error("tunnel_timeout")), 60_000);
+      let output = "", allocated = null, connected = false, settled = false;
+      const timer = setTimeout(() => finish(remoteFailure("tunnel_timeout", allocated ? "connection" : "provisioning")), timeoutMs);
       const finish = (error, value) => { if (settled) return; settled = true; clearTimeout(timer); if (error) reject(error); else resolve(value); };
-      child.once("error", () => finish(new Error("tunnel_unavailable")));
-      child.once("exit", () => { finish(new Error("tunnel_stopped")); close(); });
+      rejectStartup = finish;
+      child.once("error", () => finish(remoteFailure("tunnel_executable_unavailable", "provisioning")));
+      child.once("exit", code => { exited = true; finish(tunnelFailure(output, !!allocated, code)); close(); });
       for (const stream of [child.stdout, child.stderr]) stream.on("data", bytes => {
         output = (output + bytes.toString()).slice(-16_000);
         const value = output.match(/https:\/\/[a-z0-9]+(?:-[a-z0-9]+)*\.trycloudflare\.com(?=[\s|]|$)/)?.[0];
-        if (value && previewOrigin(value + "/")) finish(null, value + "/");
+        if (value && previewOrigin(value + "/")) allocated = value + "/";
+        if (/Registered tunnel connection/.test(output)) connected = true;
+        // The banner only allocates a hostname. Edge registration can take longer
+        // than the old 12-probe window, especially when a transport falls back.
+        if (allocated && connected) finish(null, allocated);
       });
+      if (signal?.aborted) abort();
     });
-    return { url, close, onExit(fn) { child.once("exit", fn); } };
+    return { url, close, onExit(fn) { if (exited) queueMicrotask(fn); else child.once("exit", fn); } };
   } catch (error) { close(); throw error; }
-  finally { signal?.removeEventListener("abort", close); }
+  finally { signal?.removeEventListener("abort", abort); }
+}
+
+export async function waitForRemoteHealth({ url, remoteId, signal, transport = fetch, clock = Date.now, delay = ms => new Promise(resolve => setTimeout(resolve, ms)), timeoutMs = 60_000, alive = () => true }) {
+  const until = clock() + timeoutMs;
+  let statusCode, code = "remote_health_timeout";
+  do {
+    if (signal?.aborted) throw remoteFailure("preview_cancelled", "health");
+    if (!alive()) throw remoteFailure("tunnel_connection_failed", "connection");
+    try {
+      const response = await transport(`${url}_jarvis/health`, { redirect: "error", signal: AbortSignal.any([AbortSignal.timeout(Math.max(1, Math.min(5000, until - clock()))), ...(signal ? [signal] : [])]) });
+      statusCode = response.status;
+      // Ignore provider error pages; no remote content or headers enter reports.
+      if (response.ok) {
+        let body = "";
+        if (response.body?.getReader) {
+          const reader = response.body.getReader();
+          try {
+            while (true) {
+              const part = await reader.read(); if (part.done) break;
+              body += Buffer.from(part.value).toString();
+              if (body.length > 1024) { await reader.cancel(); break; }
+            }
+          } finally { reader.releaseLock(); }
+        } else body = (await response.text()).slice(0, 1024);
+        if (body === remoteId) return;
+        throw remoteFailure("remote_health_mismatch", "health", { statusCode });
+      }
+      await response.body?.cancel();
+      code = statusCode === 403 ? "remote_health_denied" : "remote_health_http";
+    } catch (error) {
+      if (error.code === "remote_health_mismatch") throw error;
+      if (/ENOTFOUND|EAI_AGAIN/.test(error.cause?.code ?? "")) code = "remote_health_dns";
+    }
+    if (clock() < until) await delay(Math.min(1000, until - clock()));
+  } while (clock() < until);
+  throw remoteFailure(code, "health", Number.isInteger(statusCode) ? { statusCode } : {});
 }
 
 export async function publishRemotePreview({ local, appOrigin, client, scope, binary, directory, attachCleanup, signal, transport = fetch, tunnel = startQuickTunnel }) {
   const remoteId = randomUUID();
-  const config = await client.request("/api/preview/config");
-  if (config.version !== 1 || typeof config.publicKey !== "string") throw new Error("preview_unconfigured");
+  let config;
+  try { config = await client.request("/api/preview/config"); }
+  catch (error) { throw remoteFailure(error.code === "preview_unconfigured" ? "preview_unconfigured" : "preview_config_unavailable", "configuration"); }
+  if (config.version !== 1 || typeof config.publicKey !== "string") throw remoteFailure("preview_unconfigured", "configuration");
   let remote, gateway;
   const cancel = () => { remote?.close(); gateway?.close(); };
   signal?.addEventListener("abort", cancel, { once: true });
@@ -175,22 +234,21 @@ export async function publishRemotePreview({ local, appOrigin, client, scope, bi
     if (signal?.aborted) throw new Error("preview_cancelled");
     gateway = await createRemoteGate({ localUrl: local.url, appOrigin, publicKey: config.publicKey, remoteId, scope, sha: local.sha, expiresAt: local.expiresAt,
       checkAccess: async deviceId => (await client.request("/api/preview/access", { ...scope, remoteId, url: remote.url, sha: local.sha, deviceId })).allowed === true });
-    remote = await tunnel({ binary, localUrl: gateway.localUrl, directory, signal });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try { remote = await tunnel({ binary, localUrl: gateway.localUrl, directory, signal }); break; }
+      catch (error) {
+        if (attempt || signal?.aborted || error.stage !== "provisioning" || !["tunnel_timeout", "tunnel_network_failed", "tunnel_provision_failed"].includes(error.code)) throw error;
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
     gateway.setOrigin(remote.url);
-    remote.onExit(() => gateway.close());
+    let alive = true;
+    remote.onExit(() => { alive = false; gateway.close(); });
     const close = () => { remote.close(); gateway.close(); clearTimeout(timer); };
     const timer = setTimeout(close, Math.max(1, Date.parse(local.expiresAt) - Date.now())); timer.unref();
     if (!attachCleanup(local.url, close)) { close(); throw new Error("preview_bridge_missing"); }
-    let healthy = false;
-    for (let attempt = 0; attempt < 12; attempt++) {
-      if (signal?.aborted) { close(); throw new Error("preview_cancelled"); }
-      try {
-        const response = await transport(`${remote.url}_jarvis/health`, { redirect: "error", signal: AbortSignal.timeout(5000) });
-        if (response.ok && (await response.text()).slice(0, 1024) === remoteId) { healthy = true; break; }
-      } catch {}
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-    if (!healthy) { close(); throw new Error("remote_preview_not_ready"); }
+    try { await waitForRemoteHealth({ url: remote.url, remoteId, transport, signal, alive: () => alive }); }
+    catch (error) { close(); throw error; }
     return { ...local, kind: "remote", remoteId, url: remote.url,
       message: "이 PC에서 열 수 있습니다. 승인된 Jarvis 기기에서만 접근하며, 맥미니가 켜져 있어야 합니다. 별도 임시 데이터로 실행합니다." };
   } catch (error) { cancel(); throw error; }

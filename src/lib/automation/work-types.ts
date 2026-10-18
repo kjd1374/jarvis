@@ -7,6 +7,7 @@ export type WorkPreview = {
   checkedAt: string;
   expiresAt: string | null;
   message: string;
+  diagnostic?: { stage: "docker" | "build" | "application" | "configuration" | "provisioning" | "connection" | "health" | "module"; code: string; statusCode?: number; exitCode?: number };
 };
 export type WorkCheck = { name: string; status: "passed" | "failed" | "not_run"; detail: string };
 export type WorkResult = {

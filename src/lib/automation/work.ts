@@ -27,7 +27,18 @@ export function parseWorkPreview(raw: unknown): WorkPreview {
       if (!date(raw.expiresAt) || Date.parse(raw.expiresAt as string) <= Date.parse(raw.checkedAt as string) || Date.parse(raw.expiresAt as string) - Date.parse(raw.checkedAt as string) > 2 * 60 * 60_000) invalid();
     }
   } else if (raw.url !== null || raw.expiresAt !== null) invalid();
+  let diagnostic: WorkPreview["diagnostic"];
+  if (raw.diagnostic !== undefined) {
+    const d = raw.diagnostic;
+    if (!object(d) || raw.state === "ready" || !["docker", "build", "application", "configuration", "provisioning", "connection", "health", "module"].includes(String(d.stage)) ||
+      typeof d.code !== "string" || !/^[a-z_]{1,80}$/.test(d.code) ||
+      d.statusCode !== undefined && (!Number.isInteger(d.statusCode) || (d.statusCode as number) < 100 || (d.statusCode as number) > 599) ||
+      d.exitCode !== undefined && (!Number.isInteger(d.exitCode) || (d.exitCode as number) < 0 || (d.exitCode as number) > 255)) invalid();
+    diagnostic = { stage: d.stage as NonNullable<WorkPreview["diagnostic"]>["stage"], code: d.code,
+      ...(d.statusCode === undefined ? {} : { statusCode: d.statusCode as number }), ...(d.exitCode === undefined ? {} : { exitCode: d.exitCode as number }) };
+  }
   return { state: raw.state as WorkPreview["state"], kind: raw.kind as WorkPreview["kind"], url: raw.url as string | null, sha: raw.sha,
+    ...(diagnostic ? { diagnostic } : {}),
     ...(raw.kind === "remote" && raw.state === "ready" ? { remoteId: raw.remoteId as string } : {}),
     checkedAt: raw.checkedAt as string, expiresAt: raw.expiresAt as string | null, message: clean(raw.message) };
 }

@@ -487,8 +487,9 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
       journal.prepared = true; await save();
     }
     const prepareScreen = async (sha) => {
+      let tools;
       try {
-        const tools = previewTools ?? await import("./jarvis-preview.mjs");
+        tools = previewTools ?? await import("./jarvis-preview.mjs");
         const deployed = await tools.findDeploymentPreview(job.repository, sha, get, publicWebUrl);
         if (deployed) return deployed;
         if (!previewEnabled) return { state: "unavailable", kind: "mac", url: null, sha, checkedAt: new Date().toISOString(), expiresAt: null, message: "맥미니 미리보기 설정이 필요합니다. 설정에서 맥미니 실행기를 설치해주세요." };
@@ -504,8 +505,10 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
             directory: stateDir, attachCleanup: tools.attachPreviewCleanup, signal: abort.signal });
         } : undefined;
         return await tools.startMacPreview({ cwd, files, sha, stateDir, identity: `${job.space}:${job.projectId}:${job.id}`, group: `${job.space}:${job.projectId}:${job.repository}`, run, signal: abort.signal, publish });
-      } catch {
-        return { state: "failed", kind: "mac", url: null, sha, checkedAt: new Date().toISOString(), expiresAt: null, message: "미리보기 모듈 또는 실행 환경을 확인하지 못했습니다. 맥미니 실행기를 설치한 뒤 다시 준비해주세요." };
+      } catch (error) {
+        if (tools?.previewFailure) return tools.previewFailure(sha, error, "application", !!remotePreview);
+        return { state: "failed", kind: remotePreview ? "remote" : "mac", url: null, sha, checkedAt: new Date().toISOString(), expiresAt: null,
+          diagnostic: { stage: "module", code: "preview_module_unavailable" }, message: "미리보기 실행 모듈을 불러오지 못했습니다. 실행기 설치 파일을 확인해야 합니다." };
       }
     };
     const executeChecks = async () => {
