@@ -75,7 +75,7 @@ export function ProjectScreen({ project }: { project: Project }) {
     {previewAI === "codex" && <p>구독 CLI로 짧은 번역 응답을 실제 확인한 뒤 화면을 준비합니다. 요청마다 구독 사용량이 소모됩니다. API 키 과금으로 전환하지 않으며 임시 화면 한 개에서 최대 20회 요청할 수 있습니다.</p>}
     {latest?.result?.preview ? <PreviewResult preview={latest.result.preview} project={project} turnId={latest.id} /> : <p>{previewAI === "codex"
       ? "현재 코드의 임시 앱을 실행하고 구독 CLI의 번역 응답을 확인합니다. 준비가 끝나면 이 PC에서 열 수 있습니다."
-      : "현재 코드의 배포 주소를 확인합니다. 배포가 없으면 맥미니에서 미리보기를 실행해 이 PC에서 엽니다. AI 사용량은 소모하지 않습니다."}</p>}
+      : "배포 주소가 없으면 맥미니에서 임시 화면을 준비합니다. AI는 연결하지 않습니다."}</p>}
     {waiting && <p role="status">화면 준비: {waiting.status === "queued" ? queuedWorkMessage(waiting, service?.monitoring, clock) : "실행기가 화면을 준비하고 있습니다. 완료되면 화면 열기 버튼이 표시됩니다."}</p>}
     {testing && <p role="status">자동 테스트: {testing.status === "queued" ? queuedWorkMessage(testing, service?.monitoring, clock) : "실행 중입니다. 결과는 아래 프로젝트 작업에 표시됩니다."}</p>}
     <p>자동 테스트는 실행 서버에서 처리합니다. 화면 표시, 자동 검증, 실제 AI·외부 서비스 연결은 각각 확인해야 합니다.</p>
