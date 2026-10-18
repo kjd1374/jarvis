@@ -84,8 +84,8 @@
 .helpButton, .menuToggle, .closeMenu { display: grid; place-items: center; min-width: 40px; min-height: 40px; background: none; color: var(--muted); border-radius: 8px; }
 .helpButton:hover { background: var(--surface-raised); color: var(--foreground); }
 .menuToggle { display: none; }
-.main { width: 100%; max-width: 1570px; margin: 0 auto; padding: 28px 36px 36px; outline: none; }
-.footer { max-width: 1570px; margin: auto; padding: 0 36px 24px; display: flex; justify-content: space-between; gap: 16px; color: var(--muted); font-size: 11px; }
+.main { width: 100%; padding: 24px 32px 32px; outline: none; }
+.footer { padding: 0 32px 24px; display: flex; justify-content: space-between; gap: 16px; color: var(--muted); font-size: 11px; }
 .footer > span:last-child { font-size: 9px; letter-spacing: 1.7px; }
 .footer > span:last-child > span { display: inline-flex; color: var(--accent); margin-left: 12px; vertical-align: middle; transform: rotate(-45deg); }
 .mobileMenu { display: none; }
