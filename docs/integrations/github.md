@@ -8,7 +8,7 @@ Issue #11의 요청에 따라 저장소를 등록하면 읽기 점검을 대기�
 
 1. macOS·Linux·WSL의 실행할 컴퓨터에 Node 24+, [GitHub CLI](https://cli.github.com/), [공식 Codex CLI](https://developers.openai.com/codex/cli/)를 설치한다.
 2. `gh auth login`으로 허용할 저장소의 읽기 권한을 확인한다. `codex login`에서 ChatGPT 로그인, `codex login status`에서 ChatGPT 방식을 확인한다. API 키 방식이면 실행기가 분석을 거절하며 API 과금으로 전환하지 않는다.
-3. Jarvis 설정 → **구독 CLI 실행기**에서 현재 회사/개인 영역과 프로젝트를 확인하고 실행기 `jarvis-runner.mjs`, 설정 `jarvis-runner.json`을 받는다. 설정에는 공개 앱 주소·공급자·명시적 영역/프로젝트 ID만 들어간다. 두 영역을 실행하려면 각각 확인한 scopes만 구성한다. 새 프로젝트는 설정을 다시 받아야 한다.
+3. Jarvis 설정 → **구독 CLI 실행기**에서 현재 회사/개인 영역을 확인하고 실행기 `jarvis-runner.mjs`, 설정 `jarvis-runner.json`을 받는다. 프로젝트를 선택한 상태에서도 해당 영역의 현재·새 프로젝트를 자동 연결한다. 설정에는 공개 앱 주소·공급자·영역과 호환용 프로젝트 자리표시자만 들어간다. 두 영역을 실행하려면 각각 확인한 scopes를 구성한다. 연결된 영역에서 프로젝트를 추가할 때는 설정을 다시 받지 않는다. 이미 연결된 2.0 이상 실행기에도 서버에서 자동 검색이 적용된다.
 4. 두 파일이 있는 폴더에서 `node jarvis-runner.mjs --config jarvis-runner.json`을 실행한다. 처음 표시되는 12자리 **이 실행기의 기기 요청 번호**만 소유자가 기존 기기 관리 절차로 확인한다. Codex/GitHub 인증 파일·토큰은 공유하거나 Jarvis에 입력하지 않는다. 요청 번호는 인증 비밀이 아니다.
 5. 승인 후 대기 요청을 가져오며 이후 15분 간격으로 원본 변경을 조회한다. 브라우저가 닫혀 있어도 실행기가 켜져 있으면 계속된다. Ctrl+C로 중단한다. PC 전원이 꺼지면 실행되지 않는다. 맥미니 자동 시작·미리보기는 아래 2.1 설치 절차를 사용한다.
 

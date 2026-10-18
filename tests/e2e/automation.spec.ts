@@ -63,7 +63,7 @@ test("접속 중인 구버전의 대기 이유와 업데이트 후 실제 버전
   await expect(agent).toContainText("요청이 실행 대기 중입니다");
   expect((await state(page))!.projects[0].automation!.turns[0]).toMatchObject({ status: "queued", attempt: 0 });
 });
-test("GitHub 점검 대기를 보존하고 비밀값 없는 현재 범위 설정을 받는다", async ({ page }) => {
+test("프로젝트를 선택해도 비밀값 없는 영역 자동 연결 설정을 받는다", async ({ page }) => {
   await seed(page, automationWorkspace(new Date().toISOString()));
   await page.goto("/projects/auto-project"); await ready(page);
   await openDetails(page, "프로젝트 정보·연결");
@@ -77,11 +77,12 @@ test("GitHub 점검 대기를 보존하고 비밀값 없는 현재 범위 설정
   const setup = page.getByRole("region", { name: "구독 CLI 실행기", exact: true });
   await expect(setup).toContainText("ChatGPT 구독");
   const downloaded = page.waitForEvent("download");
-  await setup.getByRole("button", { name: "현재 범위의 실행기 설정 받기" }).click();
+  await expect(setup).toContainText("앞으로 등록할 프로젝트를 자동으로 연결");
+  await setup.getByRole("button", { name: "영역 자동 연결 설정 받기" }).click();
   const download = await downloaded; const stream = await download.createReadStream(); const chunks = [];
   for await (const chunk of stream!) chunks.push(chunk);
   const config = JSON.parse(Buffer.concat(chunks).toString());
-  expect(config).toEqual({ origin: "http://127.0.0.1:4317", provider: "codex", scopes: [{ space: "company", projectIds: ["auto-project"] }] });
+  expect(config).toEqual({ origin: "http://127.0.0.1:4317", provider: "codex", scopes: [{ space: "company", projectIds: [null] }] });
 });
 test("사실·AI 판단과 제안 채택을 구분하고 새로고침 뒤 중복 없이 보존한다", async ({ page }, info) => {
   await seed(page, analyzed(new Date().toISOString()));

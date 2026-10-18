@@ -16,6 +16,7 @@ export function validateMonitoring(service: Service, data: WorkspaceData) {
   if (m.runnerSeenAt !== undefined && !date(m.runnerSeenAt) || m.runnerVersion !== undefined && !text(m.runnerVersion, 50)) invalid();
   if (m.runnerConnection !== undefined) {
     const c = m.runnerConnection;
+    if (object(c) && c.projectScope !== undefined && c.projectScope !== "space" && c.projectScope !== "selected") invalid();
     if (!object(c) || !date(c.seenAt) || typeof c.remoteWork !== "boolean" || typeof c.previews !== "boolean" ||
       c.previewCli !== undefined && typeof c.previewCli !== "boolean" ||
       c.version !== undefined && (typeof c.version !== "string" || !/^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(c.version))) invalid();

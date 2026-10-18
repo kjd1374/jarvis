@@ -3,7 +3,7 @@ import { changeWorkspace } from "@/lib/automation/server";
 import { claimProjectWork } from "@/lib/automation/work";
 import { claimInspection } from "@/lib/automation/state";
 import { claimDocumentQuestion } from "@/lib/sheets/questions";
-import { observeWorkRunner } from "@/lib/automation/runner-status";
+import { observeWorkRunner, runnerProjectIds } from "@/lib/automation/runner-status";
 export const runtime = "nodejs";
 export async function POST(request: Request) {
   try {
@@ -11,17 +11,20 @@ export async function POST(request: Request) {
     const body = await readJson(request);
     const space = spaceParam(body.space);
     if (!Array.isArray(body.projectIds) || body.projectIds.length === 0 || body.projectIds.length > 20 ||
-        body.projectIds.some(id => id !== null && (typeof id !== "string" || id.length > 200)) || !["codex", "claude"].includes(String(body.provider)))
+        body.projectIds.some(id => id !== null && (typeof id !== "string" || id.length > 200)) || !["codex", "claude"].includes(String(body.provider)) ||
+        body.projectScope !== undefined && body.projectScope !== "space" && body.projectScope !== "selected")
       throw new CloudError(400, "scope_required", "실행기에서 조회할 영역·프로젝트와 구독 CLI를 지정해주세요.");
-    const projects = body.projectIds as (string | null)[];
+    const requestedProjects = body.projectIds as (string | null)[];
     const provider = body.provider as "codex" | "claude";
+    const supportsWork = body.workVersion === 1 && provider === "codex";
+    const projectScope = supportsWork && body.projectScope !== "selected" ? "space" : "selected";
     const stamp = new Date().toISOString();
     const result = await changeWorkspace(request, space, (data, deviceId) => {
-      if (projects.some(id => id !== null && !data.projects.some(p => p.id === id && p.space === space)))
-        throw new CloudError(400, "mixed_scope", "이 영역의 프로젝트만 실행기에 연결할 수 있습니다.");
+      let projects: (string | null)[];
+      try { projects = runnerProjectIds(data, space, requestedProjects, projectScope); }
+      catch { throw new CloudError(400, "mixed_scope", "이 영역의 프로젝트만 실행기에 연결할 수 있습니다."); }
       const original = data;
-      const supportsWork = body.workVersion === 1 && provider === "codex";
-      if (supportsWork) data = observeWorkRunner(data, { space, projectIds: projects }, body, stamp);
+      if (supportsWork) data = observeWorkRunner(data, { space, projectIds: projects, projectScope }, body, stamp);
       if (body.documentVersion === 1 && provider === "codex") {
         const document = claimDocumentQuestion(data, { space, projectIds: projects, deviceId }, stamp);
         data = document.data;

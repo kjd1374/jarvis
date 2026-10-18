@@ -4,11 +4,38 @@ import { enqueueWork, claimProjectWork, reportProjectWork, changeWorkState, pars
 import { normalizeWorkspace } from "../../src/lib/workspace/validation";
 import { parseWebLinks, publicWebUrl } from "../../src/lib/automation/web-links";
 import { projectQuickLinks } from "../../src/lib/workspace/project-connections";
-import { observeWorkRunner, queuedWorkMessage } from "../../src/lib/automation/runner-status";
+import { observeWorkRunner, queuedWorkMessage, runnerProjectIds, refreshAutomaticRunner } from "../../src/lib/automation/runner-status";
 const scope = { space: "company" as const, projectIds: ["auto-project"], deviceId: "device-a" };
 const uuid = "11111111-1111-4111-8111-111111111111";
 const result = { reply: "실제 변경과 검증을 정리했습니다.", summary: "화면 개선", currentStatus: "PR 검토", nextAction: "추가 회귀 검증", changes: ["src/page.tsx"], checks: [{ name: "CI", status: "passed", detail: "합성 검사" }], followUps: [{ title: "추가 회귀 검증", reason: "화면 범위를 넓혀 확인", kind: "todo" }], outcome: "pr_open", branch: `jarvis/work-${uuid}`, baseSha: "a".repeat(40), headSha: "b".repeat(40), prUrl: "https://github.com/example/synthetic/pull/10", deployment: { state: "not_configured", url: null, sha: null } };
 function queued() { return enqueueWork(automationWorkspace(), "company", "auto-project", "auto-service", "모바일 버튼 수정", "change", "pr", stamp, uuid); }
+test("자동 연결은 현재 영역의 새 프로젝트와 20개 초과 목록을 찾고 삭제된 예전 설정을 무시한다", () => {
+  const data = automationWorkspace();
+  for (let n = 0; n < 25; n++) data.projects.push({ ...data.projects[0], id: `new-${n}` });
+  data.projects.push({ ...data.projects[0], id: "personal-project", space: "personal" });
+  const projects = runnerProjectIds(data, "company", ["deleted-project"], "space");
+  expect(projects).toHaveLength(27); expect(projects).toContain("new-24"); expect(projects).toContain(null);
+  expect(projects).not.toContain("personal-project"); expect(projects).not.toContain("deleted-project");
+  expect(runnerProjectIds(data, "company", ["auto-project"], "selected")).toEqual(["auto-project"]);
+  expect(() => runnerProjectIds(data, "company", ["personal-project"], "selected")).toThrow("mixed_scope");
+  data.projects.splice(data.projects.findIndex(p => p.id === "auto-project"), 1);
+  expect(runnerProjectIds(data, "company", ["auto-project"], "space")).toContain("new-24");
+});
+test("실행 중 접속은 새 프로젝트까지 갱신하며 명시적 제한과 다른 영역은 유지한다", () => {
+  const data = observeWorkRunner(automationWorkspace(), scope, { runnerVersion: "2.5.0", remoteWorkVersion: 1, previewVersion: 1, previewCliVersion: 1 }, stamp);
+  data.projects.push({ ...data.projects[0], id: "new-project" });
+  const fresh = { ...structuredClone(data.services[0]), id: "new-service", projectId: "new-project" };
+  delete fresh.monitoring!.runnerConnection; delete fresh.monitoring!.runnerSeenAt;
+  data.services.push(fresh, { ...structuredClone(fresh), id: "personal-service", space: "personal", projectId: null });
+  const nextStamp = new Date(Date.parse(stamp) + 30_000).toISOString();
+  const next = refreshAutomaticRunner(data, "company", "auto-service", nextStamp);
+  expect(next.services[1].monitoring!.runnerConnection).toMatchObject({ version: "2.5.0", projectScope: "space", seenAt: nextStamp, previewCli: true });
+  expect(normalizeWorkspace(next).services[1].monitoring!.runnerConnection?.projectScope).toBe("space");
+  expect(next.services[2]).toBe(data.services[2]);
+  expect(refreshAutomaticRunner(data, "company", undefined, nextStamp)).toBe(data);
+  const selected = observeWorkRunner(data, { ...scope, projectScope: "selected" }, { runnerVersion: "2.5.0" }, stamp);
+  expect(refreshAutomaticRunner(selected, "company", "auto-service", nextStamp)).toBe(selected);
+});
 test("구독 CLI 미리보기는 명시적으로 저장하며 지원 실행기와 실제 응답 증거가 필요하다", () => {
   const data = enqueueWork(automationWorkspace(), "company", "auto-project", "auto-service", "구독 CLI 통역 확인", "preview", "pr", stamp, uuid, undefined, "codex");
   expect(normalizeWorkspace(data).projects[0].automation!.turns[0].previewAI).toBe("codex");
