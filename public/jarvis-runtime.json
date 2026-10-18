@@ -1,7 +1,7 @@
 {
-  "version": "2.4.0",
+  "version": "2.4.1",
   "files": {
-    "jarvis-runner.mjs": "6f0bcc83a2abb43e75a917c74708e694ca856217abc18dc8792774fb3ff18cca",
+    "jarvis-runner.mjs": "f3877087d1978061b86260c1fd9111422413514de742fc22a1344b8f1fce047c",
     "jarvis-preview.mjs": "8485b50a269c19ed4776367f73a86c2541f923e11a4b1cb0e53969cc15138af8",
     "jarvis-remote-preview.mjs": "2475514c1c8619096a8bb63f8bce65b6811288050ee734cdeeedd2b9ce50bef0",
     "jarvis-preview-auth.mjs": "5fe9b1442b41e860e053c58a45592aabd65c406c20a5f655c4e18da18baa4572"

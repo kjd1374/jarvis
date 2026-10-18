@@ -3,12 +3,12 @@
 // Host listeners remain loopback-only; authenticated preview tunnels are opt-in via Mac setup.
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { pathToFileURL, fileURLToPath } from "node:url";
+import { fileURLToPath } from "node:url";
 
-export const VERSION = "2.4.0";
+export const VERSION = "2.4.1";
 export class RunnerError extends Error {
   constructor(code) { super(code); this.code = code; }
 }
@@ -803,7 +803,7 @@ export async function main(argv = process.argv.slice(2)) {
   console.log(`Jarvis 실행기 ${VERSION} 연결됨 · 선택한 영역/프로젝트만 점검합니다. 구독 사용 한도가 적용됩니다.`);
   do {
     for (const scope of config.scopes) {
-      const claimed = await resilientRequest("/api/automation/claim", { ...scope, provider: config.provider, workVersion: 1, remoteWorkVersion: 1, documentVersion: 1, previewVersion: config.preview?.enabled === true ? 1 : 0 });
+      const claimed = await resilientRequest("/api/automation/claim", { ...scope, provider: config.provider, runnerVersion: VERSION, workVersion: 1, remoteWorkVersion: 1, documentVersion: 1, previewVersion: config.preview?.enabled === true ? 1 : 0 });
       if (claimed.job?.kind === "document") await executeDocumentQuestion(client, claimed.job, { stateDir });
       else if (claimed.job?.kind === "work") await executeProjectWork(client, claimed.job, { stateDir, previewEnabled: config.preview?.enabled === true,
         remotePreview: config.preview?.remote === true ? { origin, binary: join(dirname(fileURLToPath(import.meta.url)), "cloudflared") } : undefined });
@@ -813,6 +813,7 @@ export async function main(argv = process.argv.slice(2)) {
     await new Promise(r => setTimeout(r, 10_000));
   } while (true);
 }
-if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+// Canonicalize both paths so aliases such as macOS /tmp execute normally.
+if (process.argv[1] && await realpath(process.argv[1]) === await realpath(fileURLToPath(import.meta.url))) {
   main().catch(error => { console.error(`실행기를 시작하지 못했습니다: ${error instanceof RunnerError ? error.code : "runner_unavailable"}. 토큰/인증값은 출력하지 않았습니다.`); process.exitCode = 1; });
 }

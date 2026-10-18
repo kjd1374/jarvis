@@ -3,6 +3,7 @@ import { changeWorkspace } from "@/lib/automation/server";
 import { claimProjectWork } from "@/lib/automation/work";
 import { claimInspection } from "@/lib/automation/state";
 import { claimDocumentQuestion } from "@/lib/sheets/questions";
+import { observeWorkRunner } from "@/lib/automation/runner-status";
 export const runtime = "nodejs";
 export async function POST(request: Request) {
   try {
@@ -19,15 +20,14 @@ export async function POST(request: Request) {
       if (projects.some(id => id !== null && !data.projects.some(p => p.id === id && p.space === space)))
         throw new CloudError(400, "mixed_scope", "이 영역의 프로젝트만 실행기에 연결할 수 있습니다.");
       const original = data;
+      const supportsWork = body.workVersion === 1 && provider === "codex";
+      if (supportsWork) data = observeWorkRunner(data, { space, projectIds: projects }, body, stamp);
       if (body.documentVersion === 1 && provider === "codex") {
         const document = claimDocumentQuestion(data, { space, projectIds: projects, deviceId }, stamp);
         data = document.data;
         if (document.job) return { data, result: { job: document.job } };
       }
-      const supportsWork = body.workVersion === 1 && provider === "codex";
       if (supportsWork) {
-        data = { ...data, services: data.services.map(s => s.space === space && projects.includes(s.projectId) && s.monitoring &&
-          (!s.monitoring.runnerSeenAt || Date.parse(stamp) - Date.parse(s.monitoring.runnerSeenAt) >= 60_000) ? { ...s, monitoring: { ...s.monitoring, runnerSeenAt: stamp, runnerVersion: "2.0.0" } } : s) };
         const work = claimProjectWork(data, { space, projectIds: projects, deviceId, previews: body.previewVersion === 1, remoteWork: body.remoteWorkVersion === 1 }, stamp);
         data = work.data;
         if (work.job) return { data, result: { job: work.job } };

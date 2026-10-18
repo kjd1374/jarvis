@@ -156,7 +156,7 @@ export function reportProjectWork(data: WorkspaceData, space: Space, body: Recor
   if (body.phase === "heartbeat") {
     const phase = typeof body.progress === "string" && phaseValues.includes(body.progress) ? body.progress as ProjectTurn["phase"] : turn.phase;
     const next = updateTurn(data, project, { ...turn, phase, updatedAt: stamp, leaseUntil: new Date(Date.parse(stamp) + 10 * 60_000).toISOString() });
-    return { ...next, services: next.services.map(s => s.id === turn.serviceId && s.monitoring ? { ...s, monitoring: { ...s.monitoring, runnerSeenAt: stamp, runnerVersion: "2.0.0" } } : s) };
+    return { ...next, services: next.services.map(s => s.id === turn.serviceId && s.monitoring ? { ...s, monitoring: { ...s.monitoring, runnerSeenAt: stamp } } : s) };
   }
   if (body.phase === "error") {
     const error = typeof body.code === "string" && /^[a-z_]{1,100}$/.test(body.code) ? body.code : "work_failed";

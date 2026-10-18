@@ -46,7 +46,7 @@ export function mergeCloudWorkspace(
     const question = path.length === 5 && path[0] === "documents" && path[2] === "sheet" && path[3] === "questions";
     const job = path.length === 4 && path[0] === "services" && path[2] === "monitoring" && path[3] === "job";
     const observation = path.length === 4 && path[0] === "services" && path[2] === "monitoring" &&
-      ["runnerSeenAt", "runnerVersion", "lastSuccessAt", "lastAttemptAt", "error", "nextRetryAt", "inspection", "analysis", "previousAnalyses", "webLinks"].includes(path[3]) ||
+      ["runnerSeenAt", "runnerVersion", "runnerConnection", "lastSuccessAt", "lastAttemptAt", "error", "nextRetryAt", "inspection", "analysis", "previousAnalyses", "webLinks"].includes(path[3]) ||
       path.length === 3 && path[0] === "sourceRecords" && path[2] !== "taskId";
     if (observation || path.length === 4 && path[0] === "documents" && path[2] === "sheet" && path[3] === "runnerSeenAt") return r;
     // Never splice lease/result fields or roll back a progressing execution during review.

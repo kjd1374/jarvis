@@ -3,6 +3,30 @@ import { analyzed, collected, analysisRaw, automationWorkspace } from "../suppor
 import { applyAnalysis } from "../../src/lib/automation/state";
 import { parseAnalysis } from "../../src/lib/automation/facts";
 test.setTimeout(60_000);
+test("접속 중인 구버전의 대기 이유와 업데이트 후 실제 버전을 표시한다", async ({ page }, info) => {
+  const { enqueueWork } = await import("../../src/lib/automation/work");
+  const { observeWorkRunner } = await import("../../src/lib/automation/runner-status");
+  const stamp = new Date().toISOString(), scope = { space: "company" as const, projectIds: ["auto-project"] };
+  const queued = enqueueWork(automationWorkspace(stamp), "company", "auto-project", "auto-service", "합성 자동 테스트", "test", "pr", stamp);
+  const old = observeWorkRunner(queued, scope, { previewVersion: 1 }, stamp);
+  await seed(page, old); await page.goto("/projects/auto-project"); await ready(page);
+  const agent = page.getByRole("region", { name: "프로젝트 AI 작업실", exact: true });
+  const screen = page.getByRole("region", { name: "수정된 화면 확인", exact: true });
+  await expect(agent).toContainText("CLI 연결됨 · 새 기능 업데이트 필요");
+  await expect(agent).toContainText("버전 미확인");
+  await expect(agent).toContainText("업데이트해야 이 요청을 시작할 수 있습니다");
+  await expect(screen).toContainText("업데이트해야 이 요청을 시작할 수 있습니다");
+  await expect(agent).not.toContainText("CLI가 연결되면 자동으로 시작합니다");
+  await page.setViewportSize({ width: 320, height: 740 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: info.outputPath("runner-update-needed.png"), fullPage: true });
+  const updated = observeWorkRunner(old, scope, { runnerVersion: "2.4.1", remoteWorkVersion: 1, previewVersion: 1 }, stamp);
+  await seed(page, updated); await page.goto("/projects/auto-project"); await ready(page);
+  await expect(agent).toContainText("버전 2.4.1");
+  await expect(agent).not.toContainText("업데이트 필요");
+  await expect(agent).toContainText("요청이 실행 대기 중입니다");
+  expect((await state(page))!.projects[0].automation!.turns[0]).toMatchObject({ status: "queued", attempt: 0 });
+});
 test("GitHub 점검 대기를 보존하고 비밀값 없는 현재 범위 설정을 받는다", async ({ page }) => {
   await seed(page, automationWorkspace(new Date().toISOString()));
   await page.goto("/projects/auto-project"); await ready(page);
@@ -219,7 +243,7 @@ test("화면 준비 요청과 맥미니 전용 링크·만료 상태를 저장�
   await seed(page, data); await page.goto("/projects/auto-project"); await ready(page);
   const screen = page.getByRole("region", { name: "수정된 화면 확인", exact: true });
   await screen.getByRole("button", { name: "화면 준비", exact: true }).click();
-  await expect(screen).toContainText("요청을 저장했습니다");
+  await expect(screen).toContainText("연결되면 저장된 요청을 처리합니다");
   await expect(screen.getByRole("button", { name: "화면 준비 대기·진행 중" })).toBeDisabled();
   const saved = (await state(page))!;
   expect(saved.projects[0].automation!.turns[0].mode).toBe("preview"); expect(saved.tasks).toHaveLength(0);

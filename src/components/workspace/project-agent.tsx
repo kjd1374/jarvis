@@ -3,6 +3,8 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 import { enqueueWork, changeWorkState, latestWorkSource } from "@/lib/automation/work";
 import { repositoryFor } from "@/lib/automation/state";
+import { queuedWorkMessage, runnerOnline } from "@/lib/automation/runner-status";
+import type { GitHubMonitoring } from "@/lib/automation/types";
 import { dateLabel, id, now, type Project } from "@/lib/workspace/types";
 import type { ProjectTurn } from "@/lib/automation/work-types";
 import { useWorkspace } from "./workspace-provider";
@@ -28,11 +30,12 @@ const errors: Record<string, string> = {
 function turnStatus(turn: ProjectTurn) {
   if (turn.status === "cancelled") return "요청 취소됨";
   if (turn.error || turn.status === "failed" || turn.status === "interrupted") return "확인 필요";
+  if (turn.status === "queued") return turn.mode === "preview" ? "화면 준비 대기" : turn.mode === "test" ? "자동 테스트 대기" : "실행 대기";
   if (turn.mode === "preview") return turn.result?.preview?.state === "ready" ? "화면 준비 완료" : turn.result ? "화면 준비 필요" : "화면 준비 중";
   if (turn.mode === "test") return turn.result ? turn.result.outcome === "answered" ? "자동 검증 통과" : "자동 검증 확인 필요" : "자동 테스트 대기·실행 중";
   return turn.result ? outcomes[turn.result.outcome] : phases[turn.phase];
 }
-function WorkTurn({ turn, project, saving, onAction }: { turn: ProjectTurn; project: Project; saving: boolean; onAction: (turn: ProjectTurn, action: "cancel" | "retry") => void }) {
+function WorkTurn({ turn, project, saving, onAction, monitoring, clock }: { turn: ProjectTurn; project: Project; saving: boolean; onAction: (turn: ProjectTurn, action: "cancel" | "retry") => void; monitoring?: GitHubMonitoring; clock: number }) {
   return <article className={styles.agentTurn} aria-label="작업 요청">
     <div className={styles.detailHeading}><strong>{turnStatus(turn)}</strong><span>{dateLabel(turn.createdAt)}</span></div>
     <BriefText text={turn.request} label="요청 전문" limit={100} />
@@ -47,7 +50,7 @@ function WorkTurn({ turn, project, saving, onAction }: { turn: ProjectTurn; proj
         {turn.result.preview && <details className={styles.compactDisclosure}><summary>이 작업의 화면</summary><PreviewResult preview={turn.result.preview} project={project} turnId={turn.id} /></details>}
         {turn.result.prUrl && <a href={turn.result.prUrl} target="_blank" rel="noopener noreferrer">변경 PR 열기 ↗</a>}
         {turn.result.deployment.url && <a href={turn.result.deployment.url} target="_blank" rel="noopener noreferrer">반영된 화면 열기 ↗</a>}
-      </> : !turn.error && <p>{turn.status === "queued" ? "CLI가 연결되면 자동으로 시작합니다." : turn.status === "cancelled" ? "이미 반영된 변경은 유지됩니다." : "작업 중입니다. 결과는 자동으로 갱신됩니다."}</p>}
+      </> : !turn.error && <p>{turn.status === "queued" ? queuedWorkMessage(turn, monitoring, clock) : turn.status === "cancelled" ? "이미 반영된 변경은 유지됩니다." : "작업 중입니다. 결과는 자동으로 갱신됩니다."}</p>}
       {turn.error && <p role="status">{errors[turn.error] ?? "실행을 마치지 못했습니다. 저장된 결과를 확인한 뒤 이어서 시도해주세요."}</p>}
       <div className={styles.agentTurnActions}>
         <span>{turn.mode === "test" ? "자동 테스트 · 코드 게시·AI 호출 없음" : turn.mode === "preview" ? "화면 준비 · AI 호출 없음" : turn.mode === "ask" ? "질문" : turn.publish === "merge" ? "수정·검증 후 반영" : "수정 후 PR 검토"}</span>
@@ -79,7 +82,9 @@ export function ProjectAgent({ project }: { project: Project }) {
   const previous = history.filter(t => !needsAttention.includes(t)).reverse();
   const monitoring = service?.monitoring?.repository === (service ? repositoryFor(service) : null) ? service?.monitoring : undefined;
   const seen = monitoring?.runnerSeenAt;
-  const online = !!seen && clock - Date.parse(seen) < 120_000;
+  const online = runnerOnline(monitoring, clock);
+  const updateNeeded = online && monitoring?.runnerConnection?.remoteWork === false;
+  const turnMonitoring = (turn: ProjectTurn) => services.find(s => s.id === turn.serviceId && s.monitoring?.repository === turn.repository)?.monitoring;
   async function submit(event: React.FormEvent) {
     event.preventDefault(); if (pending.current || saving || !message.trim() || !service) return;
     pending.current = true; setError("");
@@ -94,8 +99,9 @@ export function ProjectAgent({ project }: { project: Project }) {
     catch (e) { setError(e instanceof Error ? e.message : "상태를 변경하지 못했습니다."); }
   }
   return <section id="project-ai" className={`${styles.detailSection} ${styles.projectAgent}`} aria-label="프로젝트 AI 작업실">
-    <div className={styles.detailHeading}><h2><Icon name="message" size={18} /> AI와 프로젝트 작업</h2><span role="status" className={styles.runnerStatus} data-online={online}>{online ? "Jarvis CLI 연결됨" : seen ? "Jarvis CLI 최근 응답 없음" : monitoring?.lastSuccessAt ? "CLI 실행 기록 있음 · 접속 미확인" : "CLI 연결 대기"}</span></div>
-    {seen && <p className={styles.runnerEvidence}>실행기 최근 응답 {dateLabel(seen)} · 아래 답변은 대상 저장소의 작업 결과입니다.</p>}
+    <div className={styles.detailHeading}><h2><Icon name="message" size={18} /> AI와 프로젝트 작업</h2><span role="status" className={styles.runnerStatus} data-online={online && !updateNeeded}>{updateNeeded ? "CLI 연결됨 · 새 기능 업데이트 필요" : online ? "Jarvis CLI 연결됨" : seen ? "Jarvis CLI 최근 응답 없음" : monitoring?.lastSuccessAt ? "CLI 실행 기록 있음 · 접속 미확인" : "CLI 연결 대기"}</span></div>
+    {seen && <p className={styles.runnerEvidence}>실행기 최근 응답 {dateLabel(seen)} · 버전 {monitoring?.runnerConnection?.version ?? "미확인"} · 아래 답변은 대상 저장소의 작업 결과입니다.</p>}
+    {updateNeeded && <p className={styles.agentConnection}>최근 응답한 실행기는 자동 테스트·수정본 선택을 지원하지 않습니다. <Link href="/settings#cli-runner">실행기 업데이트 안내 →</Link></p>}
     {!online && <p className={styles.agentConnection}>{account?.authenticated ? "요청은 저장되며, 실행기가 연결되면 순서대로 처리합니다." : "CLI 자동 실행은 서버에 연결된 업무실에서 사용할 수 있습니다. 현재 요청은 이 브라우저에 저장됩니다."} <Link href="/settings#cli-runner">CLI 연결 안내 →</Link></p>}
     <form onSubmit={submit} className={styles.agentComposer}>
       <label htmlFor="project-agent-message">AI에게 요청</label>
@@ -111,14 +117,14 @@ export function ProjectAgent({ project }: { project: Project }) {
       {source && <p className={styles.detailFootnote}>최근 수정본 {source.result!.headSha!.slice(0, 8)}에서 이어갑니다. 실행기 2.4.0 이상이 필요합니다.</p>}
       {error && <p role="alert" className={styles.formError}>{error}</p>}
     </form>
-    {latest && <div className={styles.agentLatest} aria-label="최근 요청"><WorkTurn key={latest.id} turn={latest} project={project} saving={saving} onAction={act} /></div>}
+    {latest && <div className={styles.agentLatest} aria-label="최근 요청"><WorkTurn key={latest.id} turn={latest} project={project} saving={saving} onAction={act} monitoring={turnMonitoring(latest)} clock={clock} /></div>}
     {needsAttention.length > 0 && <details className={styles.compactDisclosure}>
       <summary>진행·확인 필요 {needsAttention.length}건</summary>
-      <div className={styles.agentHistory}>{needsAttention.map(turn => <WorkTurn key={turn.id} turn={turn} project={project} saving={saving} onAction={act} />)}</div>
+      <div className={styles.agentHistory}>{needsAttention.map(turn => <WorkTurn key={turn.id} turn={turn} project={project} saving={saving} onAction={act} monitoring={turnMonitoring(turn)} clock={clock} />)}</div>
     </details>}
     {previous.length > 0 && <details className={styles.compactDisclosure}>
       <summary>이전 대화 {previous.length}건</summary>
-      <div className={styles.agentHistory}>{previous.slice(0, historyLimit).map(turn => <WorkTurn key={turn.id} turn={turn} project={project} saving={saving} onAction={act} />)}
+      <div className={styles.agentHistory}>{previous.slice(0, historyLimit).map(turn => <WorkTurn key={turn.id} turn={turn} project={project} saving={saving} onAction={act} monitoring={turnMonitoring(turn)} clock={clock} />)}
         {previous.length > historyLimit && <button className={styles.textButton} onClick={() => setHistoryLimit(limit => limit + 10)}>이전 대화 더 보기</button>}
       </div>
     </details>}
