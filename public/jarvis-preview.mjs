@@ -69,6 +69,10 @@ export function previewPlan(files, pkg, lock) {
       (!/^https:\/\/registry\.npmjs\.org\//.test(p.resolved) || !p.integrity)))) return null;
     return { kind: "node", start, install: !!lock, build: typeof pkg.scripts.build === "string" };
   }
+  // Dependency-free Node projects do not need an npm manifest. Their public
+  // folder is the server's frontend, not proof that the app is a static site.
+  const entry = ["server.js", "server.mjs", "server.cjs"].find(path => files.includes(path));
+  if (entry) return { kind: "node", entry, install: false, build: false };
   const root = files.includes("index.html") ? "." : files.includes("public/index.html") ? "public" : null;
   return root ? { kind: "static", root, install: false, build: false } : null;
 }
@@ -145,7 +149,7 @@ export async function runProjectTests({ cwd, files, stateDir, identity, run, sig
 export const previewServerSource = String.raw`
 import http from 'node:http';
 import { spawn } from 'node:child_process';
-import { readFile, realpath, stat } from 'node:fs/promises';
+import { readFile, realpath, stat, cp } from 'node:fs/promises';
 import { resolve, extname } from 'node:path';
 const plan=JSON.parse(await readFile('/runtime/plan.json','utf8'));
 const token=process.env.JARVIS_PREVIEW_ID;
@@ -153,7 +157,11 @@ const types={'.html':'text/html; charset=utf-8','.js':'text/javascript','.mjs':'
 const root=resolve('/app',plan.root||'.');
 let child;
 if(plan.kind==='node') {
-  child=spawn('npm',plan.start,{cwd:'/app',env:{PATH:process.env.PATH,HOME:'/tmp',TMPDIR:'/tmp',NODE_ENV:'production',HOST:'127.0.0.1',HOSTNAME:'127.0.0.1',PORT:'3000',DATA_DIR:'/tmp/app-data',NEXT_TELEMETRY_DISABLED:'1'},stdio:'ignore'});
+  // Standalone apps commonly initialize config/data beside __dirname. Run a
+  // disposable copy in bounded tmpfs; the image and original checkout stay read-only.
+  const cwd=plan.entry?'/tmp/jarvis-preview-app':'/app';
+  if(plan.entry) await cp('/app',cwd,{recursive:true});
+  child=spawn(plan.entry?'node':'npm',plan.entry?[plan.entry]:plan.start,{cwd,env:{PATH:process.env.PATH,HOME:'/tmp',TMPDIR:'/tmp',NODE_ENV:'production',HOST:'127.0.0.1',HOSTNAME:'127.0.0.1',PORT:'3000',DATA_DIR:'/tmp/app-data',NEXT_TELEMETRY_DISABLED:'1'},stdio:'ignore'});
   child.on('error',()=>process.exit(1)); child.on('exit',()=>process.exit(1));
 }
 const server=http.createServer(async(req,res)=>{
@@ -288,7 +296,7 @@ export async function startMacPreview({ cwd, files, sha, stateDir, identity, gro
     const copied = await copyProject(cwd, files, app);
     const json = async path => JSON.parse(await readFile(join(app, path), "utf8").catch(() => "null"));
     const plan = previewPlan(copied, await json("package.json"), await json("package-lock.json"));
-    if (!plan) return unavailable(sha, "자동 실행 방법을 확인하지 못했습니다. 정적 index.html 또는 npm start와 공개 npm 잠금 파일을 준비하거나 기존 웹 배포를 연결해주세요.");
+    if (!plan) return unavailable(sha, "자동 실행 방법을 확인하지 못했습니다. 정적 index.html, 단독 Node server.js/server.mjs/server.cjs 또는 npm start와 공개 npm 잠금 파일을 지원합니다. Jarvis 수정 요청으로 실행 조건을 준비할 수 있습니다.");
     await writeFile(join(directory, "server.mjs"), previewServerSource);
     await writeFile(join(directory, "bridge.mjs"), bridgeSource);
     await writeFile(join(directory, "plan.json"), JSON.stringify(plan));
