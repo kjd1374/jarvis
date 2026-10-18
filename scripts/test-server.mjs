@@ -5,6 +5,7 @@ import { createWriteStream } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
+import { generateKeyPairSync } from "node:crypto";
 
 const root = resolve(import.meta.dirname, "..");
 const app = await mkdtemp(join(tmpdir(), "jarvis-e2e-"));
@@ -33,6 +34,7 @@ if (process.argv.includes("--local-cloud")) {
     process.env.JARVIS_TEST_SUPABASE_KEY;
   env.JARVIS_CLOUD_STORAGE_ENABLED = "true";
   env.JARVIS_APP_ORIGIN = "http://127.0.0.1:4317";
+  env.JARVIS_PREVIEW_SIGNING_KEY = generateKeyPairSync("ed25519").privateKey.export({ type: "pkcs8", format: "der" }).toString("base64");
 }
 let child;
 let closing = false;

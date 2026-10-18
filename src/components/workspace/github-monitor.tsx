@@ -114,6 +114,7 @@ export function CliRunnerSetup() {
   }
   return <section className={styles.settingsCard} id="cli-runner" aria-label="구독 CLI 실행기">
     <h2>구독 CLI 실행기</h2>
+    <p>실행기는 맥미니 한 대에만 설치하면 됩니다. 승인된 데스크탑·노트북에서는 Jarvis로 작업을 요청하고 미리보기를 열 수 있습니다.</p>
     <p>ChatGPT 구독으로 로그인한 공식 Codex CLI가 저장소 점검·프로젝트 요청과 선택한 시트 문답을 처리합니다. 문답은 실행기 2.2.0 이상에서 사용할 수 있습니다. API 결제나 구독 인증값의 웹 복사는 필요하지 않습니다. 구독 사용 한도는 적용됩니다.</p>
     <p>{spaceLabels[space]} · {projectId ? data.projects.find(p => p.id === projectId)?.name : "현재 등록된 프로젝트"}만 실행기에 연결합니다.</p>
     <ol><li>실행할 PC에 Node 24+, GitHub CLI, Codex CLI를 준비합니다.</li><li>터미널에서 <code>gh auth login</code>과 <code>codex login</code>을 확인합니다. Codex는 ChatGPT 로그인 방식을 사용합니다.</li>
@@ -122,10 +123,14 @@ export function CliRunnerSetup() {
       <button className={styles.secondaryButton} disabled={!ready || scopedProjects.length > 20} onClick={download}>현재 범위의 실행기 설정 받기</button></div>
     <p>새 프로젝트에 시트를 추가했다면 해당 프로젝트를 선택해 설정을 다시 받아 적용해주세요. 20개를 넘으면 프로젝트 범위를 좁혀주세요. 보관한 시트도 같은 범위에 포함됩니다.</p>
     <details className={styles.revisionDetails}><summary>맥미니 자동 실행·미리보기 설치</summary>
+      <p><strong>이미 설치했다면 업데이트만 진행하세요.</strong> 아래 설치 파일을 새로 받은 뒤 맥미니에서 실행하면 회사·개인 프로젝트 연결과 기기 승인을 그대로 유지합니다.</p>
+      <a className={styles.secondaryButton} href="/jarvis-mac.mjs" download>맥미니 설치·업데이트 파일 받기</a>
+      <pre>cd ~/Downloads{"\n"}node jarvis-mac.mjs update</pre>
+      <p>원격 미리보기는 실행기 2.3.0부터 지원합니다. 업데이트 후 프로젝트에서 화면 준비를 다시 눌러주세요. 다른 PC에는 실행기나 별도 프로그램을 설치하지 않습니다.</p>
       <p>맥미니에서 기존 수동 실행기를 Ctrl+C로 종료한 뒤 설치 파일을 받아 아래 명령을 실행합니다. Node 24+, GitHub·Codex 구독 로그인과 Docker Desktop 또는 Colima 등 Docker 호환 엔진이 필요합니다.</p>
-      <a className={styles.secondaryButton} href="/jarvis-mac.mjs" download>맥미니 설치 파일 받기</a>
       <pre>cd ~/Downloads{"\n"}node jarvis-mac.mjs install --config jarvis-runner.json</pre>
-      <p>기존 설정 파일과 기기 승인을 재사용합니다. macOS 사용자 로그인 후 자동 실행되며 실행 중 절전을 방지합니다. 재부팅 후에는 사용자 로그인과 Docker 실행이 필요합니다. 미리보기는 맥미니에서만 열고 2시간 뒤 종료합니다.</p>
+      <p>macOS 사용자 로그인 후 자동 실행되며 실행 중 절전을 방지합니다. 재부팅 후에는 사용자 로그인과 Docker 실행이 필요합니다. 미리보기는 승인된 기기에서 열고 2시간 뒤 종료합니다.</p>
+      <p>공식 Cloudflare 연결 프로그램을 검증해 함께 설치합니다. 임시 화면 통신은 Cloudflare를 거치며, 주소를 아는 것만으로는 접근할 수 없습니다. 구독 로그인 정보와 실제 업무 서비스 인증은 미리보기에 전달하지 않습니다.</p>
       <p>준비 상태 확인: <code>node jarvis-mac.mjs check</code> · 자동 실행 중단: <code>node jarvis-mac.mjs stop</code></p>
     </details>
     <p className={styles.detailFootnote}>macOS·Linux·WSL에서 사용합니다. PC와 실행기가 켜져 있어야 자동 조회됩니다. 중단 시 서버의 대기 작업·마지막 정상 자료는 유지합니다. 프로젝트 대화에서 보낸 수정 요청은 별도 작업 폴더에서 코드 수정·PR 작성 및 선택한 범위의 반영으로 이어집니다. 실행기를 이미 사용 중이면 새 파일로 교체한 뒤 다시 시작해주세요.</p>

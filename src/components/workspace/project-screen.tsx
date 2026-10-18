@@ -9,15 +9,17 @@ import { useWorkspace } from "./workspace-provider";
 import { useWorkspaceClock } from "./use-workspace-clock";
 import styles from "./studio.module.css";
 
-export function PreviewResult({ preview }: { preview: WorkPreview }) {
+export function PreviewResult({ preview, project, turnId }: { preview: WorkPreview; project: Project; turnId: string }) {
   const clock = useWorkspaceClock();
   const expired = !!preview.expiresAt && Date.parse(preview.expiresAt) <= clock;
+  const href = preview.kind === "remote" ? `/api/preview/open?${new URLSearchParams({ space: project.space, projectId: project.id, turnId })}` : preview.url;
   return <div aria-label="화면 준비 결과" className={styles.screenResult}>
-    <strong>{expired ? "미리보기 시간 만료" : preview.state === "ready" ? preview.kind === "mac" ? "맥미니 미리보기 준비됨" : "웹 배포 확인됨" : "화면 준비 필요"}</strong>
-    {preview.state === "ready" && !expired && preview.url && <a className={styles.primaryButton} href={preview.url} target="_blank" rel="noopener noreferrer">
-      {preview.kind === "mac" ? "맥미니에서 화면 열기 ↗" : "이 버전의 웹 화면 열기 ↗"}
+    <strong>{expired ? "미리보기 시간 만료" : preview.state === "ready" ? preview.kind === "mac" ? "맥미니 전용 미리보기" : preview.kind === "remote" ? "원격 미리보기 준비됨" : "웹 배포 확인됨" : "화면 준비 필요"}</strong>
+    {preview.state === "ready" && !expired && href && <a className={styles.primaryButton} href={href} target="_blank" rel="noopener noreferrer">
+      {preview.kind === "mac" ? "맥미니에서만 열기 ↗" : preview.kind === "remote" ? "이 PC에서 화면 열기 ↗" : "이 버전의 웹 화면 열기 ↗"}
     </a>}
     <p>{expired ? "화면 준비를 다시 누르면 현재 코드로 새 미리보기를 준비합니다." : preview.message}</p>
+    {preview.kind === "mac" && !expired && <p>이전 실행기가 만든 주소입니다. <Link href="/settings#cli-runner">맥미니 실행기를 업데이트</Link>한 뒤 화면 준비를 다시 누르면 다른 PC에서도 열 수 있습니다.</p>}
     <small>코드 {preview.sha.slice(0, 8)} · 확인 {dateLabel(preview.checkedAt)}{preview.expiresAt ? ` · 종료 ${dateLabel(preview.expiresAt)}` : ""}</small>
   </div>;
 }
@@ -46,10 +48,11 @@ export function ProjectScreen({ project }: { project: Project }) {
       <button className={styles.secondaryButton} onClick={prepare} disabled={saving || !service || waiting}>{waiting ? "화면 준비 대기·진행 중" : "화면 준비"}</button>
     </div>
     {services.length > 1 && <label>화면을 볼 저장소<select aria-label="화면을 볼 저장소" value={service?.id ?? ""} onChange={e => setSelected(e.target.value)}>{services.map(s => <option key={s.id} value={s.id}>{repositoryFor(s)}</option>)}</select></label>}
-    {latest?.result?.preview ? <PreviewResult preview={latest.result.preview} /> : <p>현재 코드의 배포 주소를 확인합니다. 배포가 없으면 맥미니에서 미리보기를 실행합니다. AI 사용량은 소모하지 않습니다.</p>}
+    {latest?.result?.preview ? <PreviewResult preview={latest.result.preview} project={project} turnId={latest.id} /> : <p>현재 코드의 배포 주소를 확인합니다. 배포가 없으면 맥미니에서 미리보기를 실행해 이 PC에서 엽니다. AI 사용량은 소모하지 않습니다.</p>}
     {waiting && <p role="status">요청을 저장했습니다. 미리보기를 지원하는 맥미니 실행기가 처리하면 화면 열기 버튼이 표시됩니다.</p>}
     <details className={styles.compactDisclosure}><summary>맥미니 미리보기 이용 안내</summary>
-      <p>미리보기는 실행한 맥미니의 브라우저에서 열며 2시간 후 종료됩니다. 맥미니·실행기·Docker가 켜져 있어야 합니다. 다른 기기에서는 기존 웹 배포 주소를 사용하세요.</p>
+      <p>승인된 Jarvis 기기에서 미리보기를 열 수 있으며 2시간 후 종료됩니다. 맥미니·실행기·Docker가 켜져 있어야 합니다. 노트북·데스크탑에는 실행기를 설치하지 않아도 됩니다.</p>
+      <p>임시 화면은 Cloudflare의 HTTPS 연결을 거칩니다. 주소만 복사하면 열리지 않으므로 각 PC의 Jarvis에서 화면 열기를 눌러주세요.</p>
       <p>별도의 임시 데이터로 화면을 확인합니다. 실제 AI·업무 서비스 연결과 운영 배포는 별도로 확인합니다. 정적 웹 또는 npm start가 있는 Node 앱을 지원하며, 다른 실행 방식이나 비밀 설정이 필요하면 이유를 표시합니다.</p>
       <Link href="/settings#cli-runner">맥미니 실행기 설정 →</Link>
     </details>

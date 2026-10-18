@@ -938,6 +938,35 @@ try {
   assert.equal(previewSaved.body.data.projects.find(p => p.id === projectId).automation.turns.at(-1).result.preview.url, previewResult.preview.url);
   assert(!previewSaved.body.data.tasks.some(t => t.id === `work-${previewId}`));
   recordCheck("preview capability gates old runners; device-fenced exact-commit result persists without a change task (synthetic preview URL)");
+  // Remote preview authorization uses real device/RLS state, never an external tunnel.
+  const remoteTurn = randomUUID(), remoteId = randomUUID();
+  previewSaved.body.data.projects.find(p => p.id === projectId).automation.turns.push({ id: remoteTurn, serviceId: workServiceId, repository: "example/synthetic", request: "합성 원격 화면 준비", mode: "preview", publish: "pr", status: "queued", phase: "queued", attempt: 0, createdAt: autoStamp, updatedAt: autoStamp });
+  assert.equal((await api("/api/workspace", a.token, "PUT", { space: "company", data: previewSaved.body.data, revision: previewSaved.body.revision })).status, 200);
+  const remoteClaim = await api("/api/automation/claim", a.token, "POST", { ...workClaim, previewVersion: 1 });
+  assert.equal(remoteClaim.body.job.id, remoteTurn);
+  const remotePreview = { ...previewResult.preview, kind: "remote", remoteId, url: "https://synthetic-private-preview.trycloudflare.com/" };
+  assert.equal((await api("/api/automation/work", a.token, "POST", { ...previewIdentity, jobId: remoteTurn, leaseToken: remoteClaim.body.job.leaseToken, phase: "result", result: { ...previewResult, preview: remotePreview } })).status, 200);
+  const access = { space: "company", projectId, turnId: remoteTurn, remoteId, url: remotePreview.url, sha: remotePreview.sha, deviceId: a.secondId };
+  assert.equal((await api("/api/preview/config")).status, 401);
+  assert.equal((await api("/api/preview/config", b.token)).status, 403);
+  const publicConfig = await api("/api/preview/config", a.token);
+  assert.equal(publicConfig.status, 200); assert.equal(publicConfig.body.version, 1);
+  assert.equal((await api("/api/preview/access", a.token, "POST", access)).body.allowed, true);
+  assert.equal((await api("/api/preview/access", a.secondToken, "POST", access)).status, 403);
+  assert.equal((await api("/api/preview/access", a.token, "POST", { ...access, space: "personal" })).status, 404);
+  assert.equal((await api("/api/preview/access", a.token, "POST", { ...access, remoteId: randomUUID() })).status, 403);
+  assert.equal((await api("/api/preview/access", a.token, "POST", { ...access, deviceId: b.id })).body.allowed, false);
+  sql(`update public.jarvis_devices set revoked_at=now() where user_id='${a.secondId}'`);
+  assert.equal((await api("/api/preview/access", a.token, "POST", access)).body.allowed, false);
+  sql(`update public.jarvis_devices set revoked_at=null where user_id='${a.secondId}'`);
+  assert.equal((await fetch(base + `/api/preview/open?space=company&projectId=${projectId}&turnId=${remoteTurn}`)).status, 401);
+  const remoteSaved = await api("/api/workspace?space=company", a.token);
+  const storedRemote = remoteSaved.body.data.projects.find(p => p.id === projectId).automation.turns.find(t => t.id === remoteTurn).result.preview;
+  storedRemote.checkedAt = new Date(Date.now() - 120_000).toISOString(); storedRemote.expiresAt = new Date(Date.now() - 60_000).toISOString();
+  assert.equal((await api("/api/workspace", a.token, "PUT", { space: "company", data: remoteSaved.body.data, revision: remoteSaved.body.revision })).status, 200);
+  assert.equal((await api("/api/preview/access", a.token, "POST", access)).status, 410);
+  assert.equal((await fetch(base + `/api/preview/open?space=company&projectId=${projectId}&turnId=${remoteTurn}`, { headers: { Authorization: `Bearer ${a.token}` } })).status, 410);
+  recordCheck("remote preview keys require approval; runner/viewer/project/session bindings, revoked devices and expiry reject access without external requests");
   // Actual private storage and HTTP contracts; synthetic sheet values and model answer only.
   const sheetState = await api("/api/workspace?space=company", a.token);
   const documentId = randomUUID(), documentQuestionId = randomUUID(), snapshotId = randomUUID(), sheetProject = "synthetic-sheet-only";

@@ -30,13 +30,13 @@ function turnStatus(turn: ProjectTurn) {
   if (turn.mode === "preview") return turn.result?.preview?.state === "ready" ? "화면 준비 완료" : turn.result ? "화면 준비 필요" : "화면 준비 중";
   return turn.result ? outcomes[turn.result.outcome] : phases[turn.phase];
 }
-function WorkTurn({ turn, saving, onAction }: { turn: ProjectTurn; saving: boolean; onAction: (turn: ProjectTurn, action: "cancel" | "retry") => void }) {
+function WorkTurn({ turn, project, saving, onAction }: { turn: ProjectTurn; project: Project; saving: boolean; onAction: (turn: ProjectTurn, action: "cancel" | "retry") => void }) {
   return <article className={styles.agentTurn} aria-label="작업 요청">
     <div className={styles.detailHeading}><strong>{turnStatus(turn)}</strong><span>{dateLabel(turn.createdAt)}</span></div>
     <BriefText text={turn.request} label="요청 전문" limit={100} />
     <div className={styles.agentReply}>
       {turn.result ? <><BriefText text={turn.result.reply} label="답변 전문" />
-        {turn.result.preview && <details className={styles.compactDisclosure}><summary>이 작업의 화면</summary><PreviewResult preview={turn.result.preview} /></details>}
+        {turn.result.preview && <details className={styles.compactDisclosure}><summary>이 작업의 화면</summary><PreviewResult preview={turn.result.preview} project={project} turnId={turn.id} /></details>}
         {turn.result.prUrl && <a href={turn.result.prUrl} target="_blank" rel="noopener noreferrer">변경 PR 열기 ↗</a>}
         {turn.result.deployment.url && <a href={turn.result.deployment.url} target="_blank" rel="noopener noreferrer">반영된 화면 열기 ↗</a>}
       </> : !turn.error && <p>{turn.status === "queued" ? "CLI가 연결되면 자동으로 시작합니다." : turn.status === "cancelled" ? "이미 반영된 변경은 유지됩니다." : "작업 중입니다. 결과는 자동으로 갱신됩니다."}</p>}
@@ -98,14 +98,14 @@ export function ProjectAgent({ project }: { project: Project }) {
       <p className={styles.detailFootnote}>{!service ? "먼저 이 프로젝트에 GitHub를 연결해주세요." : mode === "ask" ? "선택한 저장소를 읽고 답변합니다." : publish === "merge" ? "코드 수정 → 검증 통과 후 병합 · 기존 자동 배포 확인" : "코드 수정·검증 → PR 작성 · 병합은 직접 결정"}</p>
       {error && <p role="alert" className={styles.formError}>{error}</p>}
     </form>
-    {latest && <div className={styles.agentLatest} aria-label="최근 요청"><WorkTurn key={latest.id} turn={latest} saving={saving} onAction={act} /></div>}
+    {latest && <div className={styles.agentLatest} aria-label="최근 요청"><WorkTurn key={latest.id} turn={latest} project={project} saving={saving} onAction={act} /></div>}
     {needsAttention.length > 0 && <details className={styles.compactDisclosure}>
       <summary>진행·확인 필요 {needsAttention.length}건</summary>
-      <div className={styles.agentHistory}>{needsAttention.map(turn => <WorkTurn key={turn.id} turn={turn} saving={saving} onAction={act} />)}</div>
+      <div className={styles.agentHistory}>{needsAttention.map(turn => <WorkTurn key={turn.id} turn={turn} project={project} saving={saving} onAction={act} />)}</div>
     </details>}
     {previous.length > 0 && <details className={styles.compactDisclosure}>
       <summary>이전 대화 {previous.length}건</summary>
-      <div className={styles.agentHistory}>{previous.slice(0, historyLimit).map(turn => <WorkTurn key={turn.id} turn={turn} saving={saving} onAction={act} />)}
+      <div className={styles.agentHistory}>{previous.slice(0, historyLimit).map(turn => <WorkTurn key={turn.id} turn={turn} project={project} saving={saving} onAction={act} />)}
         {previous.length > historyLimit && <button className={styles.textButton} onClick={() => setHistoryLimit(limit => limit + 10)}>이전 대화 더 보기</button>}
       </div>
     </details>}

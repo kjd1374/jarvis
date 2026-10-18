@@ -9,6 +9,11 @@ import { join, dirname } from "node:path";
 const IMAGE = "node:24.19.0-bookworm-slim";
 const TTL = 2 * 60 * 60_000;
 const bridges = new Map();
+export function attachPreviewCleanup(url, cleanup) {
+  const bridge = [...bridges.values()].find(item => item.url === url);
+  if (!bridge) return false;
+  bridge.cleanups.add(cleanup); return true;
+}
 export function directProbe(url, { signal } = {}) {
   return new Promise((resolveResult, reject) => {
     const request = http.get(url, { signal }, response => {
@@ -35,9 +40,10 @@ export async function createPreviewBridge(name, expiresAt) {
   });
   await new Promise((resolveReady, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolveReady); });
   server.unref();
-  const close = () => { clearTimeout(timer); server.close(); for (const socket of sockets) socket.destroy(); bridges.delete(name); };
+  const cleanups = new Set();
+  const close = () => { clearTimeout(timer); server.close(); for (const socket of sockets) socket.destroy(); bridges.delete(name); for (const cleanup of cleanups) cleanup(); cleanups.clear(); };
   const timer = setTimeout(close, Math.max(1, Date.parse(expiresAt) - Date.now())); timer.unref();
-  const bridge = { url: `http://127.0.0.1:${server.address().port}/`, close };
+  const bridge = { url: `http://127.0.0.1:${server.address().port}/`, close, cleanups };
   bridges.set(name, bridge); return bridge;
 }
 const bridgeSource = `import net from 'node:net';
@@ -144,7 +150,7 @@ export async function findDeploymentPreview(repository, sha, get, publicUrl) {
   return null;
 }
 
-export async function startMacPreview({ cwd, files, sha, stateDir, identity, group = identity, run, signal, transport = directProbe, bridge = createPreviewBridge, delay = ms => new Promise(r => setTimeout(r, ms)) }) {
+export async function startMacPreview({ cwd, files, sha, stateDir, identity, group = identity, run, signal, transport = directProbe, bridge = createPreviewBridge, publish, delay = ms => new Promise(r => setTimeout(r, ms)) }) {
   if (!shaPattern.test(sha)) throw new Error("invalid_preview_sha");
   const docker = async (args, timeout = 30_000, cleanup = false) => {
     const result = await run("docker", args, { signal: cleanup ? undefined : signal, timeout, maxBytes: 2_000_000 });
@@ -170,7 +176,12 @@ export async function startMacPreview({ cwd, files, sha, stateDir, identity, gro
       message: "실행한 맥미니에서 열 수 있습니다. 별도 임시 데이터로 실행하며 실제 AI·외부 서비스는 연결하지 않습니다." };
   };
   if (existing) {
-    try { const ready = await probe(existing); if (ready) return ready; } catch {}
+    let ready;
+    try { ready = await probe(existing); } catch {}
+    if (ready) {
+      try { return publish ? await publish(ready) : ready; }
+      catch { return unavailable(sha, "원격 연결을 준비하지 못했습니다. 맥미니 실행기를 업데이트하고 인터넷 연결을 확인한 뒤 다시 준비해주세요.", "failed"); }
+    }
     // Only a container bearing our exact request/commit labels may be replaced.
     if (existing.Config?.Labels?.["jarvis.preview.key"] !== key) return unavailable(sha, "같은 이름의 실행 환경이 있어 미리보기를 시작하지 못했습니다.", "failed");
     try { bridges.get(name)?.close(); await docker(["rm", "-f", name]); } catch { return unavailable(sha, "이전 미리보기를 종료하지 못했습니다.", "failed"); }
@@ -220,20 +231,21 @@ export async function startMacPreview({ cwd, files, sha, stateDir, identity, gro
       "--env", `JARVIS_PREVIEW_ID=${token}`, "--env", `JARVIS_PREVIEW_TTL=${TTL}`, image]);
     for (let attempt = 0; attempt < 45; attempt++) {
       if (signal?.aborted) throw new Error("preview_cancelled");
-      try {
-        const ready = await probe(JSON.parse(await docker(["inspect", name]))[0]);
-        if (ready) {
-          for (const previous of old) { bridges.get(previous)?.close(); await docker(["rm", "-f", previous], 30_000, true).catch(() => {}); }
-          return ready;
-        }
-      } catch {}
+      let ready;
+      try { ready = await probe(JSON.parse(await docker(["inspect", name]))[0]); } catch {}
+      if (ready) {
+        // Retain the previous screen until the new authenticated HTTPS path works.
+        const published = publish ? await publish(ready) : ready;
+        for (const previous of old) { bridges.get(previous)?.close(); await docker(["rm", "-f", previous], 30_000, true).catch(() => {}); }
+        return published;
+      }
       await delay(1000);
     }
     throw new Error("preview_not_ready");
   } catch {
     bridges.get(name)?.close();
     await docker(["rm", "-f", name], 30_000, true).catch(() => {});
-    return unavailable(sha, "미리보기 실행 또는 응답 확인에 실패했습니다. 코드·PR 결과는 보존됩니다. 맥미니 실행 환경을 확인한 뒤 다시 준비해주세요.", "failed");
+    return unavailable(sha, publish ? "원격 미리보기 연결에 실패했습니다. 맥미니 실행기 업데이트·Docker·인터넷 연결을 확인한 뒤 다시 준비해주세요. 코드·PR 결과는 보존됩니다." : "미리보기 실행 또는 응답 확인에 실패했습니다. 코드·PR 결과는 보존됩니다. 맥미니 실행 환경을 확인한 뒤 다시 준비해주세요.", "failed");
   } finally {
     await rm(directory, { recursive: true, force: true });
     // The running container retains its image layers. Avoid accumulating per-request build tags.

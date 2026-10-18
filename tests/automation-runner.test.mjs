@@ -73,6 +73,10 @@ test("Jarvis cookies stay in a private local file and requests never follow redi
       return new Response(JSON.stringify({ authenticated: false }), { headers: { "Set-Cookie": "sb-synthetic-auth-token=synthetic; HttpOnly; Secure" } });
     });
     await client.request("/api/account"); await client.request("/api/account");
+    await client.request("/api/preview/config");
+    await client.request("/api/preview/access", { space: "personal", projectId: "synthetic" });
+    await assert.rejects(client.request("/api/preview/open"), /invalid_app_path/);
+    await assert.rejects(client.request("https://synthetic.trycloudflare.com/"), /invalid_app_path/);
     assert.equal((await stat(path)).mode & 0o777, 0o600);
     assert(JSON.parse(await readFile(path, "utf8")).cookies["sb-synthetic-auth-token"]);
     await assert.rejects(client.request("/api/workspace"), /invalid_app_path/);

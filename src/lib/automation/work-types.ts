@@ -1,6 +1,7 @@
 export type WorkPreview = {
   state: "ready" | "unavailable" | "failed";
-  kind: "deployment" | "mac";
+  kind: "deployment" | "mac" | "remote";
+  remoteId?: string;
   url: string | null;
   sha: string;
   checkedAt: string;
