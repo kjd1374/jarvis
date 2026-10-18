@@ -94,3 +94,33 @@ test("미리보기는 커밋·확인 시각·접속 범위를 검증하고 내�
   expect(() => parseWorkPreview({ ...preview, state: "failed" })).toThrow();
   expect(() => parseWorkResult({ ...result, preview: { ...preview, sha: "c".repeat(40) } }, "example/synthetic", "change")).toThrow();
 });
+
+test("최근 미병합 수정본은 같은 프로젝트·저장소에만 선택하며 새 실행기에 고정한 커밋을 전달한다", async () => {
+  const { latestWorkSource } = await import("../../src/lib/automation/work");
+  const claim = claimProjectWork(queued(), scope, stamp), job = claim.job!;
+  const data = reportProjectWork(claim.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result }, scope.deviceId, stamp);
+  const recent = latestWorkSource(data.projects[0], "auto-service", "example/synthetic")!;
+  expect(recent.id).toBe(uuid);
+  expect(latestWorkSource(data.projects[0], "another-service", "example/synthetic")).toBeUndefined();
+  expect(latestWorkSource(data.projects[0], "auto-service", "example/other")).toBeUndefined();
+  const nextId = "22222222-2222-4222-8222-222222222222";
+  for (const mode of ["test", "preview", "ask", "change"] as const) {
+    const next = enqueueWork(data, "company", "auto-project", "auto-service", "선택한 수정본 확인", mode, "pr", stamp, nextId, recent.id);
+    expect(normalizeWorkspace(next).projects[0].automation!.turns.at(-1)!.sourceTurnId).toBe(uuid);
+    expect(claimProjectWork(next, { ...scope, previews: true }, stamp).job).toBeNull();
+    const claimed = claimProjectWork(next, { ...scope, previews: true, remoteWork: true }, stamp).job!;
+    expect(claimed.source).toEqual({ prUrl: result.prUrl, headSha: result.headSha, baseSha: result.baseSha, branch: result.branch });
+    expect(claimed.context.history[0].outcome).toBe("pr_open");
+    expect(claimed.context.history[0].checks).toEqual(result.checks);
+    const removed = structuredClone(next); removed.projects[0].automation!.turns.shift();
+    expect(claimProjectWork(removed, { ...scope, previews: true, remoteWork: true }, stamp).data.projects[0].automation!.turns[0].error).toBe("work_source_changed");
+  }
+  expect(() => enqueueWork(data, "company", "auto-project", "auto-service", "test", "test", "pr", stamp, nextId, nextId)).toThrow();
+});
+test("테스트 전용 요청은 작업을 생성하거나 PR·병합 결과를 받아들이지 않는다", () => {
+  const data = enqueueWork(automationWorkspace(), "company", "auto-project", "auto-service", "테스트 실행", "test", "pr", stamp, uuid);
+  expect(data.tasks).toHaveLength(0);
+  expect(claimProjectWork(data, scope, stamp).job).toBeNull();
+  expect(claimProjectWork(data, { ...scope, remoteWork: true }, stamp).job?.mode).toBe("test");
+  expect(() => parseWorkResult(result, "example/synthetic", "test")).toThrow();
+});

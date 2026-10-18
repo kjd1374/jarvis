@@ -1,7 +1,7 @@
 "use client";
 import { useRef, useState } from "react";
 import Link from "next/link";
-import { enqueueWork } from "@/lib/automation/work";
+import { enqueueWork, latestWorkSource } from "@/lib/automation/work";
 import { repositoryFor } from "@/lib/automation/state";
 import { dateLabel, id, now, type Project } from "@/lib/workspace/types";
 import type { WorkPreview } from "@/lib/automation/work-types";
@@ -30,26 +30,37 @@ export function ProjectScreen({ project }: { project: Project }) {
   const [selected, setSelected] = useState(services[0]?.id ?? "");
   const service = services.find(s => s.id === selected) ?? services[0];
   const [error, setError] = useState("");
+  const [revision, setRevision] = useState("latest");
+  const recent = service && latestWorkSource(project, service.id, repositoryFor(service)!);
+  const source = revision === "latest" ? recent : undefined;
   const pending = useRef(false), requestId = useRef(id());
   const turns = (project.automation?.turns ?? []).filter(t => t.serviceId === service?.id && t.repository === (service && repositoryFor(service)));
-  const latest = [...turns].reverse().find(t => t.result?.preview);
+  const latest = [...turns].reverse().find(t => t.result?.preview && (source ? t.id === source.id || t.sourceTurnId === source.id : !t.sourceTurnId && t.result.outcome !== "pr_open"));
   const waiting = turns.some(t => t.mode === "preview" && ["queued", "running"].includes(t.status));
-  async function prepare() {
-    if (!service || pending.current || saving || waiting) return;
+  const testing = turns.some(t => t.mode === "test" && ["queued", "running"].includes(t.status));
+  async function prepare(mode: "preview" | "test") {
+    if (!service || pending.current || saving || (mode === "preview" ? waiting : testing)) return;
     pending.current = true; setError("");
     try {
-      await mutate(d => enqueueWork(d, project.space, project.id, service.id, "현재 저장소의 웹 화면을 준비해주세요.", "preview", "pr", now(), requestId.current));
+      await mutate(d => enqueueWork(d, project.space, project.id, service.id, mode === "test" ? "선택한 코드의 자동 테스트를 실행해주세요." : "선택한 코드의 웹 화면을 준비해주세요.", mode, "pr", now(), requestId.current, source?.id));
       requestId.current = id();
     } catch (e) { setError(e instanceof Error ? e.message : "화면 준비 요청을 저장하지 못했습니다."); }
     finally { pending.current = false; }
   }
   return <section className={`${styles.detailSection} ${styles.projectScreen}`} aria-label="수정된 화면 확인">
     <div className={styles.detailHeading}><h2>수정된 화면 확인</h2>
-      <button className={styles.secondaryButton} onClick={prepare} disabled={saving || !service || waiting}>{waiting ? "화면 준비 대기·진행 중" : "화면 준비"}</button>
+      <div className={styles.agentTurnActions}>
+        <button className={styles.secondaryButton} onClick={() => prepare("test")} disabled={saving || !service || testing}>{testing ? "테스트 대기·진행 중" : "테스트 실행"}</button>
+        <button className={styles.secondaryButton} onClick={() => prepare("preview")} disabled={saving || !service || waiting}>{waiting ? "화면 준비 대기·진행 중" : "화면 준비"}</button>
+      </div>
     </div>
     {services.length > 1 && <label>화면을 볼 저장소<select aria-label="화면을 볼 저장소" value={service?.id ?? ""} onChange={e => setSelected(e.target.value)}>{services.map(s => <option key={s.id} value={s.id}>{repositoryFor(s)}</option>)}</select></label>}
+    {recent && <label>확인할 코드<select aria-label="확인할 코드" value={revision} onChange={e => setRevision(e.target.value)}><option value="latest">최근 수정본 · PR 반영 대기</option><option value="main">기본 브랜치 · 반영된 코드</option></select></label>}
+    {source && <p>최근 수정본 {source.result!.headSha!.slice(0, 8)}을 확인합니다. 기록상 반영 대기이며 실행할 때 GitHub 상태를 다시 확인합니다.</p>}
     {latest?.result?.preview ? <PreviewResult preview={latest.result.preview} project={project} turnId={latest.id} /> : <p>현재 코드의 배포 주소를 확인합니다. 배포가 없으면 맥미니에서 미리보기를 실행해 이 PC에서 엽니다. AI 사용량은 소모하지 않습니다.</p>}
     {waiting && <p role="status">요청을 저장했습니다. 미리보기를 지원하는 맥미니 실행기가 처리하면 화면 열기 버튼이 표시됩니다.</p>}
+    {testing && <p role="status">자동 테스트를 요청했습니다. 결과는 아래 프로젝트 작업에 표시됩니다. 테스트 실행과 수정본 선택은 실행기 2.4.0 이상에서 지원합니다.</p>}
+    <p>자동 테스트는 실행 서버에서 처리합니다. 화면 표시, 자동 검증, 실제 AI·외부 서비스 연결은 각각 확인해야 합니다.</p>
     <details className={styles.compactDisclosure}><summary>맥미니 미리보기 이용 안내</summary>
       <p>승인된 Jarvis 기기에서 미리보기를 열 수 있으며 2시간 후 종료됩니다. 맥미니·실행기·Docker가 켜져 있어야 합니다. 노트북·데스크탑에는 실행기를 설치하지 않아도 됩니다.</p>
       <p>임시 화면은 Cloudflare의 HTTPS 연결을 거칩니다. 주소만 복사하면 열리지 않으므로 각 PC의 Jarvis에서 화면 열기를 눌러주세요.</p>

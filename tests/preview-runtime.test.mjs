@@ -213,3 +213,13 @@ test("Mac update does not claim success from an exit code without a registered j
     assert.equal(await readFile(plist, "utf8"), "old"); assert(loaded());
   });
 });
+
+test("project tests choose actual repository checks and refuse missing/private dependency setup", async () => {
+  const { projectTestPlan } = await import("../public/jarvis-preview.mjs");
+  assert.deepEqual(projectTestPlan(["app.test.mjs"], null, null).commands[0].args, ["node", "--test", "./app.test.mjs"]);
+  assert(projectTestPlan([], { scripts: { start: "node app.js" } }, null).reason);
+  assert(projectTestPlan([], { scripts: { test: "node --test" }, dependencies: { library: "1" } }, null).reason);
+  assert(projectTestPlan([], { scripts: { test: "node --test" } }, { packages: { x: { resolved: "file:../host", link: true } } }).reason);
+  const plan = projectTestPlan([], { scripts: { test: "node --test", lint: "eslint", pretest: "must-not-run" } }, null);
+  assert.equal(plan.commands.length, 2); assert(plan.commands.every(c => c.args.includes("--ignore-scripts")));
+});

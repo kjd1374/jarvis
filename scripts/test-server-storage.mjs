@@ -967,6 +967,21 @@ try {
   assert.equal((await api("/api/preview/access", a.token, "POST", access)).status, 410);
   assert.equal((await fetch(base + `/api/preview/open?space=company&projectId=${projectId}&turnId=${remoteTurn}`, { headers: { Authorization: `Bearer ${a.token}` } })).status, 410);
   recordCheck("remote preview keys require approval; runner/viewer/project/session bindings, revoked devices and expiry reject access without external requests");
+  const testSnapshot = await api("/api/workspace?space=company", a.token), remoteTestId = randomUUID();
+  testSnapshot.body.data.projects.find(p => p.id === projectId).automation.turns.push({ id: remoteTestId, serviceId: workServiceId, repository: "example/synthetic", request: "합성 자동 검증", mode: "test", sourceTurnId: workId, publish: "pr", status: "queued", phase: "queued", attempt: 0, createdAt: autoStamp, updatedAt: autoStamp });
+  assert.equal((await api("/api/workspace", a.token, "PUT", { space: "company", data: testSnapshot.body.data, revision: testSnapshot.body.revision })).status, 200);
+  assert.notEqual((await api("/api/automation/claim", a.token, "POST", { ...workClaim, previewVersion: 1 })).body.job?.mode, "test");
+  const remoteTestClaim = await api("/api/automation/claim", a.token, "POST", { ...workClaim, remoteWorkVersion: 1 });
+  assert.equal(remoteTestClaim.body.job.mode, "test");
+  assert.deepEqual(remoteTestClaim.body.job.source, { prUrl: workResult.prUrl, headSha: workResult.headSha, baseSha: workResult.baseSha, branch: workResult.branch });
+  const remoteTestIdentity = { space: "company", projectId, jobId: remoteTestId, leaseToken: remoteTestClaim.body.job.leaseToken };
+  const remoteTestResult = { ...previewResult, preview: undefined, baseSha: workResult.headSha, checks: [{ name: "npm run test", status: "failed", detail: "합성 실행 실패" }], outcome: "blocked" };
+  assert.equal((await api("/api/automation/work", a.secondToken, "POST", { ...remoteTestIdentity, phase: "result", result: remoteTestResult })).status, 409);
+  assert.equal((await api("/api/automation/work", a.token, "POST", { ...remoteTestIdentity, phase: "result", result: remoteTestResult })).status, 200);
+  const testSaved = await api("/api/workspace?space=company", a.secondToken);
+  assert.equal(testSaved.body.data.projects.find(p => p.id === projectId).automation.turns.at(-1).result.checks[0].status, "failed");
+  assert(!testSaved.body.data.tasks.some(t => t.id === `work-${remoteTestId}`));
+  recordCheck("remote project tests require capability; selected source and observed failure survive reload with device fencing and no publishing task");
   // Actual private storage and HTTP contracts; synthetic sheet values and model answer only.
   const sheetState = await api("/api/workspace?space=company", a.token);
   const documentId = randomUUID(), documentQuestionId = randomUUID(), snapshotId = randomUUID(), sheetProject = "synthetic-sheet-only";
