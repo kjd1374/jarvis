@@ -28,7 +28,7 @@ export async function POST(request: Request) {
         if (document.job) return { data, result: { job: document.job } };
       }
       if (supportsWork) {
-        const work = claimProjectWork(data, { space, projectIds: projects, deviceId, previews: body.previewVersion === 1, remoteWork: body.remoteWorkVersion === 1 }, stamp);
+        const work = claimProjectWork(data, { space, projectIds: projects, deviceId, previews: body.previewVersion === 1, remoteWork: body.remoteWorkVersion === 1, previewCli: body.previewCliVersion === 1 }, stamp);
         data = work.data;
         if (work.job) return { data, result: { job: work.job } };
       }

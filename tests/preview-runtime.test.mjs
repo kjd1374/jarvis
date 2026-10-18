@@ -46,7 +46,7 @@ test("installer and runner start through directory/file symlinks and remain iner
 test("published runtime manifest matches all shipped executables", async () => {
   const manifest = JSON.parse(await readFile(new URL("../public/jarvis-runtime.json", import.meta.url), "utf8"));
   assert.equal(manifest.version, VERSION);
-  for (const name of ["jarvis-runner.mjs", "jarvis-preview.mjs", "jarvis-remote-preview.mjs", "jarvis-preview-auth.mjs"]) {
+  for (const name of ["jarvis-runner.mjs", "jarvis-preview.mjs", "jarvis-remote-preview.mjs", "jarvis-preview-auth.mjs", "jarvis-preview-cli.mjs"]) {
     assert.equal(manifest.files[name], createHash("sha256").update(await readFile(new URL(`../public/${name}`, import.meta.url))).digest("hex"));
   }
 });
@@ -105,6 +105,12 @@ test("preview containers receive only sanitized files and bounded private runtim
       bridge: async () => ({ url: "http://127.0.0.1:45678/" }), transport: async () => ({ ok: true, text: async () => info.Config.Labels["jarvis.preview.id"] }), delay: async () => {} };
     const result = await startMacPreview(options); assert.equal(result.state, "ready");
     assert.equal((await startMacPreview(options)).state, "ready"); assert.equal(build, 1); assert.equal(starts, 1);
+    delete info.Config.Labels["jarvis.preview.runtime"];
+    assert.equal((await startMacPreview(options)).state, "ready");
+    assert.equal(build, 2, "an older runtime must rebuild even for the same request and commit");
+    info.Config.Labels["jarvis.preview.runtime"] = "0".repeat(24);
+    assert.equal((await startMacPreview(options)).state, "ready");
+    assert.equal(build, 3, "a different runtime must not reuse a stale execution recipe");
     assert(!JSON.stringify(calls).includes("PRIVATE_SECRET"));
     const failed = await startMacPreview({ ...options, transport: async () => ({ ok: true, text: async () => "another-instance" }) });
     assert.equal(failed.state, "failed"); assert.equal(failed.url, null);
@@ -128,7 +134,7 @@ test("Mac runtime download verifies every hash before writing any executable", a
   const dir = await mkdtemp(join(tmpdir(), "jarvis-install-test-"));
   try {
     const bytes = "// synthetic source", hash = createHash("sha256").update(bytes).digest("hex");
-    const manifest = { version: "2.3.0", files: Object.fromEntries(["jarvis-runner.mjs", "jarvis-preview.mjs", "jarvis-remote-preview.mjs", "jarvis-preview-auth.mjs"].map(name => [name, hash])) };
+    const manifest = { version: "2.3.0", files: Object.fromEntries(["jarvis-runner.mjs", "jarvis-preview.mjs", "jarvis-remote-preview.mjs", "jarvis-preview-auth.mjs", "jarvis-preview-cli.mjs"].map(name => [name, hash])) };
     const transport = async (url, opts) => { assert.equal(opts.redirect, "error"); return new Response(url.endsWith(".json") ? JSON.stringify(manifest) : bytes); };
     await downloadRuntime("https://synthetic.example", join(dir, "good"), transport);
     assert.equal(await readFile(join(dir, "good/jarvis-runner.mjs"), "utf8"), bytes);

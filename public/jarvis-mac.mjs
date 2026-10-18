@@ -68,7 +68,7 @@ export async function downloadRuntime(origin, destination, transport = fetch) {
   };
   const manifest = JSON.parse(new TextDecoder().decode(await get("jarvis-runtime.json")));
   if (!/^2\.\d+\.\d+$/.test(manifest.version ?? "")) throw new Error("실행기 버전을 확인하지 못했습니다.");
-  const files = ["jarvis-runner.mjs", "jarvis-preview.mjs", "jarvis-remote-preview.mjs", "jarvis-preview-auth.mjs"];
+  const files = ["jarvis-runner.mjs", "jarvis-preview.mjs", "jarvis-remote-preview.mjs", "jarvis-preview-auth.mjs", "jarvis-preview-cli.mjs"];
   const downloaded = [];
   for (const name of files) {
     const bytes = await get(name), expected = manifest.files?.[name];

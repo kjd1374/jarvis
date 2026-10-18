@@ -3,6 +3,21 @@ import { analyzed, collected, analysisRaw, automationWorkspace } from "../suppor
 import { applyAnalysis } from "../../src/lib/automation/state";
 import { parseAnalysis } from "../../src/lib/automation/facts";
 test.setTimeout(60_000);
+test("구독 CLI 미리보기 선택과 요청을 보존하고 구버전에는 구체적인 대기 이유를 표시한다", async ({ page }) => {
+  const { observeWorkRunner } = await import("../../src/lib/automation/runner-status");
+  const stamp = new Date().toISOString();
+  await seed(page, observeWorkRunner(automationWorkspace(stamp), { space: "company", projectIds: ["auto-project"] }, { runnerVersion: "2.4.3", remoteWorkVersion: 1, previewVersion: 1 }, stamp));
+  await page.goto("/projects/auto-project"); await ready(page);
+  const screen = page.getByRole("region", { name: "수정된 화면 확인", exact: true });
+  await screen.getByLabel("미리보기 AI", { exact: true }).selectOption("codex");
+  await expect(screen).toContainText("구독 사용량");
+  await expect(screen).not.toContainText("AI 사용량은 소모하지 않습니다");
+  await screen.getByRole("button", { name: "화면 준비", exact: true }).click();
+  expect((await state(page))!.projects[0].automation!.turns.at(-1)).toMatchObject({ mode: "preview", previewAI: "codex", status: "queued" });
+  await expect(screen).toContainText("2.5.0");
+  await page.reload(); await ready(page);
+  await expect(screen.getByLabel("미리보기 AI", { exact: true })).toHaveValue("codex");
+});
 test("실패한 원격 준비에 구버전 주소 안내를 붙이지 않고 단계별 진단을 보여준다", async ({ page }) => {
   const { enqueueWork, claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
   const stamp = new Date().toISOString();

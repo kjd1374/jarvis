@@ -51,7 +51,7 @@ export type GitHubMonitoring = {
   webLinks?: import("./work-types").DiscoveredWebLink[];
   runnerSeenAt?: string;
   runnerVersion?: string;
-  runnerConnection?: { seenAt: string; version?: string; remoteWork: boolean; previews: boolean };
+  runnerConnection?: { seenAt: string; version?: string; remoteWork: boolean; previews: boolean; previewCli?: boolean };
   lastSuccessAt: string | null;
   lastAttemptAt: string | null;
   error: string | null;
