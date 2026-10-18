@@ -78,8 +78,8 @@ export function ProjectScreen({ project }: { project: Project }) {
       : "배포 주소가 없으면 맥미니에서 임시 화면을 준비합니다. AI는 연결하지 않습니다."}</p>}
     {waiting && <p role="status">화면 준비: {waiting.status === "queued" ? queuedWorkMessage(waiting, service?.monitoring, clock) : "실행기가 화면을 준비하고 있습니다. 완료되면 화면 열기 버튼이 표시됩니다."}</p>}
     {testing && <p role="status">자동 테스트: {testing.status === "queued" ? queuedWorkMessage(testing, service?.monitoring, clock) : "실행 중입니다. 결과는 아래 프로젝트 작업에 표시됩니다."}</p>}
-    <p>자동 테스트는 실행 서버에서 처리합니다. 화면 표시, 자동 검증, 실제 AI·외부 서비스 연결은 각각 확인해야 합니다.</p>
     <details className={styles.compactDisclosure}><summary>맥미니 미리보기 이용 안내</summary>
+      <p>자동 테스트는 실행 서버에서 처리합니다. 화면 표시, 자동 검증, 실제 AI·외부 서비스 연결은 각각 확인해야 합니다.</p>
       <p>승인된 Jarvis 기기에서 미리보기를 열 수 있으며 2시간 후 종료됩니다. 맥미니·실행기·Docker가 켜져 있어야 합니다. 노트북·데스크탑에는 실행기를 설치하지 않아도 됩니다.</p>
       <p>임시 화면은 Cloudflare의 HTTPS 연결을 거칩니다. 주소만 복사하면 열리지 않으므로 각 PC의 Jarvis에서 화면 열기를 눌러주세요.</p>
       <p>별도의 임시 데이터로 화면을 확인합니다. 구독 CLI를 선택하면 지원 앱의 AI 연결도 검사합니다. 업무 서비스 연결과 운영 배포는 별도로 확인합니다. 정적 웹과 지원하는 Node 앱을 실행하며, 다른 실행 방식이나 연결 설정이 필요하면 이유를 표시합니다.</p>
