@@ -84,6 +84,40 @@ const s=net.connect(443,'203.0.113.1');s.on('connect',()=>process.exit(2));s.on(
   assert.equal(await page.evaluate(async () => (await (await fetch("/api")).json()).n), 1);
   assert.deepEqual(errors, []);
   console.log("PASS: hosted-page link → real Docker preview; SQLite write/reload; cross-site writes/API/frames blocked; no host mounts, credentials or external network.");
+  activeBridge.close(); await runCommand("docker", ["rm", "-f", name]);
+  const standalone = join(dir, "standalone");
+  await mkdir(join(standalone, "public"), { recursive: true }); await mkdir(join(standalone, "data"));
+  await writeFile(join(standalone, "config.example.json"), '{"label":"Backend ready"}');
+  await writeFile(join(standalone, ".env"), "SYNTHETIC_SECRET=must-not-enter-container");
+  await writeFile(join(standalone, "data/records.json"), '{"n":999}');
+  await writeFile(join(standalone, "public/index.html"), `<h1>Loading</h1><button>Save record</button><output></output><script>
+async function load(){const config=await(await fetch('/api/config')).json();document.querySelector('h1').textContent=config.label;document.querySelector('output').textContent=(await(await fetch('/api/records')).json()).n;}
+document.querySelector('button').onclick=async()=>{await fetch('/api/records',{method:'POST'});await load();};load();</script>`);
+  await writeFile(join(standalone, "server.js"), `const http=require('node:http'),fs=require('node:fs'),path=require('node:path');
+const config=path.join(__dirname,'config.json'),data=path.join(__dirname,'data/records.json');
+http.createServer((req,res)=>{
+ if(req.url==='/api/config'){if(!fs.existsSync(config))fs.copyFileSync(path.join(__dirname,'config.example.json'),config);res.setHeader('Content-Type','application/json');res.end(fs.readFileSync(config));return;}
+ if(req.url==='/api/records'){let value=fs.existsSync(data)?JSON.parse(fs.readFileSync(data)):{n:0};if(req.method==='POST'){value.n++;fs.mkdirSync(path.dirname(data),{recursive:true});fs.writeFileSync(data,JSON.stringify(value));}res.setHeader('Content-Type','application/json');res.end(JSON.stringify(value));return;}
+ res.setHeader('Content-Type','text/html');res.end(fs.readFileSync(path.join(__dirname,'public/index.html')));
+}).listen(Number(process.env.PORT),process.env.HOST);`);
+  const original = await readFile(join(standalone, "server.js"), "utf8");
+  const direct = await startMacPreview({ cwd: standalone, files: ["server.js", "public/index.html", "config.example.json", ".env", "data/records.json"], sha: "b".repeat(40), stateDir: dir, identity, run: runCommand,
+    bridge: async (...args) => activeBridge = await createPreviewBridge(...args) });
+  assert.equal(direct.state, "ready", direct.message);
+  await page.goto(direct.url);
+  await page.waitForFunction(() => document.querySelector("h1").textContent === "Backend ready");
+  assert.equal(await page.locator("output").textContent(), "0", "existing private records were excluded");
+  await page.getByRole("button", { name: "Save record" }).click();
+  await page.waitForFunction(() => document.querySelector("output").textContent === "1");
+  await page.reload(); await page.waitForFunction(() => document.querySelector("output").textContent === "1");
+  assert.equal(await readFile(join(standalone, "server.js"), "utf8"), original);
+  await assert.rejects(readFile(join(standalone, "config.json")), /ENOENT/);
+  assert.equal(await readFile(join(standalone, "data/records.json"), "utf8"), '{"n":999}');
+  const directInfo = JSON.parse((await runCommand("docker", ["inspect", name])).out)[0];
+  assert.equal(directInfo.HostConfig.NetworkMode, "none"); assert.equal(directInfo.HostConfig.ReadonlyRootfs, true);
+  assert.equal(directInfo.Config.User, "node"); assert(!directInfo.Mounts.some(m => m.Type === "bind"));
+  assert.deepEqual(errors, []);
+  console.log("PASS: no-manifest Node app renders API-backed content; app-local config and records persist only in bounded temporary storage; original checkout/private records unchanged.");
 } finally {
   await browser?.close(); activeBridge?.close();
   await runCommand("docker", ["rm", "-f", name]).catch(() => {});

@@ -59,6 +59,15 @@ test("preview recipes exclude credentials and unsupported or private dependencie
   assert.equal(previewPlan([], { scripts: { start: "node app.js" } }, { packages: { x: { resolved: "file:../secret", link: true } } }), null);
   assert.equal(previewPlan([], { scripts: { preview: "vite preview", build: "vite build" } }, null).start[1], "preview");
 });
+test("a standalone Node server takes precedence over its public HTML without a package manifest", () => {
+  const plan = previewPlan(["server.js", "public/index.html"], null, null);
+  assert.equal(plan.kind, "node"); assert.equal(plan.entry, "server.js");
+  assert.equal(plan.install, false); assert.equal(plan.build, false);
+  assert.equal(previewPlan(["server.mjs", "public/index.html"], null, null).entry, "server.mjs");
+  assert.equal(previewPlan(["server.cjs", "index.html"], null, null).entry, "server.cjs");
+  assert.equal(previewPlan(["server.js", "public/index.html"], { scripts: { start: "node custom.js" } }, null).entry, undefined);
+  assert.equal(previewPlan(["public/index.html"], null, null).kind, "static");
+});
 test("deployment previews require exact commit and successful latest status", async () => {
   const get = async path => path.includes("/statuses") ? [{ state: "success", environment_url: "https://synthetic.example/" }] : [{ id: 1, sha: "b".repeat(40) }, { id: 2, sha }];
   const result = await findDeploymentPreview("example/synthetic", sha, get, url => url?.startsWith("https://") ? url : null);
