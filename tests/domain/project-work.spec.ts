@@ -8,6 +8,14 @@ const scope = { space: "company" as const, projectIds: ["auto-project"], deviceI
 const uuid = "11111111-1111-4111-8111-111111111111";
 const result = { reply: "실제 변경과 검증을 정리했습니다.", summary: "화면 개선", currentStatus: "PR 검토", nextAction: "추가 회귀 검증", changes: ["src/page.tsx"], checks: [{ name: "CI", status: "passed", detail: "합성 검사" }], followUps: [{ title: "추가 회귀 검증", reason: "화면 범위를 넓혀 확인", kind: "todo" }], outcome: "pr_open", branch: `jarvis/work-${uuid}`, baseSha: "a".repeat(40), headSha: "b".repeat(40), prUrl: "https://github.com/example/synthetic/pull/10", deployment: { state: "not_configured", url: null, sha: null } };
 function queued() { return enqueueWork(automationWorkspace(), "company", "auto-project", "auto-service", "모바일 버튼 수정", "change", "pr", stamp, uuid); }
+test("원격 미리보기는 HTTPS 전용 호스트·실행 ID·2시간 만료를 함께 검증한다", () => {
+  const preview = { state: "ready", kind: "remote", remoteId: uuid, url: "https://synthetic-preview.trycloudflare.com/", sha: "a".repeat(40), checkedAt: stamp, expiresAt: new Date(Date.parse(stamp) + 3600_000).toISOString(), message: "합성 원격 미리보기" };
+  expect(parseWorkPreview(preview)).toEqual(preview);
+  for (const url of ["http://synthetic-preview.trycloudflare.com/", "https://synthetic-preview.trycloudflare.com.evil.test/", "https://synthetic-preview.trycloudflare.com/path", "https://user@synthetic-preview.trycloudflare.com/", "http://127.0.0.1:45678/"])
+    expect(() => parseWorkPreview({ ...preview, url })).toThrow();
+  expect(() => parseWorkPreview({ ...preview, remoteId: undefined })).toThrow();
+  expect(() => parseWorkPreview({ ...preview, expiresAt: new Date(Date.parse(stamp) + 3 * 3600_000).toISOString() })).toThrow();
+});
 test("프로젝트 요청은 원자적으로 저장되며 같은 제출을 중복 생성하지 않는다", () => {
   const data = queued();
   expect(enqueueWork(data, "company", "auto-project", "auto-service", "모바일 버튼 수정", "change", "pr", stamp, uuid)).toBe(data);

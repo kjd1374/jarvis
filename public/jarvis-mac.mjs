@@ -37,7 +37,7 @@ export function validateConfig(config) {
     config.scopes.some(s => !["company", "personal"].includes(s.space) || !Array.isArray(s.projectIds) || !s.projectIds.length || s.projectIds.length > 20 ||
       s.projectIds.some(id => id !== null && (typeof id !== "string" || !id || id.length > 200)))) throw new Error("설정 파일의 Jarvis 주소·영역·프로젝트를 확인해주세요.");
   // Copy only explicit non-secret settings. Device cookies and CLI credentials stay where they are.
-  return { origin: url.origin, provider: "codex", scopes: config.scopes.map(s => ({ space: s.space, projectIds: s.projectIds })), preview: { enabled: true } };
+  return { origin: url.origin, provider: "codex", scopes: config.scopes.map(s => ({ space: s.space, projectIds: s.projectIds })), preview: { enabled: true, remote: true } };
 }
 export function runSetupCommand(bin, args, { env = process.env } = {}) {
   return new Promise(resolveResult => {
@@ -68,7 +68,7 @@ export async function downloadRuntime(origin, destination, transport = fetch) {
   };
   const manifest = JSON.parse(new TextDecoder().decode(await get("jarvis-runtime.json")));
   if (!/^2\.\d+\.\d+$/.test(manifest.version ?? "")) throw new Error("실행기 버전을 확인하지 못했습니다.");
-  const files = ["jarvis-runner.mjs", "jarvis-preview.mjs"];
+  const files = ["jarvis-runner.mjs", "jarvis-preview.mjs", "jarvis-remote-preview.mjs", "jarvis-preview-auth.mjs"];
   const downloaded = [];
   for (const name of files) {
     const bytes = await get(name), expected = manifest.files?.[name];
@@ -78,6 +78,46 @@ export async function downloadRuntime(origin, destination, transport = fetch) {
   await mkdir(destination, { recursive: true, mode: 0o700 });
   for (const [name, bytes] of downloaded) await writeFile(join(destination, name), bytes, { mode: 0o600 });
   return manifest.version;
+}
+export async function installedConfig(plist, run, read = readFile) {
+  const result = await run("/usr/bin/plutil", ["-convert", "json", "-o", "-", plist]);
+  if (result.code !== 0) throw new Error("기존 자동 실행 설정을 찾지 못했습니다. 최초 설치는 install --config 명령을 사용해주세요.");
+  const args = JSON.parse(result.output).ProgramArguments, index = args?.indexOf("--config");
+  if (!(index >= 0) || typeof args[index + 1] !== "string" || !args[index + 1].startsWith("/")) throw new Error("기존 설정 경로를 확인하지 못했습니다. 실행기를 변경하지 않았습니다.");
+  return validateConfig(JSON.parse(await read(args[index + 1], "utf8")));
+}
+export const TUNNEL_RELEASE = {
+  version: "2026.10.1",
+  arm64: "647615df99d49cd179ea5e13ef760b9bbfb33630f6ae62f87e33dfadda60adcc",
+  x64: "3b0dbaf378337e9d7fb6cd235a76d1d6a7dee434c2d8edf9281164fb6a3837ab",
+};
+export async function downloadTunnel(destination, run, { arch = process.arch, transport = fetch } = {}) {
+  const expected = TUNNEL_RELEASE[arch];
+  if (!expected) throw new Error("이 Mac의 CPU에 맞는 원격 연결 프로그램을 확인하지 못했습니다.");
+  const url = `https://github.com/cloudflare/cloudflared/releases/download/${TUNNEL_RELEASE.version}/cloudflared-darwin-${arch === "x64" ? "amd64" : "arm64"}.tgz`;
+  const response = await transport(url, { signal: AbortSignal.timeout(120_000) });
+  if (!response.ok || Number(response.headers.get("content-length") ?? 0) > 40_000_000) throw new Error("원격 연결 프로그램을 받지 못했습니다. 기존 실행기는 유지됩니다.");
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("원격 연결 프로그램 응답을 읽지 못했습니다.");
+  const parts = []; let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read(); if (done) break;
+      size += value.length;
+      if (size > 40_000_000) { await reader.cancel(); throw new Error("원격 연결 프로그램 크기 한도를 초과했습니다."); }
+      parts.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  const bytes = new Uint8Array(size); let offset = 0;
+  for (const part of parts) { bytes.set(part, offset); offset += part.length; }
+  if (bytes.length > 40_000_000 || createHash("sha256").update(bytes).digest("hex") !== expected) throw new Error("원격 연결 프로그램 무결성 확인에 실패했습니다. 기존 실행기는 유지됩니다.");
+  const archive = join(destination, "cloudflared.tgz");
+  await writeFile(archive, bytes, { mode: 0o600 });
+  try {
+    const extracted = await run("/usr/bin/tar", ["-xzf", archive, "-C", destination, "cloudflared"]);
+    if (extracted.code !== 0) throw new Error("원격 연결 프로그램 압축을 풀지 못했습니다. 기존 실행기는 유지됩니다.");
+    await chmod(join(destination, "cloudflared"), 0o700);
+  } finally { await rm(archive, { force: true }); }
 }
 export async function replaceLaunchAgent({ domain, plist, contents, run, delay = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
   const service = `${domain}/${LABEL}`;
@@ -132,7 +172,7 @@ export async function replaceLaunchAgent({ domain, plist, contents, run, delay =
 }
 export async function main(args = process.argv.slice(2)) {
   if (args.includes("--help") || !args.length) {
-    console.log("맥미니 Jarvis 실행기\nnode jarvis-mac.mjs install --config /path/jarvis-runner.json\nnode jarvis-mac.mjs check\nnode jarvis-mac.mjs stop\nmacOS 사용자 로그인 후 자동 시작합니다. 기존 수동 실행기는 Ctrl+C로 종료한 뒤 설치하세요. 인증값은 복사하지 않습니다."); return;
+    console.log("맥미니 Jarvis 실행기\nnode jarvis-mac.mjs install --config /path/jarvis-runner.json\nnode jarvis-mac.mjs update\nnode jarvis-mac.mjs check\nnode jarvis-mac.mjs stop\nupdate는 현재 회사·개인 프로젝트 범위를 그대로 유지합니다. macOS 사용자 로그인 후 자동 시작합니다. 인증값은 복사하지 않습니다."); return;
   }
   if (process.platform !== "darwin") throw new Error("이 설치 명령은 맥미니의 터미널에서 실행해주세요.");
   if (Number(process.versions.node.split(".")[0]) < 24) throw new Error("Node 24 이상이 필요합니다.");
@@ -145,7 +185,7 @@ export async function main(args = process.argv.slice(2)) {
     await rm(plist, { force: true });
     console.log("자동 실행을 중단했습니다. 승인·작업 이력·설정은 보존했습니다. 실행 중인 미리보기는 만료 시 종료됩니다."); return;
   }
-  if (!["install", "check"].includes(args[0])) throw new Error("install, check, stop 중 하나를 사용해주세요.");
+  if (!["install", "update", "check"].includes(args[0])) throw new Error("install, update, check, stop 중 하나를 사용해주세요.");
   const ready = await preflight(run);
   console.log(`GitHub ${ready.github ? "준비됨" : "로그인 필요"} · Codex 구독 ${ready.codex ? "준비됨" : "로그인 필요"} · Docker ${ready.docker ? "준비됨" : ready.dockerProblem === "client_unavailable" ? "명령 경로 확인 필요" : "엔진 접속 확인 필요"}`);
   if (args[0] === "check") return;
@@ -154,11 +194,13 @@ export async function main(args = process.argv.slice(2)) {
     ? "Docker 명령을 실행하지 못했습니다. Docker Desktop을 응용 프로그램에 설치하거나 Docker CLI 설치 경로를 확인해주세요."
     : "Docker 명령은 찾았지만 엔진에 접속하지 못했습니다. Docker Desktop의 Engine running 상태와 docker context show의 접속 대상을 확인해주세요.");
   const index = args.indexOf("--config");
-  if (index < 0 || !args[index + 1]) throw new Error("기존 jarvis-runner.json의 경로를 --config로 지정해주세요.");
-  const config = validateConfig(JSON.parse(await readFile(resolve(args[index + 1]), "utf8")));
+  if (args[0] !== "update" && (index < 0 || !args[index + 1])) throw new Error("기존 jarvis-runner.json의 경로를 --config로 지정해주세요.");
+  const config = args[0] === "update" ? await installedConfig(plist, run) : validateConfig(JSON.parse(await readFile(resolve(args[index + 1]), "utf8")));
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const runtime = join(directory, `runtime-${randomUUID()}`);
   const version = await downloadRuntime(config.origin, runtime);
+  console.log("Cloudflare 원격 연결 프로그램을 검증합니다. 미리보기는 Jarvis에서 승인된 기기로 열 때만 접근할 수 있습니다.");
+  await downloadTunnel(runtime, run);
   const configPath = join(runtime, "jarvis-runner.json");
   await writeFile(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
   await mkdir(dirname(plist), { recursive: true });

@@ -230,12 +230,22 @@ test("화면 준비 요청과 맥미니 전용 링크·만료 상태를 저장�
     deployment: { state: "not_configured", url: null, sha: null }, preview: { state: "ready", kind: "mac", url: "http://127.0.0.1:45678/", sha: "a".repeat(40), checkedAt: stamp, expiresAt: new Date(Date.parse(stamp) + 60_000).toISOString(), message: "실행한 맥미니에서 열 수 있습니다." },
   } }, "runner", stamp);
   await seed(page, complete); await page.goto("/projects/auto-project"); await ready(page);
-  await expect(screen.getByRole("link", { name: "맥미니에서 화면 열기" })).toHaveAttribute("href", "http://127.0.0.1:45678/");
+  await expect(screen.getByRole("link", { name: "맥미니에서만 열기" })).toHaveAttribute("href", "http://127.0.0.1:45678/");
+  await expect(screen).toContainText("이전 실행기가 만든 주소");
   await expect(screen).toContainText("실행한 맥미니");
+  const preview = complete.projects[0].automation!.turns[0].result!.preview!;
+  preview.kind = "remote"; preview.remoteId = "11111111-1111-4111-8111-111111111111";
+  preview.url = "https://synthetic-private-preview.trycloudflare.com/";
+  preview.message = "이 PC에서 열 수 있습니다. 승인된 Jarvis 기기에서만 접근합니다.";
+  await seed(page, complete); await page.goto("/projects/auto-project"); await ready(page);
+  const remoteLink = screen.getByRole("link", { name: "이 PC에서 화면 열기" });
+  await expect(remoteLink).toHaveAttribute("href", `/api/preview/open?space=company&projectId=auto-project&turnId=${job.id}`);
+  await expect(screen).toContainText("원격 미리보기 준비됨");
   await page.setViewportSize({ width: 320, height: 740 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: info.outputPath("project-screen-mobile.png"), fullPage: true });
   await page.clock.fastForward(61_000);
   await expect(screen).toContainText("미리보기 시간 만료");
-  await expect(screen.getByRole("link", { name: "맥미니에서 화면 열기" })).toHaveCount(0);
+  await expect(screen.getByRole("link", { name: "맥미니에서만 열기" })).toHaveCount(0);
+  await expect(remoteLink).toHaveCount(0);
 });

@@ -5,13 +5,13 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { previewFile, previewPlan, findDeploymentPreview, startMacPreview } from "../public/jarvis-preview.mjs";
-import { validateConfig, launchAgent, preflight, downloadRuntime, macCommandPath, runSetupCommand, replaceLaunchAgent } from "../public/jarvis-mac.mjs";
+import { validateConfig, launchAgent, preflight, downloadRuntime, macCommandPath, runSetupCommand, replaceLaunchAgent, installedConfig, downloadTunnel } from "../public/jarvis-mac.mjs";
 import { VERSION } from "../public/jarvis-runner.mjs";
 const sha = "a".repeat(40);
 test("published runtime manifest matches all shipped executables", async () => {
   const manifest = JSON.parse(await readFile(new URL("../public/jarvis-runtime.json", import.meta.url), "utf8"));
   assert.equal(manifest.version, VERSION);
-  for (const name of ["jarvis-runner.mjs", "jarvis-preview.mjs"]) {
+  for (const name of ["jarvis-runner.mjs", "jarvis-preview.mjs", "jarvis-remote-preview.mjs", "jarvis-preview-auth.mjs"]) {
     assert.equal(manifest.files[name], createHash("sha256").update(await readFile(new URL(`../public/${name}`, import.meta.url))).digest("hex"));
   }
 });
@@ -84,7 +84,7 @@ test("Mac runtime download verifies every hash before writing any executable", a
   const dir = await mkdtemp(join(tmpdir(), "jarvis-install-test-"));
   try {
     const bytes = "// synthetic source", hash = createHash("sha256").update(bytes).digest("hex");
-    const manifest = { version: "2.1.0", files: { "jarvis-runner.mjs": hash, "jarvis-preview.mjs": hash } };
+    const manifest = { version: "2.3.0", files: Object.fromEntries(["jarvis-runner.mjs", "jarvis-preview.mjs", "jarvis-remote-preview.mjs", "jarvis-preview-auth.mjs"].map(name => [name, hash])) };
     const transport = async (url, opts) => { assert.equal(opts.redirect, "error"); return new Response(url.endsWith(".json") ? JSON.stringify(manifest) : bytes); };
     await downloadRuntime("https://synthetic.example", join(dir, "good"), transport);
     assert.equal(await readFile(join(dir, "good/jarvis-runner.mjs"), "utf8"), bytes);
@@ -92,6 +92,21 @@ test("Mac runtime download verifies every hash before writing any executable", a
     await assert.rejects(downloadRuntime("https://synthetic.example", join(dir, "bad"), transport), /무결성/);
     await assert.rejects(readFile(join(dir, "bad/jarvis-runner.mjs")));
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+test("Mac update resolves the active config and preserves both spaces without reading device credentials", async () => {
+  const scopes = [{ space: "company", projectIds: ["work", null] }, { space: "personal", projectIds: ["private-a", "private-b"] }];
+  const config = await installedConfig("/synthetic/agent.plist", async (bin, args) => {
+    assert.equal(bin, "/usr/bin/plutil"); assert.equal(args.at(-1), "/synthetic/agent.plist");
+    return { code: 0, output: JSON.stringify({ ProgramArguments: ["node", "/active/runner.mjs", "--config", "/active/config.json"] }) };
+  }, async path => { assert.equal(path, "/active/config.json"); return JSON.stringify({ origin: "https://synthetic.example", provider: "codex", scopes }); });
+  assert.deepEqual(config.scopes, scopes); assert.equal(config.preview.remote, true);
+  await assert.rejects(installedConfig("/missing", async () => ({ code: 1 })), /기존 자동 실행/);
+  await assert.rejects(installedConfig("/bad", async () => ({ code: 0, output: '{"ProgramArguments":[]}' })), /기존 설정 경로/);
+});
+test("tunnel installer refuses unverified archives before extraction", async () => {
+  let extracts = 0;
+  await assert.rejects(downloadTunnel("/unused", async () => { extracts++; }, { arch: "arm64", transport: async () => new Response("tampered") }), /무결성/);
+  assert.equal(extracts, 0);
 });
 test("Mac setup finds a user-installed Docker CLI outside the inherited PATH and persists the working lookup", async () => {
   const home = await mkdtemp(join(tmpdir(), "jarvis-mac path-"));

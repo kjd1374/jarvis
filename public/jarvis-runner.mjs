@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 // Jarvis private outbound runner. Official gh/Codex CLIs own their logins.
-// No public listener or API billing fallback. Optional previews use host loopback only.
+// Host listeners remain loopback-only; authenticated preview tunnels are opt-in via Mac setup.
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
 
-export const VERSION = "2.2.0";
+export const VERSION = "2.3.0";
 export class RunnerError extends Error {
   constructor(code) { super(code); this.code = code; }
 }
@@ -276,11 +276,11 @@ export async function createAppClient(origin, stateFile, transport = fetch) {
   let queue = Promise.resolve();
   const request = (path, body) => {
     const task = queue.then(async () => {
-      if (!/^\/api\/(?:account(?:\/(?:device|logout))?|automation\/(?:claim|report|heartbeat|work|document))$/.test(path)) throw new RunnerError("invalid_app_path");
+      if (!/^\/api\/(?:account(?:\/(?:device|logout))?|automation\/(?:claim|report|heartbeat|work|document)|preview\/(?:config|access))$/.test(path)) throw new RunnerError("invalid_app_path");
       const headers = { Origin: origin, Cookie: [...cookies].map(([key, value]) => `${key}=${value}`).join("; ") };
       if (body !== undefined) headers["Content-Type"] = "application/json";
       const response = await transport(origin + path, { method: body === undefined ? "GET" : "POST", headers,
-        body: body === undefined ? undefined : JSON.stringify(body), redirect: "manual", signal: AbortSignal.timeout(40_000) });
+        body: body === undefined ? undefined : JSON.stringify(body), redirect: "manual", signal: AbortSignal.timeout(path.startsWith("/api/preview/") ? 8000 : 40_000) });
       if (response.status >= 300 && response.status < 400) throw new RunnerError("unexpected_redirect");
       for (const cookie of response.headers.getSetCookie()) {
         const parts = cookie.split(";"); const offset = parts[0].indexOf("=");
@@ -406,7 +406,7 @@ function dependencyFailureDetail(install) {
   const reason = Object.hasOwn(reasons, code) ? `${reasons[code]} (${code})` : `npm 실행 실패 (종료 코드 ${Number.isInteger(install.code) ? install.code : "확인 불가"})`;
   return `의존성 준비 실패: ${reason}. 의존성이 필요한 로컬 검사는 완료로 판단할 수 없습니다.`;
 }
-export async function executeProjectWork(client, job, { stateDir, run = runCommand, model = runCodexWork, get = githubGet, delay = wait, log = console.log, previewEnabled = false, previewTools } = {}) {
+export async function executeProjectWork(client, job, { stateDir, run = runCommand, model = runCodexWork, get = githubGet, delay = wait, log = console.log, previewEnabled = false, previewTools, remotePreview } = {}) {
   if (!stateDir || !/^[a-f0-9-]{36}$/.test(job.id) || !/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/.test(job.repository) || job.repository.includes("..") || !["ask", "change", "preview"].includes(job.mode) || !["pr", "merge"].includes(job.publish)) throw new RunnerError("invalid_work_scope");
   const identity = { space: job.space, projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken };
   const abort = new AbortController();
@@ -479,7 +479,13 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
         const current = (await git(["rev-parse", "HEAD"])).out.trim();
         if (current !== sha) { await git(["fetch", "origin", sha]); await git(["checkout", "--detach", sha]); }
         const files = (await git(["ls-files", "-z"])).out.split("\0").filter(Boolean);
-        return await tools.startMacPreview({ cwd, files, sha, stateDir, identity: `${job.space}:${job.projectId}:${job.id}`, group: `${job.space}:${job.projectId}:${job.repository}`, run, signal: abort.signal });
+        const publish = remotePreview ? async local => {
+          const remote = await import("./jarvis-remote-preview.mjs");
+          return remote.publishRemotePreview({ local, appOrigin: remotePreview.origin, client,
+            scope: { space: job.space, projectId: job.projectId, turnId: job.id }, binary: remotePreview.binary,
+            directory: stateDir, attachCleanup: tools.attachPreviewCleanup, signal: abort.signal });
+        } : undefined;
+        return await tools.startMacPreview({ cwd, files, sha, stateDir, identity: `${job.space}:${job.projectId}:${job.id}`, group: `${job.space}:${job.projectId}:${job.repository}`, run, signal: abort.signal, publish });
       } catch {
         return { state: "failed", kind: "mac", url: null, sha, checkedAt: new Date().toISOString(), expiresAt: null, message: "미리보기 모듈 또는 실행 환경을 확인하지 못했습니다. 맥미니 실행기를 설치한 뒤 다시 준비해주세요." };
       }
@@ -754,7 +760,8 @@ export async function main(argv = process.argv.slice(2)) {
     for (const scope of config.scopes) {
       const claimed = await resilientRequest("/api/automation/claim", { ...scope, provider: config.provider, workVersion: 1, documentVersion: 1, previewVersion: config.preview?.enabled === true ? 1 : 0 });
       if (claimed.job?.kind === "document") await executeDocumentQuestion(client, claimed.job, { stateDir });
-      else if (claimed.job?.kind === "work") await executeProjectWork(client, claimed.job, { stateDir, previewEnabled: config.preview?.enabled === true });
+      else if (claimed.job?.kind === "work") await executeProjectWork(client, claimed.job, { stateDir, previewEnabled: config.preview?.enabled === true,
+        remotePreview: config.preview?.remote === true ? { origin, binary: join(dirname(fileURLToPath(import.meta.url)), "cloudflared") } : undefined });
       else if (claimed.job) await executeJob(client, claimed.job, { stateDir });
     }
     if (argv.includes("--once")) return;

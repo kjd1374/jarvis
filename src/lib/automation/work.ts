@@ -12,18 +12,23 @@ const clean = (v: string) => v.replace(/\b(?:ghp_|gho_|github_pat_|sk-(?:proj-)?
 const phaseValues = ["queued", "preparing", "coding", "testing", "publishing", "reporting"];
 function invalid(): never { throw new Error("프로젝트 실행 기록의 범위·형식을 확인해주세요."); }
 export function parseWorkPreview(raw: unknown): WorkPreview {
-  if (!object(raw) || !["ready", "unavailable", "failed"].includes(String(raw.state)) || !["deployment", "mac"].includes(String(raw.kind)) ||
+  if (!object(raw) || !["ready", "unavailable", "failed"].includes(String(raw.state)) || !["deployment", "mac", "remote"].includes(String(raw.kind)) ||
     typeof raw.sha !== "string" || !sha(raw.sha) || !date(raw.checkedAt) || !text(raw.message, 1000) ||
     !(raw.expiresAt === null || date(raw.expiresAt))) invalid();
   if (raw.state === "ready") {
     if (raw.kind === "deployment" && (!publicWebUrl(raw.url) || raw.expiresAt !== null)) invalid();
-    if (raw.kind === "mac") {
-      if (typeof raw.url !== "string" || !/^http:\/\/127\.0\.0\.1:[0-9]{4,5}\/$/.test(raw.url)) invalid();
-      const port = Number(new URL(raw.url).port);
-      if (port < 1024 || port > 65535 || !date(raw.expiresAt) || Date.parse(raw.expiresAt as string) <= Date.parse(raw.checkedAt as string) || Date.parse(raw.expiresAt as string) - Date.parse(raw.checkedAt as string) > 2 * 60 * 60_000) invalid();
+    if (raw.kind === "mac" || raw.kind === "remote") {
+      if (raw.kind === "mac") {
+        if (typeof raw.url !== "string" || !/^http:\/\/127\.0\.0\.1:[0-9]{4,5}\/$/.test(raw.url)) invalid();
+        const port = Number(new URL(raw.url).port);
+        if (port < 1024 || port > 65535) invalid();
+      } else if (typeof raw.url !== "string" || !/^https:\/\/[a-z0-9]+(?:-[a-z0-9]+)*\.trycloudflare\.com\/$/.test(raw.url) ||
+        typeof raw.remoteId !== "string" || !/^[a-f0-9-]{36}$/.test(raw.remoteId)) invalid();
+      if (!date(raw.expiresAt) || Date.parse(raw.expiresAt as string) <= Date.parse(raw.checkedAt as string) || Date.parse(raw.expiresAt as string) - Date.parse(raw.checkedAt as string) > 2 * 60 * 60_000) invalid();
     }
   } else if (raw.url !== null || raw.expiresAt !== null) invalid();
   return { state: raw.state as WorkPreview["state"], kind: raw.kind as WorkPreview["kind"], url: raw.url as string | null, sha: raw.sha,
+    ...(raw.kind === "remote" && raw.state === "ready" ? { remoteId: raw.remoteId as string } : {}),
     checkedAt: raw.checkedAt as string, expiresAt: raw.expiresAt as string | null, message: clean(raw.message) };
 }
 export function parseWorkResult(raw: unknown, repository: string, mode: ProjectTurn["mode"]): WorkResult {
