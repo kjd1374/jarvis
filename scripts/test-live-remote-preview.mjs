@@ -2,6 +2,7 @@
 // this process. No Jarvis production API, database, user repository or model calls.
 import assert from "node:assert/strict";
 import http from "node:http";
+import { lookup, resolve4, resolve6 } from "node:dns/promises";
 import { spawn } from "node:child_process";
 import { generateKeyPairSync, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -33,12 +34,23 @@ try {
       if (path === "/api/preview/config") return { version: 1, publicKey };
       assert.equal(path, "/api/preview/access"); return { allowed: approved && input.deviceId === viewer };
     } },
-    tunnel: options => startQuickTunnel({ ...options, launch: (command, args, options) => {
+    tunnel: async options => {
+      const tunnel = await startQuickTunnel({ ...options, launch: (command, args, options) => {
       const child = spawn(command, args, options);
       // This subprocess has only synthetic tunnel state, never user credentials.
       child.stderr.on("data", bytes => { diagnostics = (diagnostics + bytes.toString()).slice(-12_000); });
       return child;
-    } }),
+      } });
+      // Diagnose synthetic-host resolution separately from tunnel registration.
+      // Only outcome codes/counts are logged, never credentials or user data.
+      const host = new URL(tunnel.url).hostname;
+      for (const name of [host, "api.trycloudflare.com"]) {
+        const results = await Promise.allSettled([lookup(name, { all: true }), resolve4(name), resolve6(name),
+          fetch(`https://cloudflare-dns.com/dns-query?name=${name}&type=A`, { headers: { accept: "application/dns-json" }, signal: AbortSignal.timeout(5000) }).then(r => r.json()).then(r => ({ status: r.Status, answers: r.Answer?.length ?? 0 }))]);
+        console.log("DNS evidence", name === host ? "synthetic-host" : "provider-api", results.map(r => r.status === "fulfilled" ? (Array.isArray(r.value) ? { answers: r.value.length } : r.value) : { code: r.reason.code ?? r.reason.cause?.code ?? r.reason.name }));
+      }
+      return tunnel;
+    },
   });
   console.log("PASS: actual provider allocation, edge connection and public gateway health");
   const ticket = issuePreviewTicket(key, { iss: appOrigin, aud: result.remoteId, origin: new URL(result.url).origin, ...scope, sha, sub: viewer });
