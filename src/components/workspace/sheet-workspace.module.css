@@ -2,7 +2,7 @@
 .heading h1 { margin:4px 0 8px; font-size:30px; }
 .heading p { color:var(--muted); font-size:14px; }
 .heading nav { display:flex; flex-wrap:wrap; gap:14px; font-size:12px; color:var(--secondary); }
-.workspace { display:grid; grid-template-columns:190px minmax(0,1fr) 285px; min-height:580px; height:80vh; max-height:1000px; background:var(--surface); border:1px solid var(--border); border-radius:18px; overflow:hidden; }
+.workspace { display:grid; grid-template-columns:190px minmax(0,1fr) 285px; min-height:580px; height:80dvh; background:var(--surface); border:1px solid var(--border); border-radius:18px; overflow:hidden; }
 .workspace[data-questions-collapsed=true] { grid-template-columns:190px minmax(0,1fr) 44px; }
 .workspace * { min-width:0; }
 .workspace button, .workspace input, .workspace textarea, .workspace select { font:inherit; font-size:12px; }
