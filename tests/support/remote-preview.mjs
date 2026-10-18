@@ -40,4 +40,3 @@ export async function fixture(run) {
 }
 export const enter = (f, value = f.ticket()) => f.request("/_jarvis/open", { method: "POST", headers: { origin: appOrigin, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ ticket: value }).toString() });
 export const cookieOf = r => r.headers["set-cookie"][0].split(";")[0];
-
