@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { verifyPreviewTicket, previewOrigin } from "../public/jarvis-preview-auth.mjs";
 import { randomUUID } from "node:crypto";
 import { fixture, ticket, publicKey, expected, viewer, enter, cookieOf } from "./support/remote-preview.mjs";
-import { startQuickTunnel } from "../public/jarvis-remote-preview.mjs";
+import { startQuickTunnel, tunnelFailure, waitForRemoteHealth } from "../public/jarvis-remote-preview.mjs";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -22,7 +22,7 @@ test("tunnel startup uses a fresh explicit config and environment without provid
         assert(!Object.keys(options.env).some(k => /TOKEN|SECRET|OPENAI|CODEX|TUNNEL_/.test(k)));
         child = new EventEmitter(); child.stdout = new PassThrough(); child.stderr = new PassThrough();
         child.kill = () => { killed = true; child.emit("exit", 0); };
-        queueMicrotask(() => child.stderr.write("https://ignored.trycloudflare.com.evil.invalid\nhttps://synthetic-tunnel.trycloudflare.com\n"));
+        queueMicrotask(() => child.stderr.write("https://ignored.trycloudflare.com.evil.invalid\nhttps://synthetic-tunnel.trycloudflare.com\nRegistered tunnel connection\n"));
         return child;
       } });
     assert.equal(await readFile(configFile, "utf8"), "{}\n");
@@ -31,6 +31,51 @@ test("tunnel startup uses a fresh explicit config and environment without provid
     const cancelled = new AbortController(); cancelled.abort();
     await assert.rejects(startQuickTunnel({ signal: cancelled.signal }), /preview_cancelled/);
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("an allocated hostname is not ready until the provider registers an edge connection", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "jarvis-tunnel-wait-"));
+  let child, resolved = false;
+  try {
+    const promise = startQuickTunnel({ binary: "/synthetic/cloudflared", localUrl: "http://127.0.0.1:45678/", directory,
+      launch: () => { child = new EventEmitter(); child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.kill = () => child.emit("exit", 0); return child; } });
+    void promise.then(() => { resolved = true; });
+    while (!child) await new Promise(r => setImmediate(r));
+    child.stderr.write("https://synthetic-wait.trycloudflare.com\n");
+    await new Promise(r => setImmediate(r)); assert.equal(resolved, false);
+    child.stderr.write("Registered tunnel connection connIndex=0 protocol=http2\n");
+    const result = await promise; assert.equal(resolved, true); result.close();
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+test("provider failures retain safe stage/code and cancellation settles startup immediately", async () => {
+  const error = tunnelFailure('failed to request quick Tunnel: dial tcp: connection refused secret=must-not-report', false, 1);
+  assert.equal(error.code, "tunnel_network_failed"); assert.equal(error.stage, "provisioning"); assert(!JSON.stringify(error).includes("secret"));
+  assert.equal(tunnelFailure("x509: certificate is not valid", true, 1).code, "tunnel_tls_failed");
+  const directory = await mkdtemp(join(tmpdir(), "jarvis-tunnel-cancel-")), controller = new AbortController();
+  let child;
+  try {
+    const promise = startQuickTunnel({ binary: "/synthetic/cloudflared", localUrl: "http://127.0.0.1:45678/", directory, signal: controller.signal,
+      launch: () => { child = new EventEmitter(); child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.kill = () => {}; return child; } });
+    const rejected = assert.rejects(promise, error => error.code === "preview_cancelled");
+    while (!child) await new Promise(r => setImmediate(r));
+    controller.abort(); await rejected;
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+test("public health tolerates delayed propagation, records HTTP failures and never accepts a different gateway", async () => {
+  let time = 0, requests = 0;
+  const options = { url: "https://synthetic-ready.trycloudflare.com/", remoteId: "synthetic-id", clock: () => time, delay: async ms => { time += ms; }, timeoutMs: 60_000 };
+  await waitForRemoteHealth({ ...options, transport: async () => { assert(time >= 5000); return ++requests <= 20 ? { ok: false, status: 530 } : { ok: true, status: 200, text: async () => "synthetic-id" }; } });
+  assert.equal(requests, 21); // The previous 12-attempt implementation failed here.
+  await assert.rejects(waitForRemoteHealth({ ...options, timeoutMs: 2000, transport: async () => ({ ok: false, status: 403 }) }), error => error.stage === "health" && error.statusCode === 403);
+  await assert.rejects(waitForRemoteHealth({ ...options, transport: async () => ({ ok: true, status: 200, text: async () => "wrong-gateway" }) }), error => error.code === "remote_health_mismatch");
+  const started = time;
+  await waitForRemoteHealth({ ...options, timeoutMs: 90_000, transport: async () => {
+    if (time - started < 65_000) throw Object.assign(new Error("DNS not visible yet"), { cause: { code: "ENOTFOUND" } });
+    return { ok: true, status: 200, text: async () => "synthetic-id" };
+  } });
+  assert.equal(time - started, 65_000);
+  const cancelled = new AbortController(); cancelled.abort();
+  await assert.rejects(waitForRemoteHealth({ ...options, signal: cancelled.signal, delay: () => assert.fail("cancelled startup must not wait"), transport: () => assert.fail("cancelled startup must not connect") }), error => error.code === "preview_cancelled");
 });
 
 test("preview tickets are short-lived, signed and bound to exact origin, project, commit and viewer", () => {

@@ -8,7 +8,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const VERSION = "2.4.1";
+export const VERSION = "2.4.2";
 export class RunnerError extends Error {
   constructor(code) { super(code); this.code = code; }
 }
@@ -487,8 +487,9 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
       journal.prepared = true; await save();
     }
     const prepareScreen = async (sha) => {
+      let tools;
       try {
-        const tools = previewTools ?? await import("./jarvis-preview.mjs");
+        tools = previewTools ?? await import("./jarvis-preview.mjs");
         const deployed = await tools.findDeploymentPreview(job.repository, sha, get, publicWebUrl);
         if (deployed) return deployed;
         if (!previewEnabled) return { state: "unavailable", kind: "mac", url: null, sha, checkedAt: new Date().toISOString(), expiresAt: null, message: "맥미니 미리보기 설정이 필요합니다. 설정에서 맥미니 실행기를 설치해주세요." };
@@ -504,8 +505,10 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
             directory: stateDir, attachCleanup: tools.attachPreviewCleanup, signal: abort.signal });
         } : undefined;
         return await tools.startMacPreview({ cwd, files, sha, stateDir, identity: `${job.space}:${job.projectId}:${job.id}`, group: `${job.space}:${job.projectId}:${job.repository}`, run, signal: abort.signal, publish });
-      } catch {
-        return { state: "failed", kind: "mac", url: null, sha, checkedAt: new Date().toISOString(), expiresAt: null, message: "미리보기 모듈 또는 실행 환경을 확인하지 못했습니다. 맥미니 실행기를 설치한 뒤 다시 준비해주세요." };
+      } catch (error) {
+        if (tools?.previewFailure) return tools.previewFailure(sha, error, "application", !!remotePreview);
+        return { state: "failed", kind: remotePreview ? "remote" : "mac", url: null, sha, checkedAt: new Date().toISOString(), expiresAt: null,
+          diagnostic: { stage: "module", code: "preview_module_unavailable" }, message: "미리보기 실행 모듈을 불러오지 못했습니다. 실행기 설치 파일을 확인해야 합니다." };
       }
     };
     const executeChecks = async () => {
@@ -814,6 +817,6 @@ export async function main(argv = process.argv.slice(2)) {
   } while (true);
 }
 // Canonicalize both paths so aliases such as macOS /tmp execute normally.
-if (process.argv[1] && await realpath(process.argv[1]) === await realpath(fileURLToPath(import.meta.url))) {
+if (process.argv[1] && await realpath(process.argv[1]).catch(() => null) === await realpath(fileURLToPath(import.meta.url))) {
   main().catch(error => { console.error(`실행기를 시작하지 못했습니다: ${error instanceof RunnerError ? error.code : "runner_unavailable"}. 토큰/인증값은 출력하지 않았습니다.`); process.exitCode = 1; });
 }

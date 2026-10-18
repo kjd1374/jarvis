@@ -11,7 +11,7 @@ import { useWorkspace } from "./workspace-provider";
 import { useWorkspaceClock } from "./use-workspace-clock";
 import { Icon } from "./icon";
 import { BriefText } from "./brief-text";
-import { PreviewResult } from "./project-screen";
+import { PreviewResult, previewMessage } from "./project-screen";
 import styles from "./studio.module.css";
 const phases: Record<ProjectTurn["phase"], string> = { queued: "실행 대기", preparing: "저장소 확인 중", coding: "코드 수정 중", testing: "변경 검사 중", publishing: "GitHub 반영·검증 중", reporting: "결과 정리 중" };
 const outcomes = { answered: "답변 완료", no_changes: "검토 완료 · 코드 변경 없음", pr_open: "PR 작성 · 반영 대기", merged: "병합 완료 · 배포 확인 중", deployed: "배포 확인 완료", blocked: "확인 필요" };
@@ -40,7 +40,7 @@ function WorkTurn({ turn, project, saving, onAction, monitoring, clock }: { turn
     <div className={styles.detailHeading}><strong>{turnStatus(turn)}</strong><span>{dateLabel(turn.createdAt)}</span></div>
     <BriefText text={turn.request} label="요청 전문" limit={100} />
     <div className={styles.agentReply}>
-      {turn.result ? <><BriefText text={turn.result.reply} label="답변 전문" />
+      {turn.result ? <><BriefText text={turn.mode === "preview" && turn.result.preview ? previewMessage(turn.result.preview) : turn.result.reply} label="답변 전문" />
         {turn.result.checks.length > 0 && <details className={styles.compactDisclosure} open={turn.mode === "test"}>
           <summary>실행한 검사 · 통과 {turn.result.checks.filter(c => c.status === "passed").length} · 실패 {turn.result.checks.filter(c => c.status === "failed").length} · 미실행 {turn.result.checks.filter(c => c.status === "not_run").length}</summary>
           <ul>{turn.result.checks.map((check, index) => <li key={index}><strong>{check.name} · {check.status === "passed" ? "통과" : check.status === "failed" ? "실패" : "미실행"}</strong><BriefText text={check.detail} label="검사 실행 결과" /></li>)}</ul>

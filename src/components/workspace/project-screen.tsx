@@ -9,6 +9,11 @@ import type { WorkPreview } from "@/lib/automation/work-types";
 import { useWorkspace } from "./workspace-provider";
 import { useWorkspaceClock } from "./use-workspace-clock";
 import styles from "./studio.module.css";
+const previewStages = { docker: "실행 서버 연결", build: "실행 환경 준비", application: "앱 응답", configuration: "Jarvis 연결 설정", provisioning: "임시 주소 발급", connection: "외부 연결", health: "외부 주소 응답", module: "실행 모듈" };
+export function previewMessage(preview: WorkPreview) {
+  return preview.state === "failed" && !preview.diagnostic && /실행기.*(?:업데이트|설치)/.test(preview.message)
+    ? "이전 미리보기 준비 실패 기록입니다. 당시 상세 원인은 저장되지 않았습니다." : preview.message;
+}
 
 export function PreviewResult({ preview, project, turnId }: { preview: WorkPreview; project: Project; turnId: string }) {
   const clock = useWorkspaceClock();
@@ -19,8 +24,11 @@ export function PreviewResult({ preview, project, turnId }: { preview: WorkPrevi
     {preview.state === "ready" && !expired && href && <a className={styles.primaryButton} href={href} target="_blank" rel="noopener noreferrer">
       {preview.kind === "mac" ? "맥미니에서만 열기 ↗" : preview.kind === "remote" ? "이 PC에서 화면 열기 ↗" : "이 버전의 웹 화면 열기 ↗"}
     </a>}
-    <p>{expired ? "화면 준비를 다시 누르면 현재 코드로 새 미리보기를 준비합니다." : preview.message}</p>
-    {preview.kind === "mac" && !expired && <p>이전 실행기가 만든 주소입니다. <Link href="/settings#cli-runner">맥미니 실행기를 업데이트</Link>한 뒤 화면 준비를 다시 누르면 다른 PC에서도 열 수 있습니다.</p>}
+    <p>{expired ? "화면 준비를 다시 누르면 현재 코드로 새 미리보기를 준비합니다." : previewMessage(preview)}</p>
+    {preview.diagnostic && <details className={styles.compactDisclosure}><summary>연결 진단</summary>
+      <p>{previewStages[preview.diagnostic.stage]} · {preview.diagnostic.code}{preview.diagnostic.statusCode ? ` · HTTP ${preview.diagnostic.statusCode}` : ""}{preview.diagnostic.exitCode !== undefined ? ` · 종료 코드 ${preview.diagnostic.exitCode}` : ""}</p>
+    </details>}
+    {preview.kind === "mac" && preview.state === "ready" && preview.url && !expired && <p>이전 실행기가 만든 주소입니다. <Link href="/settings#cli-runner">맥미니 실행기를 업데이트</Link>한 뒤 화면 준비를 다시 누르면 다른 PC에서도 열 수 있습니다.</p>}
     <small>코드 {preview.sha.slice(0, 8)} · 확인 {dateLabel(preview.checkedAt)}{preview.expiresAt ? ` · 종료 ${dateLabel(preview.expiresAt)}` : ""}</small>
   </div>;
 }

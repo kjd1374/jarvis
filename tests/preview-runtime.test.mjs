@@ -6,10 +6,18 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
-import { previewFile, previewPlan, findDeploymentPreview, startMacPreview } from "../public/jarvis-preview.mjs";
+import { previewFile, previewPlan, findDeploymentPreview, startMacPreview, previewFailure } from "../public/jarvis-preview.mjs";
 import { validateConfig, launchAgent, preflight, downloadRuntime, macCommandPath, runSetupCommand, replaceLaunchAgent, installedConfig, downloadTunnel } from "../public/jarvis-mac.mjs";
 import { VERSION } from "../public/jarvis-runner.mjs";
 const sha = "a".repeat(40);
+test("remote failures preserve the actual phase without exposing logs or fabricating legacy addresses", () => {
+  const failed = previewFailure(sha, Object.assign(new Error("private provider output"), { code: "tunnel_network_failed", stage: "provisioning", exitCode: 1 }), "build", true);
+  assert.equal(failed.kind, "remote"); assert.equal(failed.url, null);
+  assert.deepEqual(failed.diagnostic, { code: "tunnel_network_failed", stage: "provisioning", exitCode: 1 });
+  assert(!JSON.stringify(failed).includes("private provider output")); assert(!failed.message.includes("업데이트"));
+  const build = previewFailure(sha, { code: "preview_build_failed", exitCode: 1 }, "build", true);
+  assert.equal(build.diagnostic.stage, "build"); assert(!build.message.includes("Cloudflare"));
+});
 test("installer and runner start through directory/file symlinks and remain inert when imported", async () => {
   const dir = await mkdtemp(join(tmpdir(), "jarvis-entrypoint-"));
   try {
@@ -30,6 +38,8 @@ test("installer and runner start through directory/file symlinks and remain iner
       await writeFile(importer, `await import(${JSON.stringify(pathToFileURL(alias).href)}); console.log('import-only');`);
       const imported = run(importer);
       assert.equal(imported.status, 0, imported.stderr); assert.equal(imported.stdout.trim(), "import-only");
+      const stdin = spawnSync(process.execPath, ["--input-type=module", "-"], { input: `await import(${JSON.stringify(pathToFileURL(alias).href)}); console.log('stdin-import');`, encoding: "utf8", timeout: 10_000 });
+      assert.equal(stdin.status, 0, stdin.stderr); assert.equal(stdin.stdout.trim(), "stdin-import");
     }
   } finally { await rm(dir, { recursive: true, force: true }); }
 });

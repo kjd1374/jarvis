@@ -9,6 +9,14 @@ const scope = { space: "company" as const, projectIds: ["auto-project"], deviceI
 const uuid = "11111111-1111-4111-8111-111111111111";
 const result = { reply: "실제 변경과 검증을 정리했습니다.", summary: "화면 개선", currentStatus: "PR 검토", nextAction: "추가 회귀 검증", changes: ["src/page.tsx"], checks: [{ name: "CI", status: "passed", detail: "합성 검사" }], followUps: [{ title: "추가 회귀 검증", reason: "화면 범위를 넓혀 확인", kind: "todo" }], outcome: "pr_open", branch: `jarvis/work-${uuid}`, baseSha: "a".repeat(40), headSha: "b".repeat(40), prUrl: "https://github.com/example/synthetic/pull/10", deployment: { state: "not_configured", url: null, sha: null } };
 function queued() { return enqueueWork(automationWorkspace(), "company", "auto-project", "auto-service", "모바일 버튼 수정", "change", "pr", stamp, uuid); }
+test("실패한 원격 미리보기는 원인·단계·응답 코드를 보존하고 원문 로그는 받지 않는다", () => {
+  const preview = { state: "failed", kind: "remote", url: null, sha: "a".repeat(40), checkedAt: stamp, expiresAt: null, message: "외부 응답 실패", diagnostic: { stage: "health", code: "remote_health_http", statusCode: 530, rawLog: "must-not-persist" } };
+  const parsed = parseWorkPreview(preview);
+  expect(parsed.diagnostic).toEqual({ stage: "health", code: "remote_health_http", statusCode: 530 });
+  expect(parseWorkResult({ ...result, outcome: "blocked", changes: [], followUps: [], prUrl: null, branch: null, headSha: null, preview }, "example/synthetic", "preview").preview?.diagnostic).toEqual(parsed.diagnostic);
+  expect(() => parseWorkPreview({ ...preview, diagnostic: { stage: "health", code: "private log\nsecret" } })).toThrow();
+  expect(() => parseWorkPreview({ ...preview, diagnostic: { ...preview.diagnostic, statusCode: 999 } })).toThrow();
+});
 test("구버전 접속은 버전을 추정하지 않고 요청을 보존하며 업데이트 관측은 즉시 바뀐다", () => {
   const data = enqueueWork(automationWorkspace(), "company", "auto-project", "auto-service", "자동 테스트", "test", "pr", stamp, uuid);
   data.services[0].monitoring!.runnerVersion = "2.0.0";

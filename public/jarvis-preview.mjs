@@ -199,8 +199,28 @@ setTimeout(()=>process.exit(0),Number(process.env.JARVIS_PREVIEW_TTL)||7200000);
 process.on('SIGTERM',()=>{child?.kill('SIGTERM');server.close(()=>process.exit(0));});
 `;
 
-function unavailable(sha, message, state = "unavailable") {
-  return { state, kind: "mac", url: null, sha, checkedAt: new Date().toISOString(), expiresAt: null, message };
+function unavailable(sha, message, state = "unavailable", kind = "mac", diagnostic) {
+  return { state, kind, url: null, sha, checkedAt: new Date().toISOString(), expiresAt: null, message, ...(diagnostic ? { diagnostic } : {}) };
+}
+export function previewFailure(sha, error, stage, remote = false) {
+  const stages = ["docker", "build", "application", "configuration", "provisioning", "connection", "health", "module"];
+  stage = stages.includes(error?.stage) ? error.stage : stage;
+  const candidate = error?.code ?? error?.message;
+  const code = /^[a-z_]{1,80}$/.test(candidate ?? "") ? candidate : "preview_failed";
+  const diagnostic = { stage, code };
+  if (Number.isInteger(error?.statusCode) && error.statusCode >= 100 && error.statusCode <= 599) diagnostic.statusCode = error.statusCode;
+  if (Number.isInteger(error?.exitCode) && error.exitCode >= 0 && error.exitCode <= 255) diagnostic.exitCode = error.exitCode;
+  const messages = {
+    docker: "실행 서버의 Docker에 연결하지 못했습니다. Docker가 실행 중인지 확인해주세요.",
+    build: "미리보기 실행 환경을 만드는 단계에서 실패했습니다. 자동 테스트 결과와는 별개이며 코드·PR은 보존됩니다.",
+    application: "미리보기 앱의 웹 응답을 확인하지 못했습니다. 원격 연결 전 앱 실행 단계에서 실패했습니다.",
+    configuration: "Jarvis 서버에서 원격 미리보기 연결 설정을 받지 못했습니다. 실행기 재설치가 필요한 것으로 확인된 것은 아닙니다.",
+    provisioning: "Cloudflare에서 임시 접속 주소를 발급받지 못했습니다. 연결 진단에 원인을 기록했습니다. 잠시 후 화면 준비를 다시 시도할 수 있습니다.",
+    connection: "맥미니와 Cloudflare 사이의 연결을 완료하지 못했습니다. 연결 진단에 원인을 기록했습니다.",
+    health: "임시 주소는 발급됐지만 외부에서 화면 연결을 확인하지 못했습니다. 연결 진단에 응답 상태를 기록했습니다.",
+    module: "미리보기 실행 모듈을 불러오지 못했습니다. 실행기 설치 파일을 확인해야 합니다.",
+  };
+  return unavailable(sha, messages[stage], "failed", remote ? "remote" : "mac", diagnostic);
 }
 export async function findDeploymentPreview(repository, sha, get, publicUrl) {
   if (!shaPattern.test(sha)) return null;
@@ -222,11 +242,11 @@ export async function startMacPreview({ cwd, files, sha, stateDir, identity, gro
   if (!shaPattern.test(sha)) throw new Error("invalid_preview_sha");
   const docker = async (args, timeout = 30_000, cleanup = false) => {
     const result = await run("docker", args, { signal: cleanup ? undefined : signal, timeout, maxBytes: 2_000_000 });
-    if (result.code !== 0) throw new Error("preview_command_failed");
+    if (result.code !== 0) throw Object.assign(new Error("preview_command_failed"), { code: args[0] === "build" ? "preview_build_failed" : args[0] === "run" ? "preview_start_failed" : "preview_command_failed", exitCode: result.code });
     return result.out.trim();
   };
   try { await docker(["version", "--format", "{{.Server.Version}}"]); }
-  catch { return unavailable(sha, "맥미니에서 Docker Desktop 또는 호환 엔진을 실행한 뒤 화면 준비를 다시 눌러주세요."); }
+  catch (error) { return { ...previewFailure(sha, error, "docker", !!publish), state: "unavailable" }; }
   const key = createHash("sha256").update(identity).digest("hex").slice(0, 24);
   const groupKey = createHash("sha256").update(group).digest("hex").slice(0, 24);
   const name = `jarvis-preview-${key}`, image = `${name}:app`;
@@ -248,13 +268,14 @@ export async function startMacPreview({ cwd, files, sha, stateDir, identity, gro
     try { ready = await probe(existing); } catch {}
     if (ready) {
       try { return publish ? await publish(ready) : ready; }
-      catch { return unavailable(sha, "원격 연결을 준비하지 못했습니다. 맥미니 실행기를 업데이트하고 인터넷 연결을 확인한 뒤 다시 준비해주세요.", "failed"); }
+      catch (error) { return previewFailure(sha, error, "connection", !!publish); }
     }
     // Only a container bearing our exact request/commit labels may be replaced.
     if (existing.Config?.Labels?.["jarvis.preview.key"] !== key) return unavailable(sha, "같은 이름의 실행 환경이 있어 미리보기를 시작하지 못했습니다.", "failed");
     try { bridges.get(name)?.close(); await docker(["rm", "-f", name]); } catch { return unavailable(sha, "이전 미리보기를 종료하지 못했습니다.", "failed"); }
   }
   const old = [];
+  let stage = "build";
   try {
     const ids = (await docker(["ps", "--quiet", "--filter", "label=jarvis.preview.key"])).split("\n").filter(v => /^[a-f0-9]{12,64}$/.test(v));
     const all = ids.length ? JSON.parse(await docker(["inspect", ...ids])) : [];
@@ -279,6 +300,7 @@ export async function startMacPreview({ cwd, files, sha, stateDir, identity, gro
     ].join("\n"));
     // Only this sanitized context is uploaded to Docker, never the checkout or home directory.
     await docker(["build", "--pull", "--tag", image, directory], 300_000);
+    stage = "application";
     const expiresAt = new Date(Date.now() + TTL).toISOString(), token = randomUUID();
     await docker(["run", "--detach", "--rm", "--name", name, "--label", `jarvis.preview.key=${key}`, "--label", `jarvis.preview.sha=${sha}`,
       "--label", `jarvis.preview.group=${groupKey}`, "--label", `jarvis.preview.expires=${expiresAt}`, "--label", `jarvis.preview.id=${token}`,
@@ -291,6 +313,7 @@ export async function startMacPreview({ cwd, files, sha, stateDir, identity, gro
       try { ready = await probe(JSON.parse(await docker(["inspect", name]))[0]); } catch {}
       if (ready) {
         // Retain the previous screen until the new authenticated HTTPS path works.
+        stage = "connection";
         const published = publish ? await publish(ready) : ready;
         for (const previous of old) { bridges.get(previous)?.close(); await docker(["rm", "-f", previous], 30_000, true).catch(() => {}); }
         return published;
@@ -298,10 +321,10 @@ export async function startMacPreview({ cwd, files, sha, stateDir, identity, gro
       await delay(1000);
     }
     throw new Error("preview_not_ready");
-  } catch {
+  } catch (error) {
     bridges.get(name)?.close();
     await docker(["rm", "-f", name], 30_000, true).catch(() => {});
-    return unavailable(sha, publish ? "원격 미리보기 연결에 실패했습니다. 맥미니 실행기 업데이트·Docker·인터넷 연결을 확인한 뒤 다시 준비해주세요. 코드·PR 결과는 보존됩니다." : "미리보기 실행 또는 응답 확인에 실패했습니다. 코드·PR 결과는 보존됩니다. 맥미니 실행 환경을 확인한 뒤 다시 준비해주세요.", "failed");
+    return previewFailure(sha, error, stage, !!publish);
   } finally {
     await rm(directory, { recursive: true, force: true });
     // The running container retains its image layers. Avoid accumulating per-request build tags.
