@@ -4,10 +4,43 @@ import { enqueueWork, claimProjectWork, reportProjectWork, changeWorkState, pars
 import { normalizeWorkspace } from "../../src/lib/workspace/validation";
 import { parseWebLinks, publicWebUrl } from "../../src/lib/automation/web-links";
 import { projectQuickLinks } from "../../src/lib/workspace/project-connections";
+import { observeWorkRunner, queuedWorkMessage } from "../../src/lib/automation/runner-status";
 const scope = { space: "company" as const, projectIds: ["auto-project"], deviceId: "device-a" };
 const uuid = "11111111-1111-4111-8111-111111111111";
 const result = { reply: "실제 변경과 검증을 정리했습니다.", summary: "화면 개선", currentStatus: "PR 검토", nextAction: "추가 회귀 검증", changes: ["src/page.tsx"], checks: [{ name: "CI", status: "passed", detail: "합성 검사" }], followUps: [{ title: "추가 회귀 검증", reason: "화면 범위를 넓혀 확인", kind: "todo" }], outcome: "pr_open", branch: `jarvis/work-${uuid}`, baseSha: "a".repeat(40), headSha: "b".repeat(40), prUrl: "https://github.com/example/synthetic/pull/10", deployment: { state: "not_configured", url: null, sha: null } };
 function queued() { return enqueueWork(automationWorkspace(), "company", "auto-project", "auto-service", "모바일 버튼 수정", "change", "pr", stamp, uuid); }
+test("구버전 접속은 버전을 추정하지 않고 요청을 보존하며 업데이트 관측은 즉시 바뀐다", () => {
+  const data = enqueueWork(automationWorkspace(), "company", "auto-project", "auto-service", "자동 테스트", "test", "pr", stamp, uuid);
+  data.services[0].monitoring!.runnerVersion = "2.0.0";
+  data.services.push({ ...structuredClone(data.services[0]), id: "personal-service", space: "personal", projectId: null });
+  const old = observeWorkRunner(data, scope, { previewVersion: 1 }, stamp);
+  const monitoring = old.services[0].monitoring!;
+  expect(monitoring.runnerVersion).toBeUndefined(); expect(monitoring.runnerConnection?.version).toBeUndefined();
+  expect(old.services[1]).toBe(data.services[1]);
+  const turn = old.projects[0].automation!.turns[0];
+  expect(queuedWorkMessage(turn, monitoring, Date.parse(stamp))).toContain("업데이트해야");
+  expect(claimProjectWork(old, { ...scope, previews: true }, stamp).job).toBeNull();
+  expect(old.projects[0].automation!.turns[0]).toMatchObject({ id: uuid, status: "queued", attempt: 0 });
+  const nextStamp = new Date(Date.parse(stamp) + 1000).toISOString();
+  const updated = observeWorkRunner(old, scope, { runnerVersion: "2.4.1", remoteWorkVersion: 1, previewVersion: 1 }, nextStamp);
+  expect(normalizeWorkspace(updated).services[0].monitoring!.runnerConnection).toEqual({ version: "2.4.1", remoteWork: true, previews: true, seenAt: nextStamp });
+  const claim = claimProjectWork(updated, { ...scope, remoteWork: true, previews: true }, nextStamp), job = claim.job!;
+  expect(job.id).toBe(uuid);
+  const heartbeat = reportProjectWork(claim.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "heartbeat" }, scope.deviceId, nextStamp);
+  expect(heartbeat.services[0].monitoring!.runnerConnection?.version).toBe("2.4.1");
+  // A correctly installed 2.4.0 client did not send its version; capability still suffices.
+  const olderCompatible = observeWorkRunner(updated, scope, { remoteWorkVersion: 1, previewVersion: 1 }, nextStamp);
+  expect(olderCompatible.services[0].monitoring!.runnerConnection?.version).toBeUndefined();
+  expect(claimProjectWork(olderCompatible, { ...scope, remoteWork: true }, nextStamp).job?.id).toBe(uuid);
+});
+test("대기는 기능 미지원·미리보기 비활성·기능 미확인·접속 끊김을 구분한다", () => {
+  const monitoring = observeWorkRunner(automationWorkspace(), scope, { remoteWorkVersion: 1 }, stamp).services[0].monitoring!;
+  const clock = Date.parse(stamp);
+  expect(queuedWorkMessage({ mode: "preview" }, monitoring, clock)).toContain("활성화되지 않았습니다");
+  expect(queuedWorkMessage({ mode: "test" }, monitoring, clock)).toContain("실행 대기 중");
+  expect(queuedWorkMessage({ mode: "test" }, { ...monitoring, runnerConnection: undefined }, clock)).toContain("지원 기능은 아직 확인되지");
+  expect(queuedWorkMessage({ mode: "test" }, monitoring, clock + 121_000)).toContain("최근 응답이 없습니다");
+});
 test("원격 미리보기는 HTTPS 전용 호스트·실행 ID·2시간 만료를 함께 검증한다", () => {
   const preview = { state: "ready", kind: "remote", remoteId: uuid, url: "https://synthetic-preview.trycloudflare.com/", sha: "a".repeat(40), checkedAt: stamp, expiresAt: new Date(Date.parse(stamp) + 3600_000).toISOString(), message: "합성 원격 미리보기" };
   expect(parseWorkPreview(preview)).toEqual(preview);

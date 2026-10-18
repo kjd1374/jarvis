@@ -4,6 +4,16 @@ import { mergeCloudWorkspace } from "../../src/lib/cloud/merge";
 import { automationWorkspace } from "../support/automation";
 
 const stamp = "2026-10-15T00:00:00Z";
+test("runner connection observations merge atomically without mixing versions and capabilities", () => {
+  const base = automationWorkspace(stamp), local = structuredClone(base), remote = structuredClone(base);
+  local.services[0].name = "사용자 편집";
+  local.services[0].monitoring!.runnerConnection = { seenAt: stamp, version: "2.4.1", remoteWork: true, previews: true };
+  remote.services[0].monitoring!.runnerConnection = { seenAt: "2026-10-15T00:01:00Z", remoteWork: false, previews: false };
+  const result = mergeCloudWorkspace(base, local, remote, "local");
+  expect(result.data.services[0].name).toBe("사용자 편집");
+  expect(result.data.services[0].monitoring!.runnerConnection).toEqual(remote.services[0].monitoring!.runnerConnection);
+  expect(result.conflicts).toEqual([]);
+});
 function fixture() {
   const data = emptyWorkspace();
   data.projects.push({ id: "project", space: "company", name: "합성", description: "기준", createdAt: stamp });

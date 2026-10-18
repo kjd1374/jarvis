@@ -4,10 +4,35 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, symlink, chmod } from "node:fs
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { spawnSync } from "node:child_process";
 import { previewFile, previewPlan, findDeploymentPreview, startMacPreview } from "../public/jarvis-preview.mjs";
 import { validateConfig, launchAgent, preflight, downloadRuntime, macCommandPath, runSetupCommand, replaceLaunchAgent, installedConfig, downloadTunnel } from "../public/jarvis-mac.mjs";
 import { VERSION } from "../public/jarvis-runner.mjs";
 const sha = "a".repeat(40);
+test("installer and runner start through directory/file symlinks and remain inert when imported", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "jarvis-entrypoint-"));
+  try {
+    const publicDir = fileURLToPath(new URL("../public", import.meta.url));
+    await symlink(publicDir, join(dir, "tmp"), "dir");
+    for (const name of ["jarvis-mac.mjs", "jarvis-runner.mjs"]) {
+      const direct = join(publicDir, name), alias = join(dir, name);
+      await symlink(direct, alias);
+      const run = path => spawnSync(process.execPath, [path, "--help"], { encoding: "utf8", timeout: 10_000 });
+      const expected = run(direct);
+      assert.equal(expected.status, 0); assert.match(expected.stdout, /Jarvis/);
+      for (const path of [join(dir, "tmp", name), alias]) {
+        const actual = run(path);
+        assert.equal(actual.status, 0, actual.stderr);
+        assert.equal(actual.stdout, expected.stdout, `silent entrypoint: ${path}`);
+      }
+      const importer = join(dir, `import-${name}`);
+      await writeFile(importer, `await import(${JSON.stringify(pathToFileURL(alias).href)}); console.log('import-only');`);
+      const imported = run(importer);
+      assert.equal(imported.status, 0, imported.stderr); assert.equal(imported.stdout.trim(), "import-only");
+    }
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
 test("published runtime manifest matches all shipped executables", async () => {
   const manifest = JSON.parse(await readFile(new URL("../public/jarvis-runtime.json", import.meta.url), "utf8"));
   assert.equal(manifest.version, VERSION);

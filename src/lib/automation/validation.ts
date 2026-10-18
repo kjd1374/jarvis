@@ -14,6 +14,11 @@ export function validateMonitoring(service: Service, data: WorkspaceData) {
       !Number.isInteger(m.intervalMinutes) || (m.intervalMinutes as number) < 15 || (m.intervalMinutes as number) > 1440 || !Array.isArray(m.previousAnalyses) || m.previousAnalyses.length > 5) invalid();
   if (m.webLinks !== undefined) parseWebLinks(m.webLinks, m.repository as string, new Date().toISOString());
   if (m.runnerSeenAt !== undefined && !date(m.runnerSeenAt) || m.runnerVersion !== undefined && !text(m.runnerVersion, 50)) invalid();
+  if (m.runnerConnection !== undefined) {
+    const c = m.runnerConnection;
+    if (!object(c) || !date(c.seenAt) || typeof c.remoteWork !== "boolean" || typeof c.previews !== "boolean" ||
+      c.version !== undefined && (typeof c.version !== "string" || !/^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(c.version))) invalid();
+  }
   if (m.job !== null) {
     const job = m.job;
     if (!object(job) || !text(job.id, 200) || !repository(job.repository) || !date(job.requestedAt) ||
