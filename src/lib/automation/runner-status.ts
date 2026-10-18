@@ -2,17 +2,35 @@ import type { GitHubMonitoring } from "./types";
 import type { ProjectTurn } from "./work-types";
 import type { Space, WorkspaceData } from "../workspace/types";
 
-export function observeWorkRunner(data: WorkspaceData, scope: { space: Space; projectIds: (string | null)[] }, body: Record<string, unknown>, stamp: string): WorkspaceData {
+export function runnerProjectIds(data: WorkspaceData, space: Space, requested: (string | null)[], mode: "space" | "selected") {
+  if (mode === "space") return [...new Set([null, ...data.projects.filter(p => p.space === space).map(p => p.id)])];
+  if (requested.some(id => id !== null && !data.projects.some(p => p.id === id && p.space === space))) throw new Error("mixed_scope");
+  return requested;
+}
+
+export function observeWorkRunner(data: WorkspaceData, scope: { space: Space; projectIds: (string | null)[]; projectScope?: "space" | "selected" }, body: Record<string, unknown>, stamp: string): WorkspaceData {
   const connection = { seenAt: stamp,
     version: typeof body.runnerVersion === "string" && /^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(body.runnerVersion) ? body.runnerVersion : undefined,
-    remoteWork: body.remoteWorkVersion === 1, previews: body.previewVersion === 1, ...(body.previewCliVersion === 1 ? { previewCli: true } : {}) };
+    remoteWork: body.remoteWorkVersion === 1, previews: body.previewVersion === 1, ...(body.previewCliVersion === 1 ? { previewCli: true } : {}), ...(scope.projectScope ? { projectScope: scope.projectScope } : {}) };
   return { ...data, services: data.services.map(service => {
     const m = service.monitoring, prior = m?.runnerConnection;
     if (service.space !== scope.space || !scope.projectIds.includes(service.projectId) || !m) return service;
     // Capability/version changes must be visible immediately, even inside the heartbeat interval.
-    if (prior && prior.version === connection.version && prior.remoteWork === connection.remoteWork && prior.previews === connection.previews && !!prior.previewCli === !!connection.previewCli && Date.parse(stamp) - Date.parse(prior.seenAt) < 60_000) return service;
+    if (prior && prior.version === connection.version && prior.remoteWork === connection.remoteWork && prior.previews === connection.previews && !!prior.previewCli === !!connection.previewCli && prior.projectScope === connection.projectScope && Date.parse(stamp) - Date.parse(prior.seenAt) < 60_000) return service;
     return { ...service, monitoring: { ...m, runnerSeenAt: stamp, runnerVersion: undefined, runnerConnection: connection } };
   }) };
+}
+
+// Invoke only after validating the reporting job's lease/device. This keeps newly
+// registered projects visible while the runner is occupied by a longer job.
+export function refreshAutomaticRunner(data: WorkspaceData, space: Space, serviceId: string | undefined, stamp: string): WorkspaceData {
+  if (serviceId === undefined) return data;
+  const connection = data.services.find(s => s.space === space && s.id === serviceId && s.monitoring?.runnerConnection && s.monitoring.runnerConnection.projectScope !== "selected")?.monitoring?.runnerConnection;
+  if (!connection) return data;
+  return observeWorkRunner(data, { space, projectIds: runnerProjectIds(data, space, [], "space"), projectScope: "space" }, {
+    runnerVersion: connection.version, remoteWorkVersion: connection.remoteWork ? 1 : 0,
+    previewVersion: connection.previews ? 1 : 0, previewCliVersion: connection.previewCli ? 1 : 0,
+  }, stamp);
 }
 
 export function runnerOnline(monitoring: GitHubMonitoring | undefined, clock: number) {

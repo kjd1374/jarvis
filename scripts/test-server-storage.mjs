@@ -899,7 +899,9 @@ try {
   assert.equal((await api("/api/workspace", a.token, "PUT", { space: "company", data: workSnapshot.body.data, revision: workSnapshot.body.revision })).status, 200);
   const workClaim = { space: "company", projectIds: [projectId], provider: "codex", workVersion: 1 };
   assert.equal((await api("/api/automation/claim", b.token, "POST", workClaim)).status, 403);
-  assert.equal((await api("/api/automation/claim", a.token, "POST", { ...workClaim, space: "personal" })).status, 400);
+  const wrongSpaceWork = await api("/api/automation/claim", a.token, "POST", { ...workClaim, space: "personal" });
+  assert.equal(wrongSpaceWork.status, 200); assert.equal(wrongSpaceWork.body.job, null);
+  assert.equal((await api("/api/automation/claim", a.token, "POST", { ...workClaim, space: "personal", projectScope: "selected" })).status, 400);
   assert.equal((await api("/api/automation/claim", a.token, "POST", { ...workClaim, workVersion: undefined })).body.job, null);
   const workClaims = await Promise.all([api("/api/automation/claim", a.token, "POST", workClaim), api("/api/automation/claim", a.secondToken, "POST", workClaim)]);
   assert(workClaims.every(c => c.status === 200)); assert.equal(workClaims.filter(c => c.body.job?.kind === "work").length, 1);
@@ -1045,6 +1047,64 @@ try {
   assert.equal((await api("/api/automation/document", a.token, "POST", { ...removedIdentity, phase: "result", answer: { reply: "합성 마지막 값", rows: [205], limitation: "현재 구간" } })).status, 409);
   assert.deepEqual((await api("/api/workspace?space=company", a.secondToken)).body.data.documents, remaining);
   recordCheck("whole-tab pages persist across devices; current-page CLI jobs stay compatible and removing a connection fences late heartbeats/results without deleting other documents");
+  // Legacy installed 2.5.0 requests discover new projects server-side. All data
+  // below belongs to this disposable owner; no real runner or model is invoked.
+  const discovery = emptyWorkspace(), discoveredWorkId = randomUUID();
+  const addDiscovered = (data, suffix) => {
+    const id = `discovered-${suffix}`, serviceId = `discovered-service-${suffix}`;
+    data.projects.push({ id, space: "company", name: `합성 자동 연결 ${suffix}`, description: "", createdAt: autoStamp });
+    data.services.push({ ...structuredClone(autoService), id: serviceId, projectId: id, monitoring: { ...structuredClone(autoService.monitoring), automatic: false, job: null } });
+    return { id, serviceId };
+  };
+  for (let n = 0; n < 25; n++) addDiscovered(discovery, n);
+  discovery.projects[24].automation = { turns: [{ id: discoveredWorkId, serviceId: "discovered-service-24", repository: "example/synthetic", request: "합성 자동 연결 질문", mode: "ask", publish: "pr", status: "queued", phase: "queued", attempt: 0, createdAt: autoStamp, updatedAt: autoStamp }] };
+  const discoveryBase = await api("/api/workspace?space=company", a.token), personalBeforeDiscovery = await api("/api/workspace?space=personal", a.token);
+  assert.equal((await api("/api/workspace", a.token, "PUT", { space: "company", data: discovery, revision: discoveryBase.body.revision })).status, 200);
+  const legacyScope = { space: "company", projectIds: ["discovered-0"], provider: "codex", runnerVersion: "2.5.0", workVersion: 1, remoteWorkVersion: 1, previewVersion: 1, previewCliVersion: 1 };
+  assert.equal((await api("/api/automation/claim", a.token, "POST", { ...legacyScope, projectScope: "selected" })).body.job, null);
+  assert.equal((await api("/api/automation/claim", b.token, "POST", legacyScope)).status, 403);
+  assert.equal((await api("/api/automation/claim", a.token, "POST", { ...legacyScope, projectScope: "invalid" })).status, 400);
+  const automaticClaims = await Promise.all([a.token, a.secondToken].map(token => api("/api/automation/claim", token, "POST", { ...legacyScope, projectIds: ["removed-legacy-project"] })));
+  assert(automaticClaims.every(r => r.status === 200)); assert.equal(automaticClaims.filter(r => r.body.job).length, 1);
+  const discoveredJob = automaticClaims.find(r => r.body.job).body.job;
+  assert.equal(discoveredJob.id, discoveredWorkId); assert.equal(discoveredJob.projectId, "discovered-24");
+  const discoveryWinner = automaticClaims[0].body.job ? a.token : a.secondToken, discoveryLoser = discoveryWinner === a.token ? a.secondToken : a.token;
+  const discoveredIdentity = { space: "company", projectId: discoveredJob.projectId, jobId: discoveredJob.id, leaseToken: discoveredJob.leaseToken };
+  const observedDiscovery = await api("/api/workspace?space=company", a.token);
+  assert(observedDiscovery.body.data.services.every(s => s.monitoring.runnerConnection.projectScope === "space" && s.monitoring.runnerConnection.version === "2.5.0"));
+  const busyWorkProject = addDiscovered(observedDiscovery.body.data, "during-work");
+  assert.equal((await api("/api/workspace", a.token, "PUT", { space: "company", data: observedDiscovery.body.data, revision: observedDiscovery.body.revision })).status, 200);
+  assert.equal((await api("/api/automation/work", discoveryLoser, "POST", { ...discoveredIdentity, phase: "heartbeat" })).status, 409);
+  assert.equal((await api("/api/automation/work", discoveryWinner, "POST", { ...discoveredIdentity, phase: "heartbeat", leaseToken: randomUUID() })).status, 409);
+  const afterRejectedPresence = await api("/api/workspace?space=company", a.token);
+  assert.equal(afterRejectedPresence.body.data.services.find(s => s.id === busyWorkProject.serviceId).monitoring.runnerSeenAt, undefined);
+  assert.equal((await api("/api/automation/work", discoveryWinner, "POST", { ...discoveredIdentity, phase: "heartbeat" })).status, 200);
+  const afterWorkPresence = await api("/api/workspace?space=company", a.token);
+  assert.equal(afterWorkPresence.body.data.services.find(s => s.id === busyWorkProject.serviceId).monitoring.runnerConnection.version, "2.5.0");
+  const discoveryDocumentId = randomUUID(), discoveryQuestionId = randomUUID();
+  afterWorkPresence.body.data.documents.push({ ...structuredClone(wholeDocument), id: discoveryDocumentId, projectId: discoveredJob.projectId,
+    sheet: { ...structuredClone(wholeDocument.sheet), questions: [{ id: discoveryQuestionId, snapshotId: lastPage, question: "합성 자동 문답", documentName: wholeDocument.name, readAt: autoStamp, createdAt: autoStamp, updatedAt: autoStamp, status: "queued", attempt: 0 }] } });
+  assert.equal((await api("/api/workspace", a.token, "PUT", { space: "company", data: afterWorkPresence.body.data, revision: afterWorkPresence.body.revision })).status, 200);
+  const automaticDocument = await api("/api/automation/claim", a.token, "POST", { ...legacyScope, documentVersion: 1 });
+  assert.equal(automaticDocument.body.job.kind, "document"); assert.equal(automaticDocument.body.job.projectId, discoveredJob.projectId);
+  const duringDocument = await api("/api/workspace?space=company", a.token), busyDocumentProject = addDiscovered(duringDocument.body.data, "during-document");
+  assert.equal((await api("/api/workspace", a.token, "PUT", { space: "company", data: duringDocument.body.data, revision: duringDocument.body.revision })).status, 200);
+  const automaticDocumentIdentity = { space: "company", projectId: discoveredJob.projectId, documentId: discoveryDocumentId, snapshotId: lastPage, jobId: discoveryQuestionId, leaseToken: automaticDocument.body.job.leaseToken, phase: "heartbeat" };
+  assert.equal((await api("/api/automation/document", a.secondToken, "POST", automaticDocumentIdentity)).status, 409);
+  assert.equal((await api("/api/automation/document", a.token, "POST", automaticDocumentIdentity)).status, 200);
+  const afterDocumentPresence = await api("/api/workspace?space=company", a.token);
+  assert.equal(afterDocumentPresence.body.data.services.find(s => s.id === busyDocumentProject.serviceId).monitoring.runnerConnection.projectScope, "space");
+  afterDocumentPresence.body.data.services[0].monitoring.job = { ...autoService.monitoring.job, id: "discovered-inspection" };
+  assert.equal((await api("/api/workspace", a.token, "PUT", { space: "company", data: afterDocumentPresence.body.data, revision: afterDocumentPresence.body.revision })).status, 200);
+  const automaticInspection = await api("/api/automation/claim", a.token, "POST", { ...legacyScope, projectIds: ["removed-legacy-project"] });
+  assert.equal(automaticInspection.body.job.id, "discovered-inspection");
+  const duringInspection = await api("/api/workspace?space=company", a.token), busyInspectionProject = addDiscovered(duringInspection.body.data, "during-inspection");
+  assert.equal((await api("/api/workspace", a.token, "PUT", { space: "company", data: duringInspection.body.data, revision: duringInspection.body.revision })).status, 200);
+  assert.equal((await api("/api/automation/heartbeat", a.token, "POST", { space: "company", serviceId: automaticInspection.body.job.serviceId, jobId: automaticInspection.body.job.id })).status, 200);
+  const afterInspectionPresence = await api("/api/workspace?space=company", a.secondToken);
+  assert.equal(afterInspectionPresence.body.data.services.find(s => s.id === busyInspectionProject.serviceId).monitoring.runnerConnection.projectScope, "space");
+  assert.equal((await api("/api/workspace?space=personal", a.token)).body.revision, personalBeforeDiscovery.body.revision);
+  recordCheck("installed 2.5.0 discovers new/25+ projects despite removed legacy IDs; work/document/inspection heartbeats refresh new connections; selected scopes, device leases, concurrent claims and other spaces remain isolated");
   console.log(
     JSON.stringify(
       {
