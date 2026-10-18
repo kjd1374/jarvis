@@ -64,10 +64,18 @@ test("provider failures retain safe stage/code and cancellation settles startup 
 test("public health tolerates delayed propagation, records HTTP failures and never accepts a different gateway", async () => {
   let time = 0, requests = 0;
   const options = { url: "https://synthetic-ready.trycloudflare.com/", remoteId: "synthetic-id", clock: () => time, delay: async ms => { time += ms; }, timeoutMs: 60_000 };
-  await waitForRemoteHealth({ ...options, transport: async () => ++requests <= 20 ? { ok: false, status: 530 } : { ok: true, status: 200, text: async () => "synthetic-id" } });
+  await waitForRemoteHealth({ ...options, transport: async () => { assert(time >= 5000); return ++requests <= 20 ? { ok: false, status: 530 } : { ok: true, status: 200, text: async () => "synthetic-id" }; } });
   assert.equal(requests, 21); // The previous 12-attempt implementation failed here.
   await assert.rejects(waitForRemoteHealth({ ...options, timeoutMs: 2000, transport: async () => ({ ok: false, status: 403 }) }), error => error.stage === "health" && error.statusCode === 403);
   await assert.rejects(waitForRemoteHealth({ ...options, transport: async () => ({ ok: true, status: 200, text: async () => "wrong-gateway" }) }), error => error.code === "remote_health_mismatch");
+  const started = time;
+  await waitForRemoteHealth({ ...options, timeoutMs: 90_000, transport: async () => {
+    if (time - started < 65_000) throw Object.assign(new Error("DNS not visible yet"), { cause: { code: "ENOTFOUND" } });
+    return { ok: true, status: 200, text: async () => "synthetic-id" };
+  } });
+  assert.equal(time - started, 65_000);
+  const cancelled = new AbortController(); cancelled.abort();
+  await assert.rejects(waitForRemoteHealth({ ...options, signal: cancelled.signal, delay: () => assert.fail("cancelled startup must not wait"), transport: () => assert.fail("cancelled startup must not connect") }), error => error.code === "preview_cancelled");
 });
 
 test("preview tickets are short-lived, signed and bound to exact origin, project, commit and viewer", () => {

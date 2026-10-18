@@ -46,14 +46,7 @@ try {
       child.stderr.on("data", bytes => { diagnostics = (diagnostics + bytes.toString()).slice(-12_000); });
       return child;
       } });
-      // Diagnose synthetic-host resolution separately from tunnel registration.
-      // Only outcome codes/counts are logged, never credentials or user data.
-      const host = new URL(tunnel.url).hostname;
-      syntheticHost = host;
-      await new Promise(resolve => setTimeout(resolve, 5000));
-      for (const name of [host, "api.trycloudflare.com"]) {
-        await diagnoseDns(name, name === host ? "synthetic-host-after-5s" : "provider-api");
-      }
+      syntheticHost = new URL(tunnel.url).hostname;
       return tunnel;
     },
   });
