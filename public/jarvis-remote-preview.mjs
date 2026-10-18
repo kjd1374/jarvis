@@ -1,5 +1,7 @@
 // Authenticated HTTPS access to one disposable preview. Never forwards runner credentials.
 import http from "node:http";
+import https from "node:https";
+import { Resolver } from "node:dns/promises";
 import { spawn } from "node:child_process";
 import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -185,7 +187,40 @@ export async function startQuickTunnel({ binary, localUrl, directory, signal, la
   finally { signal?.removeEventListener("abort", abort); }
 }
 
-export async function waitForRemoteHealth({ url, remoteId, signal, transport = fetch, clock = Date.now, delay = ms => new Promise(resolve => setTimeout(resolve, ms)), timeoutMs = 60_000, alive = () => true }) {
+export async function remoteHealthFetch(url, options, transport = fetch) {
+  try { return await transport(url, options); }
+  catch (error) {
+    if (!/^(ENOTFOUND|EAI_AGAIN)$/.test(error.cause?.code ?? "")) throw error;
+  }
+  // macOS getaddrinfo can retain a negative answer for a newly provisioned
+  // hostname. Query the same configured resolvers afresh without changing the
+  // machine's DNS settings, and retain the original HTTPS hostname/SNI checks.
+  const target = new URL(url);
+  if (!previewOrigin(target.origin + "/") || target.pathname !== "/_jarvis/health" || target.search || target.hash) throw remoteFailure("invalid_preview_health", "health");
+  const resolver = new Resolver({ timeout: 2000, tries: 1 });
+  const cancel = () => resolver.cancel();
+  options.signal?.addEventListener("abort", cancel, { once: true });
+  try {
+    if (options.signal?.aborted) throw options.signal.reason;
+    const answers = await Promise.allSettled([resolver.resolve4(target.hostname), resolver.resolve6(target.hostname)]);
+    const addresses = answers.flatMap((answer, index) => answer.status === "fulfilled" ? answer.value.map(address => ({ address, family: index ? 6 : 4 })) : []);
+    if (!addresses.length) throw Object.assign(new Error("remote_health_dns"), { cause: { code: "ENOTFOUND" } });
+    return await new Promise((resolve, reject) => {
+      const request = https.get(target, { signal: options.signal, servername: target.hostname,
+        lookup: (_hostname, opts, callback) => opts.all ? callback(null, addresses) : callback(null, addresses[0].address, addresses[0].family) }, response => {
+        const status = response.statusCode ?? 502;
+        if (status < 200 || status >= 300) { response.destroy(); resolve({ ok: false, status }); return; }
+        const parts = []; let size = 0;
+        response.on("data", part => { size += part.length; if (size > 1024) response.destroy(remoteFailure("remote_health_mismatch", "health", { statusCode: status })); else parts.push(part); });
+        response.on("error", reject);
+        response.on("end", () => resolve({ ok: true, status, text: async () => Buffer.concat(parts).toString() }));
+      });
+      request.on("error", reject);
+    });
+  } finally { options.signal?.removeEventListener("abort", cancel); }
+}
+
+export async function waitForRemoteHealth({ url, remoteId, signal, transport = remoteHealthFetch, clock = Date.now, delay = ms => new Promise(resolve => setTimeout(resolve, ms)), timeoutMs = 60_000, alive = () => true }) {
   const until = clock() + timeoutMs;
   let statusCode, code = "remote_health_timeout";
   do {
@@ -221,7 +256,7 @@ export async function waitForRemoteHealth({ url, remoteId, signal, transport = f
   throw remoteFailure(code, "health", Number.isInteger(statusCode) ? { statusCode } : {});
 }
 
-export async function publishRemotePreview({ local, appOrigin, client, scope, binary, directory, attachCleanup, signal, transport = fetch, tunnel = startQuickTunnel }) {
+export async function publishRemotePreview({ local, appOrigin, client, scope, binary, directory, attachCleanup, signal, transport = remoteHealthFetch, tunnel = startQuickTunnel }) {
   const remoteId = randomUUID();
   let config;
   try { config = await client.request("/api/preview/config"); }
