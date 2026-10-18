@@ -257,7 +257,7 @@ export async function publishRemotePreview({ local, appOrigin, client, scope, bi
     try { await waitForRemoteHealth({ url: remote.url, remoteId, transport, signal, alive: () => alive }); }
     catch (error) { close(); throw error; }
     return { ...local, kind: "remote", remoteId, url: remote.url,
-      message: "이 PC에서 열 수 있습니다. 승인된 Jarvis 기기에서만 접근하며, 맥미니가 켜져 있어야 합니다. 별도 임시 데이터로 실행합니다." };
+      message: "이 PC에서 열 수 있습니다. 승인된 Jarvis 기기에서만 접근하며, 맥미니가 켜져 있어야 합니다. 별도 임시 데이터로 화면·기본 기능을 확인하며, 실제 AI·외부 서비스는 연결되지 않습니다." };
   } catch (error) { cancel(); throw error; }
   finally { signal?.removeEventListener("abort", cancel); }
 }

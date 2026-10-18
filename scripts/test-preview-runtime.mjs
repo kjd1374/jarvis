@@ -7,6 +7,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { chromium } from "@playwright/test";
 import { runCommand } from "../public/jarvis-runner.mjs";
 import { startMacPreview, createPreviewBridge, runProjectTests } from "../public/jarvis-preview.mjs";
+import { createRemoteGate } from "../public/jarvis-remote-preview.mjs";
+import { appOrigin, remoteUrl, publicKey, remoteId, scope, viewer, ticket } from "../tests/support/remote-preview.mjs";
+import { withPreviewHttps } from "../tests/support/preview-https.mjs";
 const dir = await mkdtemp(join(tmpdir(), "jarvis-preview-smoke-")), identity = randomUUID();
 const name = `jarvis-preview-${createHash("sha256").update(identity).digest("hex").slice(0, 24)}`;
 let browser, activeBridge;
@@ -118,6 +121,29 @@ http.createServer((req,res)=>{
   assert.equal(directInfo.Config.User, "node"); assert(!directInfo.Mounts.some(m => m.Type === "bind"));
   assert.deepEqual(errors, []);
   console.log("PASS: no-manifest Node app renders API-backed content; app-local config and records persist only in bounded temporary storage; original checkout/private records unchanged.");
+  await browser.close(); browser = undefined;
+  let clock = Date.now(), approved = true;
+  const gate = await createRemoteGate({ localUrl: direct.url, appOrigin, publicKey, remoteId, scope, sha: direct.sha,
+    expiresAt: direct.expiresAt, clock: () => clock, checkAccess: async id => approved && id === viewer });
+  gate.setOrigin(remoteUrl);
+  try {
+    await withPreviewHttps({ gate, ticket: () => ticket({ sha: direct.sha }) }, async secureBrowser => {
+      const approvedContext = await secureBrowser.newContext({ ignoreHTTPSErrors: true }), other = await secureBrowser.newContext({ ignoreHTTPSErrors: true });
+      const securePage = await approvedContext.newPage(), failures = [];
+      securePage.on("pageerror", error => failures.push(error.message));
+      securePage.on("response", response => { if (response.url().startsWith(remoteUrl) && response.status() >= 400) failures.push(String(response.status())); });
+      await securePage.goto(appOrigin, { waitUntil: "commit" }); await securePage.waitForURL(remoteUrl);
+      await securePage.waitForFunction(() => document.querySelector("h1").textContent === "Backend ready" && document.querySelector("output").textContent === "1");
+      await securePage.getByRole("button", { name: "Save record" }).click();
+      await securePage.waitForFunction(() => document.querySelector("output").textContent === "2");
+      await securePage.reload(); await securePage.waitForFunction(() => document.querySelector("output").textContent === "2");
+      assert.deepEqual(failures, [], "authenticated app initialization and writes must not hide HTTP or browser errors");
+      assert.equal((await (await other.newPage()).goto(remoteUrl)).status(), 403);
+      approved = false; clock += 10_001;
+      assert.equal((await securePage.reload()).status(), 403);
+    });
+  } finally { gate.close(); }
+  console.log("PASS: Docker Node server → bridge → authenticated HTTPS → browser initialization and save/reload; copied links and revoked viewers denied.");
 } finally {
   await browser?.close(); activeBridge?.close();
   await runCommand("docker", ["rm", "-f", name]).catch(() => {});

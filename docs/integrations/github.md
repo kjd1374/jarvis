@@ -103,3 +103,7 @@ The official tunnel client selects QUIC with HTTP2 fallback; the runner waits fo
 ### Standalone Node apps (2.4.3)
 
 Without package.json, a root server.js, server.mjs or server.cjs now starts with Node before any static HTML fallback. The app must honor PORT/HOST and use Node built-ins or its tracked local modules. Its sanitized source runs from bounded temporary storage so app-local config/record initialization works without writing to the original checkout. Existing stored records, credentials and host model services are not copied. Public HTML alone still uses static serving; npm projects keep their declared scripts and public-lockfile requirements. After updating, prepare a new screen to replace an already completed static preview.
+
+### Preview reuse verification (2.4.4)
+
+Retries reuse a preview only when its request, commit and installed preview-runtime hash match. An older or missing runtime identity forces a fresh owned container so an outdated static-only recipe cannot survive an update. Docker/browser CI now exercises the standalone server through authenticated HTTPS and API initialization, temporary write/reload and access revocation in one path. Screen readiness is not a real AI/model validation; the result states that limitation directly.

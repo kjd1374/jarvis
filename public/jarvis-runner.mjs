@@ -8,7 +8,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const VERSION = "2.4.3";
+export const VERSION = "2.4.4";
 export class RunnerError extends Error {
   constructor(code) { super(code); this.code = code; }
 }

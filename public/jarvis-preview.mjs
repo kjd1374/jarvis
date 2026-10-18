@@ -8,6 +8,9 @@ import { join, dirname } from "node:path";
 
 const IMAGE = "node:24.19.0-bookworm-slim";
 const TTL = 2 * 60 * 60_000;
+// A request/commit can outlive a runner update. Reuse only containers built by
+// this exact runtime so older static/server recipes cannot survive a retry.
+const RUNTIME_ID = createHash("sha256").update(await readFile(new URL(import.meta.url))).digest("hex").slice(0, 24);
 const bridges = new Map();
 export function attachPreviewCleanup(url, cleanup) {
   const bridge = [...bridges.values()].find(item => item.url === url);
@@ -263,6 +266,7 @@ export async function startMacPreview({ cwd, files, sha, stateDir, identity, gro
   try { existing = JSON.parse(await docker(["inspect", name]))[0]; } catch {}
   const probe = async (info) => {
     if (!info?.State?.Running || info.Config?.Labels?.["jarvis.preview.key"] !== key || info.Config.Labels["jarvis.preview.sha"] !== sha) return null;
+    if (info.Config.Labels["jarvis.preview.runtime"] !== RUNTIME_ID) return null;
     const expiresAt = info.Config.Labels["jarvis.preview.expires"];
     if (!(Date.parse(expiresAt) > Date.now())) return null;
     const { url } = await bridge(name, expiresAt);
@@ -311,6 +315,7 @@ export async function startMacPreview({ cwd, files, sha, stateDir, identity, gro
     stage = "application";
     const expiresAt = new Date(Date.now() + TTL).toISOString(), token = randomUUID();
     await docker(["run", "--detach", "--rm", "--name", name, "--label", `jarvis.preview.key=${key}`, "--label", `jarvis.preview.sha=${sha}`,
+      "--label", `jarvis.preview.runtime=${RUNTIME_ID}`,
       "--label", `jarvis.preview.group=${groupKey}`, "--label", `jarvis.preview.expires=${expiresAt}`, "--label", `jarvis.preview.id=${token}`,
       "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
       "--memory", "1g", "--cpus", "1", "--pids-limit", "128", "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m",
