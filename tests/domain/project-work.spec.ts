@@ -210,3 +210,28 @@ test("테스트 전용 요청은 작업을 생성하거나 PR·병합 결과를 
   expect(claimProjectWork(data, { ...scope, remoteWork: true }, stamp).job?.mode).toBe("test");
   expect(() => parseWorkResult(result, "example/synthetic", "test")).toThrow();
 });
+
+test("최근 확인한 기본 브랜치를 기본 선택하되 실패·다른 저장소와 이후 PR 수정은 구분한다", async () => {
+  const { preferredWorkRevision } = await import("../../src/lib/automation/work");
+  const first = claimProjectWork(queued(), scope, stamp), job = first.job!;
+  const data = reportProjectWork(first.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result }, scope.deviceId, stamp);
+  const project = data.projects[0], original = structuredClone(project);
+  const choose = () => preferredWorkRevision(project, "auto-service", "example/synthetic");
+  expect(choose()).toBe("latest");
+  const later = new Date(Date.parse(stamp) + 60_000).toISOString();
+  const base = { ...project.automation!.turns[0], id: "22222222-2222-4222-8222-222222222222", mode: "preview" as const, createdAt: later, updatedAt: later, result: {
+    ...project.automation!.turns[0].result!, outcome: "answered" as const, prUrl: null, headSha: null, branch: null, baseSha: "c".repeat(40),
+    preview: { state: "ready" as const, kind: "remote" as const, remoteId: uuid, sha: "c".repeat(40), url: "https://synthetic-current.trycloudflare.com/", checkedAt: later, expiresAt: new Date(Date.parse(later) + 3600_000).toISOString(), message: "합성 기본 브랜치" },
+  } };
+  project.automation!.turns.push(base);
+  expect(choose()).toBe("main");
+  expect(project.automation!.turns[0]).toEqual(original.automation!.turns[0]);
+  for (const override of [{ serviceId: "other-service" }, { repository: "example/other" }, { status: "failed" as const }, { createdAt: new Date(Date.parse(stamp) - 60_000).toISOString() }, { sourceTurnId: uuid }]) {
+    project.automation!.turns[1] = { ...base, ...override }; expect(choose()).toBe("latest");
+  }
+  project.automation!.turns[1] = { ...base, result: { ...base.result, preview: { ...base.result.preview, state: "failed", url: null, expiresAt: null } } };
+  expect(choose()).toBe("latest");
+  project.automation!.turns[1] = base;
+  project.automation!.turns.push({ ...original.automation!.turns[0], id: "33333333-3333-4333-8333-333333333333", createdAt: new Date(Date.parse(later) + 60_000).toISOString() });
+  expect(choose()).toBe("latest");
+});

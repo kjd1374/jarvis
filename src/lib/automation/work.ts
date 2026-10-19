@@ -103,6 +103,19 @@ export function latestWorkSource(project: Project, serviceId: string, repository
   const latest = [...(project.automation?.turns ?? [])].reverse().find(t => t.serviceId === serviceId && t.repository === repository && t.mode === "change" && t.result?.headSha && t.result.prUrl);
   return latest?.result?.outcome === "pr_open" ? latest : undefined;
 }
+// A historical PR result is not a live GitHub status. Continue from the code the
+// user most recently verified, without rewriting that historical result.
+export function preferredWorkRevision(project: Project, serviceId: string, repository: string): "main" | "latest" {
+  const recent = latestWorkSource(project, serviceId, repository);
+  if (!recent) return "latest";
+  const verified = [...(project.automation?.turns ?? [])].reverse().find(t =>
+    t.serviceId === serviceId && t.repository === repository && t.status === "completed" &&
+    Date.parse(t.createdAt) >= Date.parse(recent.createdAt) &&
+    (!t.sourceTurnId || t.sourceTurnId === recent.id) &&
+    (t.mode === "preview" && t.result?.preview?.state === "ready" ||
+      t.mode === "test" && t.result?.outcome !== "blocked" && !!t.result?.checks.length && t.result.checks.every(c => c.status === "passed")));
+  return verified && !verified.sourceTurnId ? "main" : "latest";
+}
 export function enqueueWork(data: WorkspaceData, space: Space, projectId: string, serviceId: string, request: string, mode: ProjectTurn["mode"], publish: ProjectTurn["publish"], stamp: string, turnId = id(), sourceTurnId?: string, previewAI?: "codex", followLatest = false) {
   const project = data.projects.find(p => p.id === projectId && p.space === space);
   const service = data.services.find(s => s.id === serviceId && s.space === space && s.projectId === projectId);

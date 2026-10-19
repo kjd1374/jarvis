@@ -415,3 +415,60 @@ test("새 프로젝트는 자동 준비와 첫 개발 요청을 저장하고 준
   await agent.getByRole("button", { name: "이어서 준비", exact: true }).click();
   await expect(agent.getByLabel("AI에게 요청", { exact: true })).toBeEnabled();
 });
+
+test("기본 브랜치의 최신 준비 화면은 예전 PR에 가려지지 않고 후속 요청도 같은 코드를 사용한다", async ({ page }) => {
+  const { enqueueWork, claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
+  const stamp = new Date(Date.now() - 60_000).toISOString(), later = new Date().toISOString();
+  const scope = { space: "company" as const, projectIds: ["auto-project"], deviceId: "runner", remoteWork: true, previews: true };
+  const first = claimProjectWork(enqueueWork(automationWorkspace(stamp), "company", "auto-project", "auto-service", "합성 수정", "change", "pr", stamp), scope, stamp), job = first.job!;
+  const prResult = { reply: "합성 수정본", summary: "수정", currentStatus: "", nextAction: "", changes: ["app.js"], checks: [], followUps: [], outcome: "pr_open", branch: `jarvis/work-${job.id}`, baseSha: "a".repeat(40), headSha: "b".repeat(40), prUrl: "https://github.com/example/synthetic/pull/1", deployment: { state: "not_configured", url: null, sha: null } };
+  const old = reportProjectWork(first.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: prResult }, "runner", stamp);
+  const prepared = claimProjectWork(enqueueWork(old, "company", "auto-project", "auto-service", "반영된 화면 준비", "preview", "pr", later), scope, later), previewJob = prepared.job!;
+  const data = reportProjectWork(prepared.data, "company", { projectId: previewJob.projectId, jobId: previewJob.id, leaseToken: previewJob.leaseToken, phase: "result", result: {
+    ...prResult, outcome: "answered", changes: [], branch: null, headSha: null, prUrl: null, baseSha: "c".repeat(40),
+    preview: { state: "ready", kind: "remote", remoteId: previewJob.id, sha: "c".repeat(40), url: "https://synthetic-current.trycloudflare.com/", checkedAt: later, expiresAt: new Date(Date.now() + 3600_000).toISOString(), message: "합성 기본 브랜치 화면" },
+  } }, "runner", later);
+  await seed(page, data); await page.goto("/projects/auto-project"); await ready(page);
+  const screen = page.getByRole("region", { name: "수정된 화면 확인", exact: true });
+  const agent = page.getByRole("region", { name: "프로젝트 AI 작업실", exact: true });
+  for (let reload = 0; reload < 2; reload++) {
+    await expect(screen.getByLabel("확인할 코드")).toHaveValue("main");
+    await expect(agent.getByLabel("작업할 코드")).toHaveValue("main");
+    await expect(screen).toContainText("코드 cccccccc");
+    await expect(screen.getByRole("link", { name: "이 PC에서 화면 열기" })).toHaveAttribute("href", new RegExp(previewJob.id));
+    await expect(screen).not.toContainText("최근 수정본 bbbbbbbb");
+    await page.reload(); await ready(page);
+  }
+  await screen.getByRole("button", { name: "화면 준비", exact: true }).click();
+  expect((await state(page))!.projects[0].automation!.turns.at(-1)?.sourceTurnId).toBeUndefined();
+  await agent.getByLabel("AI에게 요청", { exact: true }).fill("확인한 화면에서 후속 수정");
+  await agent.getByRole("button", { name: "요청 보내기" }).click();
+  const saved = (await state(page))!;
+  expect(saved.projects[0].automation!.turns.at(-1)).toMatchObject({ mode: "change" });
+  expect(saved.projects[0].automation!.turns.at(-1)?.sourceTurnId).toBeUndefined();
+  expect(saved.projects[0].automation!.turns.at(-1)?.followLatest).toBeUndefined();
+  expect(saved.projects[0].automation!.turns[0].result).toMatchObject(prResult);
+  await screen.getByLabel("확인할 코드").selectOption("latest");
+  await expect(screen).toContainText("최근 수정본 bbbbbbbb");
+});
+
+test("PR 변경 실패에서 반영된 코드로 한 번에 화면 준비하며 구독 CLI 선택을 보존한다", async ({ page }) => {
+  const { enqueueWork, claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
+  const stamp = new Date().toISOString();
+  const scope = { space: "company" as const, projectIds: ["auto-project"], deviceId: "runner", remoteWork: true, previews: true, previewCli: true };
+  const first = claimProjectWork(enqueueWork(automationWorkspace(stamp), "company", "auto-project", "auto-service", "합성 수정", "change", "pr", stamp), scope, stamp), job = first.job!;
+  const old = reportProjectWork(first.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: {
+    reply: "합성 수정본", summary: "수정", currentStatus: "", nextAction: "", changes: [], checks: [], followUps: [], outcome: "pr_open", branch: `jarvis/work-${job.id}`, baseSha: "a".repeat(40), headSha: "b".repeat(40), prUrl: "https://github.com/example/synthetic/pull/1", deployment: { state: "not_configured", url: null, sha: null },
+  } }, "runner", stamp);
+  const prepared = claimProjectWork(enqueueWork(old, "company", "auto-project", "auto-service", "예전 PR 확인", "preview", "pr", stamp, undefined, job.id, "codex"), scope, stamp), failed = prepared.job!;
+  const data = reportProjectWork(prepared.data, "company", { projectId: failed.projectId, jobId: failed.id, leaseToken: failed.leaseToken, phase: "error", code: "work_source_changed" }, "runner", stamp);
+  await seed(page, data); await page.goto("/projects/auto-project"); await ready(page);
+  const screen = page.getByRole("region", { name: "수정된 화면 확인", exact: true });
+  await expect(screen.getByLabel("확인할 코드")).toHaveValue("latest");
+  await screen.getByRole("button", { name: "반영된 코드로 화면 준비", exact: true }).click();
+  await expect(screen.getByLabel("확인할 코드")).toHaveValue("main");
+  const saved = (await state(page))!.projects[0].automation!.turns;
+  expect(saved.at(-1)).toMatchObject({ mode: "preview", previewAI: "codex", status: "queued" });
+  expect(saved.at(-1)?.sourceTurnId).toBeUndefined();
+  expect(saved.find(t => t.id === failed.id)).toMatchObject({ status: "failed", error: "work_source_changed", sourceTurnId: job.id });
+});

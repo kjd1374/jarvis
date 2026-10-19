@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useRef, useState } from "react";
-import { enqueueWork, changeWorkState, latestWorkSource } from "@/lib/automation/work";
+import { enqueueWork, changeWorkState, latestWorkSource, preferredWorkRevision } from "@/lib/automation/work";
 import { repositoryFor } from "@/lib/automation/state";
 import { queuedWorkMessage, runnerOnline } from "@/lib/automation/runner-status";
 import type { GitHubMonitoring } from "@/lib/automation/types";
@@ -73,7 +73,8 @@ export function ProjectAgent({ project }: { project: Project }) {
   const [mode, setMode] = useState<"change" | "ask">("change");
   const [publish, setPublish] = useState<"merge" | "pr">("merge");
   const [error, setError] = useState("");
-  const [revision, setRevision] = useState("latest");
+  const [revisionChoice, setRevision] = useState<{ serviceId: string; value: string } | null>(null);
+  const revision = revisionChoice && revisionChoice.serviceId === service?.id ? revisionChoice.value : service ? preferredWorkRevision(project, service.id, repositoryFor(service)!) : "main";
   const recent = service && latestWorkSource(project, service.id, repositoryFor(service)!);
   const source = revision === "latest" ? recent : undefined;
   const pending = useRef(false), requestId = useRef(id());
@@ -118,7 +119,7 @@ export function ProjectAgent({ project }: { project: Project }) {
       <textarea id="project-agent-message" value={message} onChange={e => setMessage(e.target.value)} maxLength={8000} rows={2} placeholder="원하는 변경이나 질문을 적어주세요." disabled={project.setup?.status === "cancelled"} />
       <div className={styles.agentComposerActions}>
         {services.length > 1 && <label>대상 저장소<select aria-label="대상 저장소" value={service?.id ?? ""} onChange={e => setServiceId(e.target.value)}>{services.map(s => <option key={s.id} value={s.id}>{repositoryFor(s)}</option>)}</select></label>}
-        {recent && <label>작업할 코드<select aria-label="작업할 코드" value={revision} onChange={e => setRevision(e.target.value)}><option value="latest">최근 수정본 · PR 이어가기</option><option value="main">기본 브랜치</option></select></label>}
+        {recent && <label>작업할 코드<select aria-label="작업할 코드" value={revision} onChange={e => setRevision({ serviceId: service!.id, value: e.target.value })}><option value="latest">저장된 PR 수정본 · 이어가기</option><option value="main">기본 브랜치 · 반영된 코드</option></select></label>}
         <label>요청 방식<select aria-label="요청 방식" value={mode} onChange={e => setMode(e.target.value as "ask" | "change")}><option value="change">수정 요청</option><option value="ask">질문하기</option></select></label>
         {mode === "change" && <label>반영 범위<select aria-label="반영 범위" value={publish} onChange={e => setPublish(e.target.value as "pr" | "merge")}><option value="merge">검증 후 병합·자동 배포</option><option value="pr">PR 작성 후 내가 검토</option></select></label>}
         <button type="submit" className={styles.primaryButton} disabled={saving || project.setup?.status === "cancelled" || !message.trim()}>요청 보내기 <Icon name="arrow" size={16} /></button>
