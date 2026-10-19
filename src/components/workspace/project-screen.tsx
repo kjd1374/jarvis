@@ -11,6 +11,8 @@ import { useWorkspaceClock } from "./use-workspace-clock";
 import styles from "./studio.module.css";
 const previewStages = { docker: "실행 서버 연결", build: "실행 환경 준비", application: "앱 응답", configuration: "Jarvis 연결 설정", provisioning: "임시 주소 발급", connection: "외부 연결", health: "외부 주소 응답", module: "실행 모듈", ai: "구독 CLI 응답" };
 export function previewMessage(preview: WorkPreview) {
+  if (preview.state === "failed" && preview.diagnostic?.code === "preview_cli_config_unavailable")
+    return "이 앱은 구독 CLI 미리보기 연결을 지원하지 않습니다. CLI를 호출하기 전에 준비를 중단했습니다. 화면만 확인하려면 미리보기 AI를 ‘연결 안 함’으로 선택해주세요.";
   return preview.state === "failed" && !preview.diagnostic && /실행기.*(?:업데이트|설치)/.test(preview.message)
     ? "이전 미리보기 준비 실패 기록입니다. 당시 상세 원인은 저장되지 않았습니다." : preview.message;
 }
@@ -50,11 +52,11 @@ export function ProjectScreen({ project }: { project: Project }) {
   const latest = [...turns].reverse().find(t => t.result?.preview && (source ? t.id === source.id || t.sourceTurnId === source.id : !t.sourceTurnId && t.result.outcome !== "pr_open"));
   const waiting = turns.find(t => t.mode === "preview" && ["queued", "running"].includes(t.status));
   const testing = turns.find(t => t.mode === "test" && ["queued", "running"].includes(t.status));
-  async function prepare(mode: "preview" | "test") {
+  async function prepare(mode: "preview" | "test", chosenAI = previewAI) {
     if (!service || pending.current || saving || (mode === "preview" ? waiting : testing)) return;
     pending.current = true; setError("");
     try {
-      await mutate(d => enqueueWork(d, project.space, project.id, service.id, mode === "test" ? "선택한 코드의 자동 테스트를 실행해주세요." : "선택한 코드의 웹 화면을 준비해주세요.", mode, "pr", now(), requestId.current, source?.id, mode === "preview" && previewAI === "codex" ? "codex" : undefined));
+      await mutate(d => enqueueWork(d, project.space, project.id, service.id, mode === "test" ? "선택한 코드의 자동 테스트를 실행해주세요." : "선택한 코드의 웹 화면을 준비해주세요.", mode, "pr", now(), requestId.current, source?.id, mode === "preview" && chosenAI === "codex" ? "codex" : undefined));
       requestId.current = id();
     } catch (e) { setError(e instanceof Error ? e.message : "화면 준비 요청을 저장하지 못했습니다."); }
     finally { pending.current = false; }
@@ -72,10 +74,11 @@ export function ProjectScreen({ project }: { project: Project }) {
     <label>미리보기 AI<select aria-label="미리보기 AI" value={previewAI} onChange={e => setPreviewAI(e.target.value === "codex" ? "codex" : "none")}>
       <option value="none">연결 안 함 · 화면·저장 확인</option><option value="codex">현재 구독 CLI · 사용량 소모</option>
     </select></label>
-    {previewAI === "codex" && <p>구독 CLI로 짧은 번역 응답을 실제 확인한 뒤 화면을 준비합니다. 요청마다 구독 사용량이 소모됩니다. API 키 과금으로 전환하지 않으며 임시 화면 한 개에서 최대 20회 요청할 수 있습니다.</p>}
+    {previewAI === "codex" && <p>지원 앱 안의 AI 기능을 구독 CLI에 연결하는 선택입니다. Jarvis의 코드 수정용 CLI 연결과는 별개입니다. 짧은 번역 응답을 실제 확인하며 요청마다 구독 사용량이 소모됩니다. API 키 과금으로 전환하지 않으며 임시 화면 한 개에서 최대 20회 요청할 수 있습니다.</p>}
     {latest?.result?.preview ? <PreviewResult preview={latest.result.preview} project={project} turnId={latest.id} /> : <p>{previewAI === "codex"
       ? "현재 코드의 임시 앱을 실행하고 구독 CLI의 번역 응답을 확인합니다. 준비가 끝나면 이 PC에서 열 수 있습니다."
       : "배포 주소가 없으면 맥미니에서 임시 화면을 준비합니다. AI는 연결하지 않습니다."}</p>}
+    {latest?.result?.preview?.state === "failed" && latest.result.preview.diagnostic?.code === "preview_cli_config_unavailable" && <button className={styles.secondaryButton} disabled={saving || !service || !!waiting} onClick={() => { setPreviewAI("none"); void prepare("preview", "none"); }}>AI 연결 없이 화면 준비</button>}
     {waiting && <p role="status">화면 준비: {waiting.status === "queued" ? queuedWorkMessage(waiting, service?.monitoring, clock) : "실행기가 화면을 준비하고 있습니다. 완료되면 화면 열기 버튼이 표시됩니다."}</p>}
     {testing && <p role="status">자동 테스트: {testing.status === "queued" ? queuedWorkMessage(testing, service?.monitoring, clock) : "실행 중입니다. 결과는 아래 프로젝트 작업에 표시됩니다."}</p>}
     <details className={styles.compactDisclosure}><summary>맥미니 미리보기 이용 안내</summary>

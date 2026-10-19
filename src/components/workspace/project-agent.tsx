@@ -53,7 +53,7 @@ function WorkTurn({ turn, project, saving, onAction, monitoring, clock }: { turn
       </> : !turn.error && <p>{turn.status === "queued" ? queuedWorkMessage(turn, monitoring, clock) : turn.status === "cancelled" ? "이미 반영된 변경은 유지됩니다." : "작업 중입니다. 결과는 자동으로 갱신됩니다."}</p>}
       {turn.error && <p role="status">{errors[turn.error] ?? "실행을 마치지 못했습니다. 저장된 결과를 확인한 뒤 이어서 시도해주세요."}</p>}
       <div className={styles.agentTurnActions}>
-        <span>{turn.mode === "test" ? "자동 테스트 · 코드 게시·AI 호출 없음" : turn.mode === "preview" ? "화면 준비 · AI 호출 없음" : turn.mode === "ask" ? "질문" : turn.publish === "merge" ? "수정·검증 후 반영" : "수정 후 PR 검토"}</span>
+        <span>{turn.mode === "test" ? "자동 테스트 · 코드 게시·AI 호출 없음" : turn.mode === "preview" ? turn.previewAI === "codex" ? "화면 준비 · 구독 CLI 선택" : "화면 준비 · AI 호출 없음" : turn.mode === "ask" ? "질문" : turn.publish === "merge" ? "수정·검증 후 반영" : "수정 후 PR 검토"}</span>
         {["failed", "interrupted"].includes(turn.status) && <button className={styles.textButton} disabled={saving} onClick={() => onAction(turn, "retry")}>이어서 실행</button>}
         {["queued", "running", "failed", "interrupted"].includes(turn.status) && <button className={styles.textButton} disabled={saving} onClick={() => onAction(turn, "cancel")}>요청 취소</button>}
       </div>

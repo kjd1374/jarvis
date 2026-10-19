@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import { previewFile, previewPlan, findDeploymentPreview, startMacPreview, previewFailure } from "../public/jarvis-preview.mjs";
 import { validateConfig, launchAgent, preflight, downloadRuntime, macCommandPath, runSetupCommand, replaceLaunchAgent, installedConfig, downloadTunnel } from "../public/jarvis-mac.mjs";
-import { VERSION } from "../public/jarvis-runner.mjs";
+import { VERSION, allowedWorkPath } from "../public/jarvis-runner.mjs";
 const sha = "a".repeat(40);
 test("remote failures preserve the actual phase without exposing logs or fabricating legacy addresses", () => {
   const failed = previewFailure(sha, Object.assign(new Error("private provider output"), { code: "tunnel_network_failed", stage: "provisioning", exitCode: 1 }), "build", true);
@@ -48,6 +48,12 @@ test("published runtime manifest matches all shipped executables", async () => {
   assert.equal(manifest.version, VERSION);
   for (const name of ["jarvis-runner.mjs", "jarvis-preview.mjs", "jarvis-remote-preview.mjs", "jarvis-preview-auth.mjs", "jarvis-preview-cli.mjs"]) {
     assert.equal(manifest.files[name], createHash("sha256").update(await readFile(new URL(`../public/${name}`, import.meta.url))).digest("hex"));
+  }
+});
+test("work and preview retain source modules under src/data while excluding stored records", () => {
+  for (const allowed of [allowedWorkPath, previewFile]) {
+    for (const file of ["src/data/products.ts", "src/data/nested/items.js", "src/data/view.tsx"]) assert.equal(allowed(file), true, file);
+    for (const file of ["data/products.ts", "src/data/records.json", "src/data/records.csv", "src/data/records.sqlite", "src/data/.env", "src/data/credentials.ts", "src/data/customers/list.ts", "src/data/../private.ts"]) assert.equal(allowed(file), false, file);
   }
 });
 test("preview recipes exclude credentials and unsupported or private dependencies", () => {
@@ -115,6 +121,22 @@ test("preview containers receive only sanitized files and bounded private runtim
     const failed = await startMacPreview({ ...options, transport: async () => ({ ok: true, text: async () => "another-instance" }) });
     assert.equal(failed.state, "failed"); assert.equal(failed.url, null);
     assert(calls.some(args => args[0] === "rm" && args[1] === "-f"));
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+test("unsupported CLI app configuration stops before building or invoking the subscription", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "jarvis-unsupported-cli-"));
+  try {
+    await writeFile(join(dir, "package.json"), JSON.stringify({ scripts: { preview: "vite preview", build: "vite build" } }));
+    let calls = 0;
+    const result = await startMacPreview({ cwd: dir, files: ["package.json"], sha, stateDir: dir, identity: "unsupported-cli",
+      cliInference: async () => { calls++; throw Error("must not call subscription"); },
+      run: async (_bin, args) => {
+        assert(!["build", "run"].includes(args[0]));
+        return args[0] === "inspect" ? { code: 1, out: "" } : { code: 0, out: "" };
+      } });
+    assert.equal(result.state, "failed"); assert.equal(result.url, null); assert.equal(calls, 0);
+    assert.deepEqual(result.diagnostic, { stage: "ai", code: "preview_cli_config_unavailable" });
+    assert.match(result.message, /CLI를 호출하기 전에/); assert(!result.message.includes("로그인"));
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 test("missing Docker returns a useful preparation state without a fake URL", async () => {

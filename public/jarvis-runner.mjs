@@ -9,7 +9,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { completeWithSubscription } from "./jarvis-preview-cli.mjs";
 
-export const VERSION = "2.5.0";
+export const VERSION = "2.5.1";
 export class RunnerError extends Error {
   constructor(code) { super(code); this.code = code; }
 }
@@ -391,7 +391,9 @@ export async function runCodexWork(job, cwd, controlDir, { run = runCommand, sig
 }
 export function allowedWorkPath(path) {
   if (typeof path !== "string" || path.length > 450 || path.startsWith("/") || path.includes("\\") || path.split("/").some(p => !p || p === ".." || p === ".")) return false;
-  if (/(^|\/)(?:\.[^/]+|AGENTS\.md|node_modules|vendor|dist|build|coverage|uploads?|conversations?|transcripts?|customers?|backups?|data|fixtures?|seeds?|logs?|test-results|playwright-report)(\/|$)/i.test(path)) return false;
+  if (/(^|\/)(?:\.[^/]+|AGENTS\.md|node_modules|vendor|dist|build|coverage|uploads?|conversations?|transcripts?|customers?|backups?|fixtures?|seeds?|logs?|test-results|playwright-report)(\/|$)/i.test(path)) return false;
+  // src/data can contain imported application modules, not just stored records.
+  if (/(^|\/)data(\/|$)/i.test(path) && !/^src\/data\/.+\.(?:[cm]?[jt]s|[jt]sx)$/.test(path)) return false;
   return !/(?:^|\/)(?:[^/]*\.)?env(?:\.|$)|secret|credential|auth\.json|(?:token|password)[^/]*\.(?:json|txt|ya?ml)|\.(?:pem|key|p12|csv|sqlite|db)$/i.test(path);
 }
 const wait = ms => new Promise(r => setTimeout(r, ms));

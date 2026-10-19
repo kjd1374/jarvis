@@ -3,6 +3,33 @@ import { analyzed, collected, analysisRaw, automationWorkspace } from "../suppor
 import { applyAnalysis } from "../../src/lib/automation/state";
 import { parseAnalysis } from "../../src/lib/automation/facts";
 test.setTimeout(60_000);
+test("앱의 구독 CLI 미지원은 접속 실패와 구분하고 같은 수정본을 AI 없이 다시 준비한다", async ({ page }) => {
+  const { enqueueWork, claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
+  const { observeWorkRunner } = await import("../../src/lib/automation/runner-status");
+  const stamp = new Date().toISOString(), scope = { space: "company" as const, projectIds: ["auto-project"], deviceId: "runner", remoteWork: true, previews: true, previewCli: true };
+  const change = claimProjectWork(enqueueWork(automationWorkspace(stamp), "company", "auto-project", "auto-service", "합성 수정", "change", "pr", stamp), scope, stamp), source = change.job!;
+  let data = reportProjectWork(change.data, "company", { projectId: source.projectId, jobId: source.id, leaseToken: source.leaseToken, phase: "result", result: {
+    reply: "합성 수정본", summary: "수정", currentStatus: "", nextAction: "", changes: ["src/app.tsx"], checks: [], followUps: [], outcome: "pr_open", branch: `jarvis/work-${source.id}`, baseSha: "a".repeat(40), headSha: "b".repeat(40), prUrl: "https://github.com/example/synthetic/pull/1", deployment: { state: "not_configured", url: null, sha: null },
+  } }, "runner", stamp);
+  const preview = claimProjectWork(enqueueWork(data, "company", "auto-project", "auto-service", "화면 준비", "preview", "pr", stamp, undefined, source.id, "codex"), scope, stamp), job = preview.job!;
+  data = reportProjectWork(preview.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: {
+    reply: "기존의 일반 오류 안내", summary: "미리보기 실패", currentStatus: "", nextAction: "", changes: [], checks: [], followUps: [], outcome: "blocked", branch: null, baseSha: "b".repeat(40), headSha: null, prUrl: null, deployment: { state: "not_configured", url: null, sha: null },
+    preview: { state: "failed", kind: "remote", url: null, sha: "b".repeat(40), checkedAt: stamp, expiresAt: null, message: "구독 CLI의 실제 응답을 확인하지 못했습니다. 로그인·사용 한도·응답 상태를 확인해주세요.", diagnostic: { stage: "ai", code: "preview_cli_config_unavailable" } },
+  } }, "runner", stamp);
+  data = observeWorkRunner(data, scope, { runnerVersion: "2.5.0", remoteWorkVersion: 1, previewVersion: 1, previewCliVersion: 1 }, stamp);
+  await seed(page, data); await page.goto("/projects/auto-project"); await ready(page);
+  const screen = page.getByRole("region", { name: "수정된 화면 확인", exact: true }), agent = page.getByRole("region", { name: "프로젝트 AI 작업실", exact: true });
+  await expect(agent.getByRole("status").first()).toHaveText("Jarvis CLI 연결됨");
+  await expect(screen).toContainText("이 앱은 구독 CLI 미리보기 연결을 지원하지 않습니다");
+  await expect(screen).not.toContainText("로그인·사용 한도·응답 상태");
+  await expect(agent).toContainText("화면 준비 · 구독 CLI 선택");
+  await screen.getByRole("button", { name: "AI 연결 없이 화면 준비", exact: true }).click();
+  const saved = (await state(page))!, next = saved.projects[0].automation!.turns.at(-1)!;
+  expect(next).toMatchObject({ mode: "preview", sourceTurnId: source.id, status: "queued" });
+  expect(next.previewAI).toBeUndefined(); expect(saved.projects[0].automation!.turns.find(t => t.id === job.id)!.result!.preview!.diagnostic!.code).toBe("preview_cli_config_unavailable");
+  await expect(screen.getByLabel("미리보기 AI")).toHaveValue("none");
+  await page.reload(); await ready(page); await expect(screen.getByLabel("미리보기 AI")).toHaveValue("none");
+});
 test("구독 CLI 미리보기 선택과 요청을 보존하고 구버전에는 구체적인 대기 이유를 표시한다", async ({ page }) => {
   const { observeWorkRunner } = await import("../../src/lib/automation/runner-status");
   const stamp = new Date().toISOString();

@@ -64,7 +64,8 @@ const shaPattern = /^[a-f0-9]{40,64}$/;
 export function previewFile(path) {
   return typeof path === "string" && path.length <= 450 && !path.startsWith("/") && !path.includes("\\") &&
     !path.split("/").some(p => !p || p === "." || p === ".." || p.startsWith(".")) &&
-    !/(^|\/)(?:AGENTS\.md|node_modules|vendor|dist|build|coverage|uploads?|conversations?|transcripts?|customers?|backups?|data|fixtures?|seeds?|logs?|test-results|playwright-report)(\/|$)/i.test(path) &&
+    !/(^|\/)(?:AGENTS\.md|node_modules|vendor|dist|build|coverage|uploads?|conversations?|transcripts?|customers?|backups?|fixtures?|seeds?|logs?|test-results|playwright-report)(\/|$)/i.test(path) &&
+    (!/(^|\/)data(\/|$)/i.test(path) || /^src\/data\/.+\.(?:[cm]?[jt]s|[jt]sx)$/.test(path)) &&
     !/(?:^|\/)(?:[^/]*\.)?env(?:\.|$)|secret|credential|auth\.json|(?:token|password)[^/]*\.(?:json|txt|ya?ml)|\.(?:pem|key|p12|csv|sqlite|db)$/i.test(path);
 }
 export function previewPlan(files, pkg, lock) {
@@ -243,7 +244,9 @@ export function previewFailure(sha, error, stage, remote = false) {
     module: "미리보기 실행 모듈을 불러오지 못했습니다. 실행기 설치 파일을 확인해야 합니다.",
     ai: "구독 CLI의 실제 응답을 확인하지 못했습니다. 연결 진단에 로그인·사용 한도·응답 상태를 기록했습니다. 준비 완료로 처리하지 않았습니다.",
   };
-  return unavailable(sha, messages[stage], "failed", remote ? "remote" : "mac", diagnostic);
+  const message = code === "preview_cli_config_unavailable"
+    ? "이 앱은 구독 CLI 미리보기 연결을 지원하지 않습니다. CLI를 호출하기 전에 준비를 중단했습니다. 화면만 확인하려면 미리보기 AI를 ‘연결 안 함’으로 선택해주세요." : messages[stage];
+  return unavailable(sha, message, "failed", remote ? "remote" : "mac", diagnostic);
 }
 export async function findDeploymentPreview(repository, sha, get, publicUrl) {
   if (!shaPattern.test(sha)) return null;
