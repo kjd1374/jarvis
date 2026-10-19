@@ -30,17 +30,22 @@ test('isolated project behavior', async()=>{
   console.log("PASS: actual project tests run in a credential-free/offline Docker container; real success/failure captured; install/pretest hooks skipped; checkout unchanged.");
   await writeFile(join(cwd, "package.json"), JSON.stringify({ type: "module", scripts: { start: "node server.mjs" } }));
   await writeFile(join(cwd, ".env"), "SYNTHETIC_SECRET=must-not-enter-container");
+  await mkdir(join(cwd, "src/data"), { recursive: true });
+  await writeFile(join(cwd, "src/data/title.js"), 'export const title = "Synthetic preview";');
+  await writeFile(join(cwd, "src/data/records.json"), '{"private":"must-not-enter-container"}');
   await writeFile(join(cwd, "server.mjs"), `import http from 'node:http';
-import { mkdirSync } from 'node:fs'; import { DatabaseSync } from 'node:sqlite';
+import { title } from './src/data/title.js';
+import { mkdirSync, existsSync } from 'node:fs'; import { DatabaseSync } from 'node:sqlite';
+if(existsSync('/app/src/data/records.json')) throw Error('private records copied');
 mkdirSync(process.env.DATA_DIR,{recursive:true});const db=new DatabaseSync(process.env.DATA_DIR+'/test.db');
 db.exec('CREATE TABLE IF NOT EXISTS counter(n INTEGER)');db.exec('INSERT INTO counter VALUES(0)');
 http.createServer((req,res)=>{
  if(req.headers['sec-fetch-site']==='cross-site'){res.writeHead(403);res.end('Cross-site request rejected');return;}
  if(req.url==='/api') { if(req.method==='POST') {if(req.headers.origin!=='http://127.0.0.1:3000'){res.writeHead(403);res.end();return;}db.exec('UPDATE counter SET n=n+1');}
  res.setHeader('Content-Type','application/json');res.end(JSON.stringify(db.prepare('SELECT n FROM counter').get()));return;}
- res.setHeader('Content-Type','text/html');res.end('<h1>Synthetic preview</h1><button>Save</button><output></output><script>document.querySelector("button").onclick=async()=>{const r=await fetch("/api",{method:"POST"});document.querySelector("output").textContent=(await r.json()).n}</script>');
+ res.setHeader('Content-Type','text/html');res.end('<h1>'+title+'</h1><button>Save</button><output></output><script>document.querySelector("button").onclick=async()=>{const r=await fetch("/api",{method:"POST"});document.querySelector("output").textContent=(await r.json()).n}</script>');
 }).listen(Number(process.env.PORT),process.env.HOST);`);
-  const result = await startMacPreview({ cwd, files: ["package.json", "server.mjs", ".env"], sha: "a".repeat(40), stateDir: dir, identity, run: runCommand,
+  const result = await startMacPreview({ cwd, files: ["package.json", "server.mjs", "src/data/title.js", "src/data/records.json", ".env"], sha: "a".repeat(40), stateDir: dir, identity, run: runCommand,
     bridge: async (...args) => activeBridge = await createPreviewBridge(...args) });
   assert.equal(result.state, "ready", result.message);
   const info = JSON.parse((await runCommand("docker", ["inspect", name])).out)[0];
@@ -87,6 +92,23 @@ const s=net.connect(443,'203.0.113.1');s.on('connect',()=>process.exit(2));s.on(
   assert.equal(await page.evaluate(async () => (await (await fetch("/api")).json()).n), 1);
   assert.deepEqual(errors, []);
   console.log("PASS: hosted-page link → real Docker preview; SQLite write/reload; cross-site writes/API/frames blocked; no host mounts, credentials or external network.");
+  activeBridge.close(); await runCommand("docker", ["rm", "-f", name]);
+  // Vite bundles its config into node_modules/.vite-temp before listening.
+  // Exercise that filesystem requirement without installing third-party code.
+  await writeFile(join(cwd, "package.json"), JSON.stringify({ type: "module", scripts: { preview: "vite preview", build: "node build.mjs" } }));
+  const viteProgram = `#!/usr/bin/env node
+const fs=require('node:fs'),http=require('node:http');
+fs.writeFileSync('/app/node_modules/.vite-temp/config.mjs','temporary config');
+let readonly=false;try{fs.writeFileSync('/app/original.txt','must fail');}catch(e){readonly=e.code==='EROFS';}
+if(!readonly)process.exit(1);
+http.createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end('<h1>Synthetic Vite cache ready</h1>');}).listen(3000,'127.0.0.1');`;
+  await writeFile(join(cwd, "build.mjs"), `import {mkdirSync,writeFileSync} from 'node:fs';mkdirSync('node_modules/.bin',{recursive:true});writeFileSync('node_modules/.bin/vite',${JSON.stringify(viteProgram)},{mode:0o755});`);
+  const vite = await startMacPreview({ cwd, files: ["package.json", "build.mjs"], sha: "c".repeat(40), stateDir: dir, identity, run: runCommand,
+    bridge: async (...args) => activeBridge = await createPreviewBridge(...args) });
+  assert.equal(vite.state, "ready", JSON.stringify(vite));
+  await page.goto(vite.url); assert.equal(await page.locator("h1").textContent(), "Synthetic Vite cache ready");
+  await assert.rejects(readFile(join(cwd, "node_modules/.vite-temp/config.mjs")), /ENOENT/);
+  console.log("PASS: Vite preview config cache writes only to bounded temporary memory; application image and original source remain read-only.");
   activeBridge.close(); await runCommand("docker", ["rm", "-f", name]);
   const standalone = join(dir, "standalone");
   await mkdir(join(standalone, "public"), { recursive: true }); await mkdir(join(standalone, "data"));
