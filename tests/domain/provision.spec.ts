@@ -19,7 +19,9 @@ test("준비 중 요청을 보존하고 같은 임대 결과를 한 번만 적�
   expect(normalizeWorkspace(ready).projects[0].setup?.status).toBe("ready");
   expect(ready.services).toHaveLength(1); expect(ready.projects[0].automation?.turns).toHaveLength(2);
   expect(reportSetup(ready, "personal", body, "runner", stamp)).toBe(ready);
-  const work = claimProjectWork(ready, { ...scope, remoteWork: true }, stamp).job!;
+  expect(claimProjectWork(ready, { ...scope, remoteWork: true }, stamp).job).toBeNull();
+  expect(claimProjectWork(ready, { ...scope, deviceId: "other", remoteWork: true, managedWork: true }, stamp).job).toBeNull();
+  const work = claimProjectWork(ready, { ...scope, remoteWork: true, managedWork: true }, stamp).job!;
   expect(work.request).toBe("그래프 구현"); expect(work.context.project.environment?.database).toBe("sqlite");
 });
 test("취소·기기·영역을 넘지 않고 동일 실행기에서만 만료된 준비를 복구한다", () => {

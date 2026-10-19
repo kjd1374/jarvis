@@ -106,3 +106,17 @@ test('supervisor restores the previous verified runtime when a candidate passes 
   assert.equal(oldStarts,2);assert.equal(JSON.parse(await readFile(join(dir,'runtime-current.json'),'utf8')).runtime,runtime);
  }finally{clearTimeout(timeout);abort.abort();await rm(dir,{recursive:true,force:true});}
 });
+test('generated cloud storage handler writes and reads through its server credential and rejects cross-site writes',async()=>{
+ const {pathToFileURL}=await import('node:url');const dir=await mkdtemp(join(tmpdir(),'jarvis-generated-api-'));const original=globalThis.fetch;
+ const priorUrl=process.env.SUPABASE_URL,priorKey=process.env.SUPABASE_SERVICE_ROLE_KEY;let value={count:0},calls=0;
+ try{
+  const files=starterFiles({target:'vercel',database:'supabase'});for(const name of ['storage.mjs','api/records.mjs']){await mkdir(dirname(join(dir,name)),{recursive:true});await writeFile(join(dir,name),files[name]);}
+  process.env.SUPABASE_URL='https://synthetic-db.invalid';process.env.SUPABASE_SERVICE_ROLE_KEY='synthetic-server-only';
+  globalThis.fetch=async(url,options)=>{calls++;assert.equal(new URL(url).origin,'https://synthetic-db.invalid');assert.equal(options.headers.Authorization,'Bearer synthetic-server-only');if(options.method==='POST'){const body=JSON.parse(options.body);assert.equal(body.key,'counter');value=body.value;return new Response('',{status:201});}return new Response(JSON.stringify([{value}]));};
+  const {default:handler}=await import(pathToFileURL(join(dir,'api/records.mjs')));
+  const invoke=async(method,origin,body)=>{const response={code:200,body:null,setHeader(){},status(code){this.code=code;return this;},json(body){this.body=body;return this;},end(){return this;}};await handler({method,headers:{host:'app.synthetic.invalid',origin},query:{key:'counter'},body},response);return response;};
+  assert.equal((await invoke('POST','https://evil.invalid',{count:1})).code,403);assert.equal(calls,0);
+  const saved=await invoke('POST','https://app.synthetic.invalid',{count:7});assert.equal(saved.code,200);assert.deepEqual(saved.body,{saved:true});
+  const loaded=await invoke('GET');assert.deepEqual(loaded.body,{value:{count:7}});assert(!JSON.stringify(loaded.body).includes('synthetic-server-only'));
+ }finally{globalThis.fetch=original;if(priorUrl===undefined)delete process.env.SUPABASE_URL;else process.env.SUPABASE_URL=priorUrl;if(priorKey===undefined)delete process.env.SUPABASE_SERVICE_ROLE_KEY;else process.env.SUPABASE_SERVICE_ROLE_KEY=priorKey;await rm(dir,{recursive:true,force:true});}
+});

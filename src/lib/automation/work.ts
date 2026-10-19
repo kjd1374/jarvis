@@ -123,10 +123,10 @@ export function changeWorkState(data: WorkspaceData, space: Space, projectId: st
   const next = updateTurn(data, project, { ...turn, status: action === "cancel" ? "cancelled" : "queued", phase: "queued", updatedAt: stamp, error: undefined, leaseOwner: undefined, leaseToken: undefined, leaseUntil: undefined });
   return { ...next, tasks: next.tasks.map(t => t.id === `work-${turn.id}` ? { ...t, status: action === "cancel" ? "decision" as const : "todo" as const } : t) };
 }
-export function claimProjectWork(data: WorkspaceData, scope: { space: Space; projectIds: (string | null)[]; deviceId: string; previews?: boolean; remoteWork?: boolean; previewCli?: boolean }, stamp: string) {
+export function claimProjectWork(data: WorkspaceData, scope: { space: Space; projectIds: (string | null)[]; deviceId: string; previews?: boolean; remoteWork?: boolean; previewCli?: boolean; managedWork?: boolean }, stamp: string) {
   let current = data;
   for (const project of current.projects.filter(p => p.space === scope.space && scope.projectIds.includes(p.id))) {
-    if (project.setup && project.setup.status !== "ready") continue;
+    if (project.setup && (project.setup.status !== "ready" || !scope.managedWork || project.setup.executionDevice !== scope.deviceId)) continue;
     const turns = project.automation?.turns ?? [];
     // A write job is never silently replayed after a crash or lease loss.
     for (const turn of turns.filter(t => t.status === "running" && Date.parse(t.leaseUntil ?? "") <= Date.parse(stamp)))
