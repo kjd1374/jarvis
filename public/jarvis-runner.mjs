@@ -544,7 +544,7 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
         deployment: { state: "not_configured", url: null, sha: null }, preview };
       await pulse(); journal.result = result; await save();
       await client.request("/api/automation/work", { ...identity, phase: "result", result });
-      log(job.previewAI ? "웹 화면 준비 결과를 저장했습니다. 구독 CLI 응답 여부는 결과와 진단에 기록했습니다." : "웹 화면 준비 결과를 저장했습니다. AI 모델은 호출하지 않았습니다."); return;
+      log(job.previewAI ? "웹 화면 준비 결과를 저장했습니다. 선택한 AI의 응답 여부는 결과와 진단에 기록했습니다." : "웹 화면 준비 결과를 저장했습니다. AI 모델은 호출하지 않았습니다."); return;
     }
     const checks = journal.checks ?? [];
     // Install only locked npm packages, with lifecycle scripts disabled and no user npm config/tokens.

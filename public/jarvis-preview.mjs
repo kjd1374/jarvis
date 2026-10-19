@@ -243,7 +243,7 @@ export function previewFailure(sha, error, stage, remote = false) {
     connection: "맥미니와 Cloudflare 사이의 연결을 완료하지 못했습니다. 연결 진단에 원인을 기록했습니다.",
     health: "임시 주소는 발급됐지만 외부에서 화면 연결을 확인하지 못했습니다. 연결 진단에 응답 상태를 기록했습니다.",
     module: "미리보기 실행 모듈을 불러오지 못했습니다. 실행기 설치 파일을 확인해야 합니다.",
-    ai: "선택한 AI의 실제 응답을 확인하지 못했습니다. 연결 진단에 로그인·사용 한도·응답 상태를 기록했습니다. 준비 완료로 처리하지 않았습니다.",
+    ai: "선택한 AI의 실제 응답을 확인하지 못했습니다. 연결 진단에 실패 원인과 응답 상태를 기록했습니다. 준비 완료로 처리하지 않았습니다.",
   };
   const localMessages = { local_model_missing: "맥미니에 translategemma:4b 모델이 없습니다. 다른 모델이나 구독 CLI로 전환하지 않았습니다.", local_model_unavailable: "맥미니의 Ollama 응답을 확인하지 못했습니다. 로컬 모델 서버의 실행 상태를 확인해야 합니다.", local_model_timeout: "맥미니의 로컬 모델 응답 시간이 초과됐습니다. 준비 완료로 처리하지 않았습니다." };
   const message = localMessages[code] ?? (code === "preview_cli_config_unavailable"

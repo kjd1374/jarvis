@@ -9,7 +9,7 @@ import type { WorkPreview } from "@/lib/automation/work-types";
 import { useWorkspace } from "./workspace-provider";
 import { useWorkspaceClock } from "./use-workspace-clock";
 import styles from "./studio.module.css";
-const previewStages = { docker: "실행 서버 연결", build: "실행 환경 준비", application: "앱 응답", configuration: "Jarvis 연결 설정", provisioning: "임시 주소 발급", connection: "외부 연결", health: "외부 주소 응답", module: "실행 모듈", ai: "구독 CLI 응답" };
+const previewStages = { docker: "실행 서버 연결", build: "실행 환경 준비", application: "앱 응답", configuration: "Jarvis 연결 설정", provisioning: "임시 주소 발급", connection: "외부 연결", health: "외부 주소 응답", module: "실행 모듈", ai: "번역 AI 응답" };
 export function previewMessage(preview: WorkPreview) {
   if (preview.state === "failed" && preview.diagnostic?.code === "preview_cli_config_unavailable")
     return "이 앱은 구독 CLI 미리보기 연결을 지원하지 않습니다. CLI를 호출하기 전에 준비를 중단했습니다. 화면만 확인하려면 미리보기 AI를 ‘연결 안 함’으로 선택해주세요.";
