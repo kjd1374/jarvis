@@ -183,6 +183,7 @@ export function scopedPayload(input: unknown, space: Space): WorkspaceData {
   }
   if (value.activeSpace !== space)
     throw new CloudError(400, "mixed_scope", "영역이 일치하지 않습니다.");
+  if (Object.keys(value.providerConnections ?? {}).some(key => key !== space)) throw new CloudError(400, "mixed_scope", "다른 영역의 서비스 연결을 함께 저장할 수 없습니다.");
   for (const key of collections)
     for (const row of value[key])
       if ("space" in row && row.space !== space)

@@ -226,7 +226,7 @@ export async function probeRemoteHealth(value, options = {}, { platform = proces
   });
 }
 
-export async function waitForRemoteHealth({ url, remoteId, signal, transport = probeRemoteHealth, clock = Date.now, delay = ms => sleep(ms, undefined, { signal }), timeoutMs = 90_000, alive = () => true }) {
+export async function waitForRemoteHealth({ url, remoteId, signal, transport = probeRemoteHealth, clock = Date.now, delay = ms => sleep(ms, undefined, { signal }), timeoutMs = 180_000, alive = () => true }) {
   if (signal?.aborted) throw remoteFailure("preview_cancelled", "health");
   // Edge registration precedes DNS publication. An immediate NXDOMAIN can stay
   // cached on macOS for the whole probe window, even after the record exists.
@@ -261,14 +261,31 @@ export async function waitForRemoteHealth({ url, remoteId, signal, transport = p
       code = statusCode === 403 ? "remote_health_denied" : "remote_health_http";
     } catch (error) {
       if (error.code === "remote_health_mismatch") throw error;
-      if (/ENOTFOUND|EAI_AGAIN/.test(error.cause?.code ?? error.code ?? "")) code = "remote_health_dns";
+      if (signal?.aborted) throw remoteFailure("preview_cancelled", "health");
+      const cause = error.cause?.code ?? error.code ?? "";
+      if (/CERT_|ERR_TLS|SELF_SIGNED|UNABLE_TO_VERIFY|DEPTH_ZERO/.test(cause)) throw remoteFailure("remote_health_tls", "health");
+      statusCode = undefined;
+      code = /ENOTFOUND|EAI_AGAIN/.test(cause) ? "remote_health_dns" : /TIMEOUT|TimeoutError|AbortError/.test(cause || error.name) ? "remote_health_timeout" : "remote_health_network";
     }
     if (clock() < until) await delay(Math.min(1000, until - clock()));
   } while (clock() < until);
   throw remoteFailure(code, "health", Number.isInteger(statusCode) ? { statusCode } : {});
 }
 
-export async function publishRemotePreview({ local, appOrigin, client, scope, binary, directory, attachCleanup, attachCliAuthorization, signal, transport = probeRemoteHealth, tunnel = startQuickTunnel }) {
+export async function publishRemotePreview(options) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try { return await publishRemotePreviewAttempt(options); }
+    catch (error) {
+      // A registered edge can still have an unpublished hostname. Discard that
+      // allocation and its gateway before one fresh attempt; never retry auth,
+      // identity/TLS failures, cancellation, or an expiring local app.
+      if (attempt || options.signal?.aborted || error.code !== "remote_health_dns" ||
+        Date.parse(options.local.expiresAt) - Date.now() < 185_000) throw error;
+    }
+  }
+}
+
+async function publishRemotePreviewAttempt({ local, appOrigin, client, scope, binary, directory, attachCleanup, attachCliAuthorization, signal, transport = probeRemoteHealth, tunnel = startQuickTunnel, health = waitForRemoteHealth }) {
   const remoteId = randomUUID();
   let config;
   try { config = await client.request("/api/preview/config"); }
@@ -295,11 +312,11 @@ export async function publishRemotePreview({ local, appOrigin, client, scope, bi
     const close = () => { remote.close(); gateway.close(); clearTimeout(timer); };
     const timer = setTimeout(close, Math.max(1, Date.parse(local.expiresAt) - Date.now())); timer.unref();
     if (!attachCleanup(local.url, close)) { close(); throw new Error("preview_bridge_missing"); }
-    try { await waitForRemoteHealth({ url: remote.url, remoteId, transport, signal, alive: () => alive }); }
+    try { await health({ url: remote.url, remoteId, transport, signal, alive: () => alive }); }
     catch (error) { close(); throw error; }
     return { ...local, kind: "remote", remoteId, url: remote.url,
       message: local.ai ? "이 PC에서 열 수 있습니다. 맥미니의 구독 CLI로 실제 번역 응답을 확인했습니다. 앱은 별도 임시 데이터로 실행하며, 요청마다 구독 사용량이 소모됩니다."
-        : "이 PC에서 열 수 있습니다. 승인된 Jarvis 기기에서만 접근하며, 맥미니가 켜져 있어야 합니다. 별도 임시 데이터로 화면·기본 기능을 확인하며, 실제 AI·외부 서비스는 연결되지 않습니다." };
+        : local.dataPersistence === "project" ? "이 PC에서 열 수 있습니다. 승인된 Jarvis 기기만 접근하며, 프로젝트 데이터는 맥미니에 보관됩니다. 화면을 다시 준비해도 DATA_DIR의 데이터는 유지됩니다." : "이 PC에서 열 수 있습니다. 승인된 Jarvis 기기에서만 접근하며, 맥미니가 켜져 있어야 합니다. 별도 임시 데이터로 화면·기본 기능을 확인하며, 실제 AI·외부 서비스는 연결되지 않습니다." };
   } catch (error) { cancel(); throw error; }
   finally { signal?.removeEventListener("abort", cancel); }
 }

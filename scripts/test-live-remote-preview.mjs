@@ -2,14 +2,14 @@
 // this process. No Jarvis production API, database, user repository or model calls.
 import assert from "node:assert/strict";
 import http from "node:http";
-import { lookup, resolve4, resolve6 } from "node:dns/promises";
+import { lookup, resolve4, resolve6, Resolver } from "node:dns/promises";
 import { spawn } from "node:child_process";
 import { generateKeyPairSync, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
-import { publishRemotePreview, startQuickTunnel } from "../public/jarvis-remote-preview.mjs";
+import { publishRemotePreview, startQuickTunnel, probeRemoteHealth } from "../public/jarvis-remote-preview.mjs";
 import { issuePreviewTicket, ticketPublicKey } from "../public/jarvis-preview-auth.mjs";
 
 assert(process.env.JARVIS_LIVE_PREVIEW_CHECK === "1", "Explicit opt-in required");
@@ -20,10 +20,15 @@ const appOrigin = "https://jarvis-preview-validation.invalid", viewer = randomUU
 const key = generateKeyPairSync("ed25519").privateKey.export({ format: "der", type: "pkcs8" }).toString("base64");
 const publicKey = ticketPublicKey(key), sha = "a".repeat(40);
 const scope = { space: "personal", projectId: "synthetic-live-check", turnId: randomUUID() };
-let approved = true, writes = 0, cleanup, browser, diagnostics = "", syntheticHost;
+let approved = true, writes = 0, cleanup, browser, diagnostics = "", syntheticHost, nextDnsEvidence = 0;
 async function diagnoseDns(name, label) {
+  const authoritative = async () => {
+    const resolver = new Resolver({ timeout: 2000, tries: 1 });
+    resolver.setServers(await resolve4("kevin.ns.cloudflare.com"));
+    return resolver.resolve4(name);
+  };
   const results = await Promise.allSettled([lookup(name, { all: true }), resolve4(name), resolve6(name),
-    fetch(`https://cloudflare-dns.com/dns-query?name=${name}&type=A`, { headers: { accept: "application/dns-json" }, signal: AbortSignal.timeout(5000) }).then(r => r.json()).then(r => ({ status: r.Status, answers: r.Answer?.length ?? 0 }))]);
+    ...["https://cloudflare-dns.com/dns-query", "https://dns.google/resolve"].map(endpoint => fetch(`${endpoint}?name=${name}&type=A`, { headers: { accept: "application/dns-json" }, signal: AbortSignal.timeout(5000) }).then(r => r.json()).then(r => ({ status: r.Status, answers: r.Answer?.length ?? 0, negativeTtl: r.Authority?.[0]?.TTL }))), authoritative()]);
   console.log("DNS evidence", label, results.map(r => r.status === "fulfilled" ? (Array.isArray(r.value) ? { answers: r.value.length } : r.value) : { code: r.reason.code ?? r.reason.cause?.code ?? r.reason.name }));
 }
 const app = http.createServer((req, res) => {
@@ -33,8 +38,19 @@ const app = http.createServer((req, res) => {
 });
 try {
   await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
-  const result = await publishRemotePreview({ local: { state: "ready", kind: "mac", url: `http://127.0.0.1:${app.address().port}/`, sha, checkedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 240_000).toISOString() },
+  const result = await publishRemotePreview({ local: { state: "ready", kind: "mac", url: `http://127.0.0.1:${app.address().port}/`, sha, checkedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 600_000).toISOString() },
     appOrigin, scope, binary, directory, attachCleanup: (_url, close) => { cleanup = close; return true; },
+    transport: async (url, options) => {
+      try { return await probeRemoteHealth(url, options); }
+      catch (error) {
+        if (Date.now() >= nextDnsEvidence) {
+          nextDnsEvidence = Date.now() + 30_000;
+          // Diagnose while the tunnel is alive. Teardown can remove its DNS record.
+          await diagnoseDns(new URL(url).hostname, "active-tunnel");
+        }
+        throw error;
+      }
+    },
     client: { request: async (path, input) => {
       if (path === "/api/preview/config") return { version: 1, publicKey };
       assert.equal(path, "/api/preview/access"); return { allowed: approved && input.deviceId === viewer };
@@ -47,6 +63,7 @@ try {
       return child;
       } });
       syntheticHost = new URL(tunnel.url).hostname;
+      console.log("Synthetic allocated hostname", syntheticHost, "provider log hostnames", [...new Set(diagnostics.match(/[a-z0-9]+(?:-[a-z0-9]+)*\.trycloudflare\.com/g))]);
       return tunnel;
     },
   });

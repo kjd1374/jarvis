@@ -1,3 +1,4 @@
+import { runAutopilotLifecycle } from "./autopilot-lifecycle.mjs";
 // Connected browser -> real private storage -> runner -> Git -> Docker -> TLS
 // -> signed viewer ticket -> app persistence. External CLI/provider data is synthetic.
 import assert from "node:assert/strict";
@@ -85,6 +86,7 @@ http.createServer((req,res)=>{
     let form = page.getByRole("dialog", { name: "프로젝트 만들기", exact: true });
     const name = "합성 연결 전체 흐름";
     await form.getByLabel("프로젝트 이름").fill(name);
+    await form.getByRole("checkbox", { name: "저장소·실행 환경 자동 준비" }).uncheck();
     await form.getByLabel("프로젝트 설명").fill("등록부터 실제 화면 저장까지 연결 검증");
     await form.getByRole("button", { name: "프로젝트 저장", exact: true }).click(); await expect(form).not.toBeVisible();
     await expect.poll(async () => (await snapshot()).data.projects.find(p => p.name === name)?.id).toBeTruthy();
@@ -159,12 +161,13 @@ http.createServer((req,res)=>{
     assert.deepEqual(after.data.notes, before.data.notes); assert.equal(after.data.projects.find(p => p.id === project.id).automation.turns.length, 2);
     assert(!(await api("/api/workspace?space=company", account.token)).body.data.projects.some(p => p.id === project.id));
     recordCheck("connected lifecycle: browser registration -> existing scoped runner discovery -> synthetic CLI answer -> resumed runner -> real Git/Docker -> persisted result -> real signed-ticket HTTPS open -> isolated app save/reload; outage, copied links, revoked device and cross-space access rejected; no production/model calls");
+    await runAutopilotLifecycle({ base, browser, runner: resumed, network, approve, snapshot, recordCheck });
   } catch (error) {
     await page?.screenshot({ path: "test-results/project-lifecycle-failure.png", fullPage: true }).catch(() => {});
     throw error;
   } finally {
     globalThis.fetch = nativeFetch; await browser?.close(); bridge?.close();
-    if (container) await runCommand("docker", ["rm", "-f", container]).catch(() => {});
+    if (container) { await runCommand("docker", ["rm", "-f", container]).catch(() => {}); await runCommand("docker", ["image", "rm", `${container}:app`]).catch(() => {}); }
     if (gitServer) { gitServer.closeAllConnections(); await new Promise(r => gitServer.close(r)); }
     await rm(directory, { recursive: true, force: true });
   }

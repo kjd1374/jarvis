@@ -119,7 +119,7 @@ export function CliRunnerSetup() {
       <p><strong>이미 설치했다면 업데이트만 진행하세요.</strong> 아래 설치 파일을 새로 받은 뒤 맥미니에서 실행하면 회사·개인 프로젝트 연결과 기기 승인을 그대로 유지합니다.</p>
       <a className={styles.secondaryButton} href="/jarvis-mac.mjs" download>맥미니 설치·업데이트 파일 받기</a>
       <pre>cd ~/Downloads{"\n"}node jarvis-mac.mjs update</pre>
-      <p>최신 실행기는 2.5.2입니다. macOS에서 새 임시 주소의 DNS 조회가 실패하던 문제와 앱 소스·Vite 실행 문제를 함께 수정했습니다. 구독 CLI 미리보기는 지원 앱에서만 선택해주세요. 터미널의 ‘실행기 2.5.2 자동 시작을 등록했습니다’와 프로젝트의 실행기 버전을 확인해주세요. 저장된 대기 요청은 다시 보내지 않아도 됩니다.</p>
+      <p>최신 실행기는 2.6.0입니다. 한 번 업데이트하면 새 프로젝트의 저장소·실행 환경을 준비하고 이후 실행기 업데이트는 작업 사이에 자동으로 확인합니다. 다운로드·검증 실패 시 현재 버전을 유지하며 새 버전 시작 실패 시 이전 버전으로 복구합니다. 프로젝트에서 실제 접속 버전을 확인해주세요. 저장된 대기 요청은 다시 보내지 않아도 됩니다.</p>
       <p>원격 미리보기는 실행기 2.3.0부터, Jarvis 테스트 실행·최근 수정본 이어가기는 2.4.0부터 지원합니다. 업데이트 후 프로젝트에서 테스트 실행 또는 화면 준비를 눌러주세요. 다른 PC에는 실행기나 별도 프로그램을 설치하지 않습니다. 설치가 끝나면 일반 개발·테스트는 Jarvis에서 요청합니다.</p>
       <p>맥미니에서 기존 수동 실행기를 Ctrl+C로 종료한 뒤 설치 파일을 받아 아래 명령을 실행합니다. Node 24+, GitHub·Codex 구독 로그인과 Docker Desktop 또는 Colima 등 Docker 호환 엔진이 필요합니다.</p>
       <pre>cd ~/Downloads{"\n"}node jarvis-mac.mjs install --config jarvis-runner.json</pre>

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { verifyPreviewTicket, previewOrigin } from "../public/jarvis-preview-auth.mjs";
 import { randomUUID } from "node:crypto";
 import { fixture, ticket, publicKey, expected, viewer, enter, cookieOf } from "./support/remote-preview.mjs";
-import { startQuickTunnel, tunnelFailure, waitForRemoteHealth, probeRemoteHealth } from "../public/jarvis-remote-preview.mjs";
+import { startQuickTunnel, tunnelFailure, waitForRemoteHealth, probeRemoteHealth, publishRemotePreview } from "../public/jarvis-remote-preview.mjs";
 import http from "node:http";
 import https from "node:https";
 import { createLifecycleNetwork, lifecycleRemote } from "./support/lifecycle-network.mjs";
@@ -95,8 +95,64 @@ test("public health tolerates delayed propagation, records HTTP failures and nev
     return { ok: true, status: 200, text: async () => "synthetic-id" };
   } });
   assert.equal(time - started, 65_000);
+  const slowDnsStarted = time;
+  await waitForRemoteHealth({ ...options, timeoutMs: undefined, transport: async () => {
+    if (time - slowDnsStarted < 125_000) throw Object.assign(new Error("Negative DNS cache"), { code: "ENOTFOUND" });
+    return { ok: true, status: 200, text: async () => "synthetic-id" };
+  } });
+  assert.equal(time - slowDnsStarted, 125_000);
+  const unavailableStarted = time;
+  await assert.rejects(waitForRemoteHealth({ ...options, timeoutMs: undefined, transport: async () => {
+    throw Object.assign(new Error("DNS unavailable"), { code: "ENOTFOUND" });
+  } }), error => error.code === "remote_health_dns");
+  assert.equal(time - unavailableStarted, 185_000);
   const cancelled = new AbortController(); cancelled.abort();
   await assert.rejects(waitForRemoteHealth({ ...options, signal: cancelled.signal, delay: () => assert.fail("cancelled startup must not wait"), transport: () => assert.fail("cancelled startup must not connect") }), error => error.code === "preview_cancelled");
+});
+
+test("an unpublished hostname is replaced once with a fresh gateway; permanent failure, mismatch and cancellation stay closed", async () => {
+  for (const scenario of ["recover", "permanent", "mismatch", "tls", "cancel", "expiring"]) {
+    const allocated = [], cleanups = [], identities = [], controller = new AbortController(); let time = 0;
+    const options = {
+      local: { state: "ready", kind: "mac", url: "http://127.0.0.1:45678/", sha: "a".repeat(40), expiresAt: new Date(Date.now() + (scenario === "expiring" ? 60_000 : 600_000)).toISOString() },
+      appOrigin: "https://jarvis.invalid", scope: { space: "personal", projectId: "synthetic", turnId: randomUUID() }, signal: controller.signal,
+      client: { request: async () => ({ version: 1, publicKey }) },
+      attachCleanup: (_url, close) => { cleanups.push(close); return true; },
+      tunnel: async ({ localUrl }) => {
+        if (allocated.length) assert(allocated[0].closed, "old tunnel must close before reallocation");
+        const entry = { localUrl, url: `https://synthetic-recovery-${allocated.length}.trycloudflare.com/`, closed: false };
+        allocated.push(entry); let onExit;
+        return { url: entry.url, onExit(fn) { onExit = fn; }, close() { if (!entry.closed) { entry.closed = true; onExit?.(); } } };
+      },
+      health: input => {
+        identities.push(input.remoteId);
+        return waitForRemoteHealth({ ...input, timeoutMs: 10, clock: () => time, delay: async ms => { time += ms; } });
+      },
+      transport: async url => {
+        if (scenario === "mismatch") return new Response("wrong-gateway");
+        if (scenario === "tls") throw Object.assign(new Error("certificate failure"), { code: "CERT_HAS_EXPIRED" });
+        if (scenario === "cancel") controller.abort();
+        if (scenario !== "recover" || allocated.length === 1) throw Object.assign(new Error("unpublished"), { code: "ENOTFOUND" });
+        // Real gateway response, bound to the replacement hostname and identity.
+        const entry = allocated.at(-1);
+        return new Promise((resolve, reject) => {
+          http.get(entry.localUrl + "_jarvis/health", { headers: { Host: new URL(url).host } }, response => {
+            let body = ""; response.on("data", bytes => { body += bytes; });
+            response.on("end", () => resolve(new Response(body, { status: response.statusCode })));
+          }).on("error", reject);
+        });
+      },
+    };
+    try {
+      if (scenario === "recover") {
+        const result = await publishRemotePreview(options);
+        assert.equal(result.url, allocated[1].url); assert.equal(result.remoteId, identities[1]);
+        assert.notEqual(identities[0], identities[1]); assert(allocated[0].closed); assert(!allocated[1].closed);
+      } else await assert.rejects(publishRemotePreview(options), e => e.code === ({ mismatch: "remote_health_mismatch", tls: "remote_health_tls", cancel: "preview_cancelled" }[scenario] ?? "remote_health_dns"));
+      assert.equal(allocated.length, ["recover", "permanent"].includes(scenario) ? 2 : 1);
+    } finally { for (const close of cleanups) close(); }
+    assert(allocated.every(item => item.closed));
+  }
 });
 
 test("preview tickets are short-lived, signed and bound to exact origin, project, commit and viewer", () => {

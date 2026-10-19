@@ -16,6 +16,7 @@ import { useWorkspace } from "./workspace-provider";
 import { Modal, WorkspaceControls } from "./workspace-controls";
 import { Icon } from "./icon";
 import { RequestsPanel } from "./requests-panel";
+import { newProjectSetup } from "@/lib/automation/provision";
 import styles from "./studio.module.css";
 
 export function WorkItems({
@@ -54,6 +55,7 @@ function WorkItemsView({
   const [view, setView] = useState(initialView);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [automatic, setAutomatic] = useState(true);
   const [selectedProject, setSelectedProject] = useState(projectId ?? "");
   const [dueDate, setDueDate] = useState(today());
   const [status, setStatus] = useState<TaskStatus>("todo");
@@ -78,6 +80,7 @@ function WorkItemsView({
                 space,
                 name: title.trim(),
                 description: description.trim(),
+                ...(automatic ? { setup: { ...newProjectSetup(now()), requests: description.trim() ? [{ id: id(), request: description.trim().slice(0, 8000), mode: "change" as const, publish: "merge" as const, createdAt: now() }] : [] } } : {}),
                 createdAt: now(),
               },
             ],
@@ -381,16 +384,18 @@ function WorkItemsView({
               />
             </label>
             {kind === "projects" ? (
-              <label className={styles.field}>
+              <><label className={styles.field}>
                 프로젝트 설명
                 <textarea
                   rows={3}
                   maxLength={10000}
                   value={description}
                   onChange={(event) => setDescription(event.target.value)}
-                  placeholder="목표와 배경을 간단히 적어주세요"
+                  placeholder="만들고 싶은 기능과 목표를 적어주세요. 자동 준비 시 첫 개발 요청으로 실행합니다."
                 />
               </label>
+              <label className={styles.field}><span><input type="checkbox" checked={automatic} onChange={e => setAutomatic(e.target.checked)} /> 저장소·실행 환경 자동 준비</span></label>
+              <p className={styles.modalDescription}>비공개 GitHub 저장소를 만들고 사용 가능한 환경을 선택합니다. 설명이 있으면 첫 개발 요청으로 실행하고, 검증 후 병합합니다. 유료 서비스로 자동 전환하지 않습니다. 기존 저장소를 직접 연결하려면 해제하세요.</p></>
             ) : (
               <>
                 <label className={styles.field}>

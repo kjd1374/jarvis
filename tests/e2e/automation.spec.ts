@@ -390,3 +390,28 @@ test("최근 수정본으로 원격 테스트·화면 준비·후속 요청을 �
   await page.setViewportSize({ width: 320, height: 740 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+test("새 프로젝트는 자동 준비와 첫 개발 요청을 저장하고 준비 중 후속 대화를 보존한다", async ({ page }) => {
+  const data = automationWorkspace(new Date().toISOString()); data.activeSpace = "personal";
+  await seed(page, data); await page.goto("/projects"); await ready(page);
+  await page.getByRole("button", { name: "프로젝트 만들기", exact: true }).click();
+  const form = page.getByRole("dialog", { name: "프로젝트 만들기", exact: true });
+  await form.getByLabel("프로젝트 이름", { exact: true }).fill("자동 그래프 앱");
+  await form.getByLabel("프로젝트 설명", { exact: true }).fill("연도별 수익률 그래프를 만들고 입력값 저장");
+  await expect(form.getByRole("checkbox", { name: "저장소·실행 환경 자동 준비" })).toBeChecked();
+  await form.getByRole("button", { name: "프로젝트 저장", exact: true }).click(); await expect(form).not.toBeVisible();
+  const project = (await state(page))!.projects.find(p => p.name === "자동 그래프 앱")!;
+  expect(project.setup).toMatchObject({ status: "queued", target: "auto", requests: [{ request: "연도별 수익률 그래프를 만들고 입력값 저장", mode: "change" }] });
+  await page.goto(`/projects/${project.id}`); await ready(page);
+  const agent = page.getByRole("region", { name: "프로젝트 AI 작업실", exact: true });
+  await expect(agent).toContainText("개발 환경 자동 준비");
+  await agent.getByLabel("AI에게 요청", { exact: true }).fill("배당금 포함 여부도 선택하게 해줘");
+  await agent.getByRole("button", { name: "요청 보내기", exact: true }).click();
+  await expect(agent.getByLabel("AI에게 요청", { exact: true })).toHaveValue("");
+  await page.reload(); await ready(page);
+  expect((await state(page))!.projects.find(p => p.id === project.id)!.setup!.requests).toHaveLength(2);
+  await expect(agent).toContainText("배당금 포함 여부도 선택하게 해줘");
+  await agent.getByRole("button", { name: "자동 준비 취소", exact: true }).click();
+  await expect(agent.getByLabel("AI에게 요청", { exact: true })).toBeDisabled();
+  await agent.getByRole("button", { name: "이어서 준비", exact: true }).click();
+  await expect(agent.getByLabel("AI에게 요청", { exact: true })).toBeEnabled();
+});

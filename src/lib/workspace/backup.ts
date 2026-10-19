@@ -21,7 +21,7 @@ export async function createBackup(
   includesFiles = true,
   readOriginal = readFile,
 ): Promise<Backup> {
-  const value = normalizeWorkspace(data);
+  const value = { ...normalizeWorkspace(data), providerConnections: undefined };
   const files: Backup["files"] = [];
   let size = 0;
   if (includesFiles)
@@ -92,9 +92,11 @@ export function parseBackup(text: string): Backup {
     throw new Error(
       "원본 포함 백업에 빠진 파일이 있습니다. 원본 제외 백업 여부를 확인해주세요.",
     );
+  data.providerConnections = undefined;
   // Restoring a record is not permission to replay a previous external code change.
   data.projects = data.projects.map(p => p.automation ? { ...p, automation: { turns: p.automation.turns.map(t =>
     ["queued", "running"].includes(t.status) ? { ...t, status: "interrupted" as const, error: "imported_request_review", leaseOwner: undefined, leaseToken: undefined, leaseUntil: undefined } : t) } } : p);
+  data.projects = data.projects.map(p => p.setup && ["queued", "running"].includes(p.setup.status) ? { ...p, setup: { ...p.setup, status: "interrupted", error: "imported_request_review", leaseOwner: undefined, leaseToken: undefined, leaseUntil: undefined } } : p);
   data.documents = data.documents.map(d => d.sheet ? { ...d, sheet: { ...d.sheet, runnerSeenAt: undefined, questions: d.sheet.questions.map(q =>
     ["queued", "running"].includes(q.status) ? { ...q, status: "interrupted" as const, error: "imported_request_review", leaseOwner: undefined, leaseToken: undefined, leaseUntil: undefined } : q) } } : d);
   return { ...value, data };

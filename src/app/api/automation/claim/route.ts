@@ -1,3 +1,5 @@
+import { credentialsFor } from "@/lib/automation/providers";
+import { claimSetup } from "@/lib/automation/provision";
 import { checkOrigin, CloudError, failure, readJson, reply, spaceParam } from "@/lib/cloud/server";
 import { changeWorkspace } from "@/lib/automation/server";
 import { claimProjectWork } from "@/lib/automation/work";
@@ -19,7 +21,7 @@ export async function POST(request: Request) {
     const supportsWork = body.workVersion === 1 && provider === "codex";
     const projectScope = supportsWork && body.projectScope !== "selected" ? "space" : "selected";
     const stamp = new Date().toISOString();
-    const result = await changeWorkspace(request, space, (data, deviceId) => {
+    const result = await changeWorkspace(request, space, (data, deviceId, ownerId) => {
       let projects: (string | null)[];
       try { projects = runnerProjectIds(data, space, requestedProjects, projectScope); }
       catch { throw new CloudError(400, "mixed_scope", "이 영역의 프로젝트만 실행기에 연결할 수 있습니다."); }
@@ -30,8 +32,13 @@ export async function POST(request: Request) {
         data = document.data;
         if (document.job) return { data, result: { job: document.job } };
       }
+      if (supportsWork && body.provisionVersion === 1) {
+        const setup = claimSetup(data, { space, projectIds: projects, deviceId }, stamp);
+        data = setup.data;
+        if (setup.job) return { data, result: { job: { ...setup.job, credentials: credentialsFor(data, ownerId, space) } } };
+      }
       if (supportsWork) {
-        const work = claimProjectWork(data, { space, projectIds: projects, deviceId, previews: body.previewVersion === 1, remoteWork: body.remoteWorkVersion === 1, previewCli: body.previewCliVersion === 1 }, stamp);
+        const work = claimProjectWork(data, { space, projectIds: projects, deviceId, previews: body.previewVersion === 1, remoteWork: body.remoteWorkVersion === 1, previewCli: body.previewCliVersion === 1, managedWork: body.provisionVersion === 1 }, stamp);
         data = work.data;
         if (work.job) return { data, result: { job: work.job } };
       }

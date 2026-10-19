@@ -5,7 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile, chmod, rm, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve, join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const LABEL = "app.jarvis.runner";
 export function macCommandPath({ node = process.execPath, home = homedir(), path = process.env.PATH ?? "" } = {}) {
@@ -68,7 +68,9 @@ export async function downloadRuntime(origin, destination, transport = fetch) {
   };
   const manifest = JSON.parse(new TextDecoder().decode(await get("jarvis-runtime.json")));
   if (!/^2\.\d+\.\d+$/.test(manifest.version ?? "")) throw new Error("실행기 버전을 확인하지 못했습니다.");
-  const files = ["jarvis-runner.mjs", "jarvis-preview.mjs", "jarvis-remote-preview.mjs", "jarvis-preview-auth.mjs", "jarvis-preview-cli.mjs"];
+  const required = ["jarvis-runner.mjs", "jarvis-preview.mjs", "jarvis-remote-preview.mjs", "jarvis-preview-auth.mjs", "jarvis-preview-cli.mjs", "jarvis-provision.mjs", "jarvis-supervisor.mjs", "jarvis-mac.mjs"];
+  const files = Object.keys(manifest.files ?? {});
+  if (files.length > 24 || required.some(name => !files.includes(name)) || files.some(name => !/^jarvis-[a-z0-9-]+\.mjs$/.test(name))) throw new Error("실행기 파일 목록을 확인하지 못했습니다. 기존 실행기는 유지됩니다.");
   const downloaded = [];
   for (const name of files) {
     const bytes = await get(name), expected = manifest.files?.[name];
@@ -77,6 +79,7 @@ export async function downloadRuntime(origin, destination, transport = fetch) {
   }
   await mkdir(destination, { recursive: true, mode: 0o700 });
   for (const [name, bytes] of downloaded) await writeFile(join(destination, name), bytes, { mode: 0o600 });
+  await writeFile(join(destination, "jarvis-runtime.json"), JSON.stringify(manifest), { mode: 0o600 });
   return manifest.version;
 }
 export async function installedConfig(plist, run, read = readFile) {
@@ -201,10 +204,14 @@ export async function main(args = process.argv.slice(2)) {
   const version = await downloadRuntime(config.origin, runtime);
   console.log("Cloudflare 원격 연결 프로그램을 검증합니다. 미리보기는 Jarvis에서 승인된 기기로 열 때만 접근할 수 있습니다.");
   await downloadTunnel(runtime, run);
-  const configPath = join(runtime, "jarvis-runner.json");
+  const configPath = join(directory, "jarvis-runner.json");
   await writeFile(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
   await mkdir(dirname(plist), { recursive: true });
-  const contents = launchAgent({ node: process.execPath, runner: join(runtime, "jarvis-runner.mjs"), config: configPath, directory, path });
+  const { launcherSource } = await import(pathToFileURL(join(runtime, "jarvis-supervisor.mjs")));
+  const launcher = join(directory, "jarvis-launcher.mjs");
+  await writeFile(launcher, launcherSource, { mode: 0o600 });
+  await writeFile(join(directory, "runtime-current.json"), JSON.stringify({ runtime }), { mode: 0o600 });
+  const contents = launchAgent({ node: process.execPath, runner: launcher, config: configPath, directory, path });
   const staged = join(runtime, "agent.plist"); await writeFile(staged, contents, { mode: 0o600 });
   if ((await run("plutil", ["-lint", staged])).code !== 0) throw new Error("자동 시작 설정 검증에 실패했습니다. 기존 실행기는 유지됩니다.");
   console.log("자동 실행 등록을 갱신합니다. 기존 실행기 종료와 새 등록 상태를 확인합니다.");
