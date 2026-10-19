@@ -9,7 +9,7 @@ import type { WorkPreview } from "@/lib/automation/work-types";
 import { useWorkspace } from "./workspace-provider";
 import { useWorkspaceClock } from "./use-workspace-clock";
 import styles from "./studio.module.css";
-const previewStages = { docker: "실행 서버 연결", build: "실행 환경 준비", application: "앱 응답", configuration: "Jarvis 연결 설정", provisioning: "임시 주소 발급", connection: "외부 연결", health: "외부 주소 응답", module: "실행 모듈", ai: "구독 CLI 응답" };
+const previewStages = { docker: "실행 서버 연결", build: "실행 환경 준비", application: "앱 응답", configuration: "Jarvis 연결 설정", provisioning: "임시 주소 발급", connection: "외부 연결", health: "외부 주소 응답", module: "실행 모듈", ai: "번역 AI 응답" };
 export function previewMessage(preview: WorkPreview) {
   if (preview.state === "failed" && preview.diagnostic?.code === "preview_cli_config_unavailable")
     return "이 앱은 구독 CLI 미리보기 연결을 지원하지 않습니다. CLI를 호출하기 전에 준비를 중단했습니다. 화면만 확인하려면 미리보기 AI를 ‘연결 안 함’으로 선택해주세요.";
@@ -27,7 +27,7 @@ export function PreviewResult({ preview, project, turnId }: { preview: WorkPrevi
       {preview.kind === "mac" ? "맥미니에서만 열기 ↗" : preview.kind === "remote" ? "이 PC에서 화면 열기 ↗" : "이 버전의 웹 화면 열기 ↗"}
     </a>}
     <p>{expired ? "화면 준비를 다시 누르면 현재 코드로 새 미리보기를 준비합니다." : previewMessage(preview)}</p>
-    {preview.ai && <p>구독 CLI 실제 응답 확인 · 안녕하세요 → {preview.ai.sample} · {dateLabel(preview.ai.verifiedAt)}</p>}
+    {preview.ai && <p>{preview.ai.provider === "ollama" ? "로컬 LLM 실제 응답 확인 · TranslateGemma" : "구독 CLI 실제 응답 확인"} · 안녕하세요 → {preview.ai.sample} · {dateLabel(preview.ai.verifiedAt)}</p>}
     {preview.diagnostic && <details className={styles.compactDisclosure}><summary>연결 진단</summary>
       <p>{previewStages[preview.diagnostic.stage]} · {preview.diagnostic.code}{preview.diagnostic.statusCode ? ` · HTTP ${preview.diagnostic.statusCode}` : ""}{preview.diagnostic.exitCode !== undefined ? ` · 종료 코드 ${preview.diagnostic.exitCode}` : ""}</p>
     </details>}
@@ -45,12 +45,12 @@ export function ProjectScreen({ project }: { project: Project }) {
   const [error, setError] = useState("");
   const [revisionChoice, setRevision] = useState<{ serviceId: string; value: string } | null>(null);
   const revision = revisionChoice && revisionChoice.serviceId === service?.id ? revisionChoice.value : service ? preferredWorkRevision(project, service.id, repositoryFor(service)!) : "main";
-  const [previewAI, setPreviewAI] = useState<"none" | "codex">([...project.automation?.turns ?? []].reverse().find(t => t.mode === "preview")?.previewAI ?? "none");
+  const [previewAI, setPreviewAI] = useState<"none" | "codex" | "ollama">([...project.automation?.turns ?? []].reverse().find(t => t.mode === "preview")?.previewAI ?? "none");
   const recent = service && latestWorkSource(project, service.id, repositoryFor(service)!);
   const source = revision === "latest" ? recent : undefined;
   const pending = useRef(false), requestId = useRef(id());
   const turns = (project.automation?.turns ?? []).filter(t => t.serviceId === service?.id && t.repository === (service && repositoryFor(service)));
-  const latest = [...turns].reverse().find(t => t.result?.preview && (source ? t.id === source.id || t.sourceTurnId === source.id : !t.sourceTurnId && t.result.outcome !== "pr_open"));
+  const latest = [...turns].reverse().find(t => t.result?.preview && (t.previewAI ?? "none") === previewAI && (source ? t.id === source.id || t.sourceTurnId === source.id : !t.sourceTurnId && t.result.outcome !== "pr_open"));
   const waiting = turns.find(t => t.mode === "preview" && ["queued", "running"].includes(t.status));
   const testing = turns.find(t => t.mode === "test" && ["queued", "running"].includes(t.status));
   const sourceChanged = source && turns.some(t => t.sourceTurnId === source.id && t.error === "work_source_changed");
@@ -58,7 +58,7 @@ export function ProjectScreen({ project }: { project: Project }) {
     if (!service || pending.current || saving || (mode === "preview" ? waiting : testing)) return;
     pending.current = true; setError("");
     try {
-      await mutate(d => enqueueWork(d, project.space, project.id, service.id, mode === "test" ? "선택한 코드의 자동 테스트를 실행해주세요." : "선택한 코드의 웹 화면을 준비해주세요.", mode, "pr", now(), requestId.current, chosenRevision === "latest" ? recent?.id : undefined, mode === "preview" && chosenAI === "codex" ? "codex" : undefined));
+      await mutate(d => enqueueWork(d, project.space, project.id, service.id, mode === "test" ? "선택한 코드의 자동 테스트를 실행해주세요." : "선택한 코드의 웹 화면을 준비해주세요.", mode, "pr", now(), requestId.current, chosenRevision === "latest" ? recent?.id : undefined, mode === "preview" && chosenAI !== "none" ? chosenAI : undefined));
       requestId.current = id();
     } catch (e) { setError(e instanceof Error ? e.message : "화면 준비 요청을 저장하지 못했습니다."); }
     finally { pending.current = false; }
@@ -77,12 +77,13 @@ export function ProjectScreen({ project }: { project: Project }) {
     {sourceChanged && <div role="status"><p>저장된 PR의 코드나 상태가 달라졌습니다. 이미 반영한 화면을 확인하려면 기본 브랜치로 준비해주세요.</p>
       <button className={styles.secondaryButton} disabled={saving || !!waiting} onClick={() => { setRevision({ serviceId: service!.id, value: "main" }); void prepare("preview", previewAI, "main"); }}>반영된 코드로 화면 준비</button>
     </div>}
-    <label>미리보기 AI<select aria-label="미리보기 AI" value={previewAI} onChange={e => setPreviewAI(e.target.value === "codex" ? "codex" : "none")}>
-      <option value="none">연결 안 함 · 화면·저장 확인</option><option value="codex">현재 구독 CLI · 사용량 소모</option>
+    <label>미리보기 AI<select aria-label="미리보기 AI" value={previewAI} onChange={e => setPreviewAI(e.target.value === "ollama" ? "ollama" : e.target.value === "codex" ? "codex" : "none")}>
+      <option value="ollama">맥미니 로컬 LLM · TranslateGemma</option><option value="none">연결 안 함 · 화면·저장 확인</option><option value="codex">현재 구독 CLI · 사용량 소모</option>
     </select></label>
+    {previewAI === "ollama" && <p>맥미니에 설치된 TranslateGemma로 통역합니다. 모델과 실제 번역 응답을 확인한 뒤 화면을 준비하며, 구독 CLI나 유료 API로 전환하지 않습니다.</p>}
     {previewAI === "codex" && <p>지원 앱 안의 AI 기능을 구독 CLI에 연결하는 선택입니다. Jarvis의 코드 수정용 CLI 연결과는 별개입니다. 짧은 번역 응답을 실제 확인하며 요청마다 구독 사용량이 소모됩니다. API 키 과금으로 전환하지 않으며 임시 화면 한 개에서 최대 20회 요청할 수 있습니다.</p>}
-    {latest?.result?.preview ? <PreviewResult preview={latest.result.preview} project={project} turnId={latest.id} /> : <p>{!service ? project.setup ? "저장소와 실행 환경을 자동으로 준비하고 있습니다. 준비가 끝나면 개발 요청과 화면 확인이 이어집니다." : "화면 준비와 자동 테스트에 사용할 GitHub 저장소를 먼저 등록해주세요." : previewAI === "codex"
-      ? "현재 코드의 임시 앱을 실행하고 구독 CLI의 번역 응답을 확인합니다. 준비가 끝나면 이 PC에서 열 수 있습니다."
+    {latest?.result?.preview ? <PreviewResult preview={latest.result.preview} project={project} turnId={latest.id} /> : <p>{!service ? project.setup ? "저장소와 실행 환경을 자동으로 준비하고 있습니다. 준비가 끝나면 개발 요청과 화면 확인이 이어집니다." : "화면 준비와 자동 테스트에 사용할 GitHub 저장소를 먼저 등록해주세요." : previewAI !== "none"
+      ? "현재 코드의 임시 앱을 실행하고 선택한 AI의 번역 응답을 확인합니다. 준비가 끝나면 이 PC에서 열 수 있습니다."
       : "배포 주소가 없으면 맥미니에서 임시 화면을 준비합니다. AI는 연결하지 않습니다."}</p>}
     {latest?.result?.preview?.state === "failed" && latest.result.preview.diagnostic?.code === "preview_cli_config_unavailable" && <button className={styles.secondaryButton} disabled={saving || !service || !!waiting} onClick={() => { setPreviewAI("none"); void prepare("preview", "none"); }}>AI 연결 없이 화면 준비</button>}
     {waiting && <p role="status">화면 준비: {waiting.status === "queued" ? queuedWorkMessage(waiting, service?.monitoring, clock) : "실행기가 화면을 준비하고 있습니다. 완료되면 화면 열기 버튼이 표시됩니다."}</p>}

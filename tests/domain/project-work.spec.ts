@@ -235,3 +235,20 @@ test("최근 확인한 기본 브랜치를 기본 선택하되 실패·다른 �
   project.automation!.turns.push({ ...original.automation!.turns[0], id: "33333333-3333-4333-8333-333333333333", createdAt: new Date(Date.parse(later) + 60_000).toISOString() });
   expect(choose()).toBe("latest");
 });
+
+test("로컬 LLM 요청은 전용 실행기 역량과 일치하는 실제 모델 응답이 있어야 완료된다", () => {
+  const data=enqueueWork(automationWorkspace(),"company","auto-project","auto-service","로컬 통역 준비","preview","pr",stamp,uuid,undefined,"ollama");
+  expect(normalizeWorkspace(data).projects[0].automation!.turns[0].previewAI).toBe("ollama");
+  expect(claimProjectWork(data,{...scope,previews:true,remoteWork:true,previewCli:true},stamp).job).toBeNull();
+  const claimed=claimProjectWork(data,{...scope,previews:true,remoteWork:true,previewLocal:true},stamp), job=claimed.job!;
+  expect(job.previewAI).toBe("ollama");
+  const preview={state:"ready",kind:"remote",remoteId:uuid,url:"https://synthetic-local.trycloudflare.com/",sha:"a".repeat(40),checkedAt:stamp,expiresAt:new Date(Date.parse(stamp)+3600_000).toISOString(),message:"합성 로컬 응답",ai:{provider:"ollama",model:"translategemma:4b",verifiedAt:stamp,sample:"Xin chào"}};
+  const report={...result,outcome:"answered",changes:[],followUps:[],prUrl:null,branch:null,headSha:null,preview};
+  const body={projectId:job.projectId,jobId:job.id,leaseToken:job.leaseToken,phase:"result",result:report};
+  const completed=reportProjectWork(claimed.data,"company",body,scope.deviceId,stamp);
+  expect(normalizeWorkspace(completed).projects[0].automation!.turns[0].result?.preview?.ai?.provider).toBe("ollama");
+  expect(()=>reportProjectWork(claimed.data,"company",{...body,result:{...report,preview:{...preview,ai:{...preview.ai,provider:"codex"}}}},scope.deviceId,stamp)).toThrow();
+  expect(()=>parseWorkPreview({...preview,ai:{...preview.ai,model:"unverified"}})).toThrow();
+  const observed=observeWorkRunner(data,scope,{runnerVersion:"2.7.0",previewVersion:1,previewLocalVersion:1},stamp);
+  expect(normalizeWorkspace(observed).services[0].monitoring?.runnerConnection?.previewLocal).toBe(true);
+});

@@ -215,6 +215,20 @@ http.createServer(async(req,res)=>{
       assert.equal(denied.status, 503); assert.equal(inferenceCalls, callsBefore, "revocation must prevent model invocation, including backend-originated calls");
     });
   } finally { cliGate.close(); }
+  let localCalls = 0;
+  const localPreview = await startMacPreview({ ...cliOptions, aiProvider: 'ollama', cliInference: async () => { localCalls++; return 'Xin chào'; } });
+  assert.equal(localPreview.state, 'ready', JSON.stringify(localPreview));
+  assert.equal(localPreview.ai.provider, 'ollama'); assert.equal(localPreview.ai.model, 'translategemma:4b');
+  const localConfig = await (await fetch(localPreview.url + 'api/config')).json();
+  assert.equal(localConfig.profiles.jarvis.model, 'translategemma:4b'); assert.equal(localConfig.profiles.jarvis.warmup, false);
+  assert.equal((await fetch(localPreview.url + 'api/translate', {method:'POST'})).status, 503);
+  assert.equal(localCalls, 1);
+  assert(attachPreviewCliAuthorization(localPreview.url, async () => true));
+  const localAnswer = await (await fetch(localPreview.url + 'api/translate', {method:'POST'})).json();
+  assert.equal(localAnswer.translation, 'Xin chào'); assert.equal(localCalls, 2);
+  assert(attachPreviewCliAuthorization(localPreview.url, async () => false));
+  assert.equal((await fetch(localPreview.url + 'api/translate', {method:'POST'})).status, 503); assert.equal(localCalls, 2);
+  console.log('PASS MODEL MOCK: local provider profile, verified probe, app request and authorization/revocation through the network-disabled container; no installed model called.');
   let failedCalls = 0;
   const unavailable = await startMacPreview({ ...cliOptions, cliInference: async () => { failedCalls++; throw Object.assign(new Error('private login evidence'), { code: 'cli_login_required', stage: 'ai' }); } });
   console.log('Synthetic failure-path evidence:', JSON.stringify({ calls: failedCalls, diagnostic: unavailable.diagnostic }));

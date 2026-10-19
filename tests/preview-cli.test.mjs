@@ -63,3 +63,33 @@ test("requested JSON completions reject plain-text answers instead of claiming s
     else assert.equal(await call, content);
   }
 });
+
+test("local inference verifies the installed model and forwards only bounded completion data", async () => {
+  const { createLocalInference, LOCAL_MODEL, ollamaRequest } = await import('../public/jarvis-preview-cli.mjs');
+  const calls=[];
+  const local=await createLocalInference({request:async(path,options)=>{
+    calls.push({path,options});
+    if(path==='/api/tags')return {status:200,body:{models:[{name:LOCAL_MODEL}]}};
+    assert.equal(path,'/v1/chat/completions');
+    assert.deepEqual(options.body,{model:LOCAL_MODEL,messages:prompt.messages,stream:false,temperature:0,max_tokens:64});
+    return {status:200,body:{choices:[{message:{content:'Xin chào'},finish_reason:'stop'}]}};
+  }});
+  const signal=new AbortController().signal;
+  assert.equal(await local.inference({...prompt,model:'other',baseUrl:'http://not-allowed',max_tokens:64},{signal}),'Xin chào');
+  assert.equal(calls[1].options.signal,signal); assert.equal(local.model,LOCAL_MODEL);
+  await assert.rejects(local.inference({...prompt,tools:[]}),e=>e.code==='invalid_completion');
+  assert.throws(()=>ollamaRequest('/api/pull'),e=>e.code==='local_model_unavailable');
+  assert.equal(calls.length,2);
+  const profile=previewCliProfile({profiles:{local:{apiKey:'never-forward'}},teacher:{apiKey:'never-forward'}},'ollama');
+  assert.equal(profile.profiles.jarvis.model,LOCAL_MODEL);assert.equal(profile.profiles.jarvis.warmup,false);
+  assert.equal(profile.teacher.model,LOCAL_MODEL);assert(!JSON.stringify(profile).includes('never-forward'));
+});
+test("local model absence, HTTP failure and truncated output never fall back to CLI or claim success", async()=>{
+  const { createLocalInference, LOCAL_MODEL } = await import('../public/jarvis-preview-cli.mjs');
+  await assert.rejects(createLocalInference({request:async()=>({status:200,body:{models:[{name:'other-model'}]}})}),e=>e.code==='local_model_missing');
+  await assert.rejects(createLocalInference({request:async()=>({status:503,body:{}})}),e=>e.code==='local_model_unavailable');
+  for(const output of [{status:302,body:{}},{status:200,body:{choices:[{message:{content:'unfinished'},finish_reason:'length'}]}},{status:200,body:{choices:[{message:{content:''},finish_reason:'stop'}]}}]){
+    const local=await createLocalInference({request:async path=>path==='/api/tags'?{status:200,body:{models:[{name:LOCAL_MODEL}]}}:output});
+    await assert.rejects(local.inference(prompt),e=>['local_model_unavailable','invalid_completion'].includes(e.code));
+  }
+});
