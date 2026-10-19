@@ -38,7 +38,7 @@ const app = http.createServer((req, res) => {
 });
 try {
   await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
-  const result = await publishRemotePreview({ local: { state: "ready", kind: "mac", url: `http://127.0.0.1:${app.address().port}/`, sha, checkedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 240_000).toISOString() },
+  const result = await publishRemotePreview({ local: { state: "ready", kind: "mac", url: `http://127.0.0.1:${app.address().port}/`, sha, checkedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 600_000).toISOString() },
     appOrigin, scope, binary, directory, attachCleanup: (_url, close) => { cleanup = close; return true; },
     transport: async (url, options) => {
       try { return await probeRemoteHealth(url, options); }
