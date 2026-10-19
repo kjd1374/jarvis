@@ -299,7 +299,7 @@ export async function publishRemotePreview({ local, appOrigin, client, scope, bi
     catch (error) { close(); throw error; }
     return { ...local, kind: "remote", remoteId, url: remote.url,
       message: local.ai ? "이 PC에서 열 수 있습니다. 맥미니의 구독 CLI로 실제 번역 응답을 확인했습니다. 앱은 별도 임시 데이터로 실행하며, 요청마다 구독 사용량이 소모됩니다."
-        : "이 PC에서 열 수 있습니다. 승인된 Jarvis 기기에서만 접근하며, 맥미니가 켜져 있어야 합니다. 별도 임시 데이터로 화면·기본 기능을 확인하며, 실제 AI·외부 서비스는 연결되지 않습니다." };
+        : local.dataPersistence === "project" ? "이 PC에서 열 수 있습니다. 승인된 Jarvis 기기만 접근하며, 프로젝트 데이터는 맥미니에 보관됩니다. 화면을 다시 준비해도 DATA_DIR의 데이터는 유지됩니다." : "이 PC에서 열 수 있습니다. 승인된 Jarvis 기기에서만 접근하며, 맥미니가 켜져 있어야 합니다. 별도 임시 데이터로 화면·기본 기능을 확인하며, 실제 AI·외부 서비스는 연결되지 않습니다." };
   } catch (error) { cancel(); throw error; }
   finally { signal?.removeEventListener("abort", cancel); }
 }

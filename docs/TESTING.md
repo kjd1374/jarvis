@@ -1,5 +1,7 @@
 # 회귀·저장·연결 검증
 
+자동 준비·연속 개발·데이터 유지·업데이트 복구 검사는 [PROJECT-AUTOMATION.md](PROJECT-AUTOMATION.md)에 추가했다.
+
 현재 프로젝트 등록→실행기→실제 화면의 검증 범위와 완료 기준은 [PROJECT-LIFECYCLE.md](PROJECT-LIFECYCLE.md)를 따른다. 아래 날짜별 결과는 당시의 기록이며, 현재 검사 수는 실행 결과와 해당 PR의 CI에서 확인한다.
 
 Node 24 / npm 11, Playwright 1.64.0. 클라우드에서는 먼저 `source /workspace/.setup/jarvis-env.sh`를 적용한다. 일반 PC/CI에는 이 파일이 필요 없다.

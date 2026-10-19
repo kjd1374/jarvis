@@ -41,6 +41,8 @@ export async function PUT(request: Request) {
       );
     const value = scopedPayload(body.data, space);
     const auth = await authorize(request);
+    const current = await loadSpace(auth, space);
+    value.providerConnections = current.data.providerConnections;
     return reply({
       revision: await saveSpace(auth, space, value, Number(body.revision)),
     });

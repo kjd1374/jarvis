@@ -1,4 +1,5 @@
 export type WorkPreview = {
+  dataPersistence?: "project";
   state: "ready" | "unavailable" | "failed";
   kind: "deployment" | "mac" | "remote";
   remoteId?: string;
@@ -34,6 +35,7 @@ export type ProjectTurn = {
   request: string;
   mode: "ask" | "change" | "preview" | "test";
   sourceTurnId?: string;
+  followLatest?: true;
   previewAI?: "codex";
   publish: "pr" | "merge";
   status: "queued" | "running" | "completed" | "failed" | "interrupted" | "cancelled";

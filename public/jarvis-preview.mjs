@@ -13,6 +13,7 @@ const TTL = 2 * 60 * 60_000;
 // this exact runtime so older static/server recipes cannot survive a retry.
 const RUNTIME_ID = createHash("sha256").update(await readFile(new URL(import.meta.url))).update(await readFile(new URL("./jarvis-preview-cli.mjs", import.meta.url))).digest("hex").slice(0, 24);
 const bridges = new Map();
+export function activePreviewCount() { return bridges.size; }
 export function attachPreviewCleanup(url, cleanup) {
   const bridge = [...bridges.values()].find(item => item.url === url);
   if (!bridge) return false;
@@ -174,7 +175,7 @@ if(plan.kind==='node') {
   const cwd=plan.entry?'/tmp/jarvis-preview-app':'/app';
   if(plan.entry) await cp('/app',cwd,{recursive:true});
   if(plan.cli) await writeFile(cwd+'/config.json',await readFile('/runtime/cli-profile.json'));
-  child=spawn(plan.entry?'node':'npm',plan.entry?[plan.entry]:plan.start,{cwd,env:{PATH:process.env.PATH,HOME:'/tmp',TMPDIR:'/tmp',NODE_ENV:'production',HOST:'127.0.0.1',HOSTNAME:'127.0.0.1',PORT:'3000',DATA_DIR:'/tmp/app-data',NEXT_TELEMETRY_DISABLED:'1'},stdio:'ignore'});
+  child=spawn(plan.entry?'node':'npm',plan.entry?[plan.entry]:plan.start,{cwd,env:{PATH:process.env.PATH,HOME:'/tmp',TMPDIR:'/tmp',NODE_ENV:'production',HOST:'127.0.0.1',HOSTNAME:'127.0.0.1',PORT:'3000',DATA_DIR:plan.persistent?'/persistent':'/tmp/app-data',NEXT_TELEMETRY_DISABLED:'1'},stdio:'ignore'});
   child.on('error',()=>process.exit(1)); child.on('exit',()=>process.exit(1));
 }
 const server=http.createServer(async(req,res)=>{
@@ -264,7 +265,7 @@ export async function findDeploymentPreview(repository, sha, get, publicUrl) {
   return null;
 }
 
-export async function startMacPreview({ cwd, files, sha, stateDir, identity, group = identity, run, signal, transport = directProbe, bridge = createPreviewBridge, publish, cliInference, authorizeCliPreparation, delay = ms => new Promise(r => setTimeout(r, ms)) }) {
+export async function startMacPreview({ cwd, files, sha, stateDir, identity, group = identity, persistent = false, run, signal, transport = directProbe, bridge = createPreviewBridge, publish, cliInference, authorizeCliPreparation, delay = ms => new Promise(r => setTimeout(r, ms)) }) {
   if (!shaPattern.test(sha)) throw new Error("invalid_preview_sha");
   const docker = async (args, timeout = 30_000, cleanup = false) => {
     const result = await run("docker", args, { signal: cleanup ? undefined : signal, timeout, maxBytes: 2_000_000 });
@@ -300,8 +301,8 @@ export async function startMacPreview({ cwd, files, sha, stateDir, identity, gro
     const { url } = await bridge(name, expiresAt);
     const response = await transport(`${url}__jarvis_preview_health`, { redirect: "manual", signal: AbortSignal.timeout(3000) });
     if (!response.ok || await response.text() !== info.Config.Labels["jarvis.preview.id"]) return null;
-    return { state: "ready", kind: "mac", url, sha, checkedAt: new Date().toISOString(), expiresAt,
-      message: "실행한 맥미니에서 열 수 있습니다. 별도 임시 데이터로 실행하며 실제 AI·외부 서비스는 연결하지 않습니다." };
+    return { state: "ready", kind: "mac", url, sha, ...(persistent ? { dataPersistence: "project" } : {}), checkedAt: new Date().toISOString(), expiresAt,
+      message: persistent ? "프로젝트 전용 데이터를 맥미니에 보관합니다. 화면을 다시 준비하거나 코드를 수정해도 DATA_DIR의 데이터는 유지됩니다." : "실행한 맥미니에서 열 수 있습니다. 별도 임시 데이터로 실행하며 실제 AI·외부 서비스는 연결하지 않습니다." };
   };
   if (existing) {
     let ready;
@@ -329,6 +330,7 @@ export async function startMacPreview({ cwd, files, sha, stateDir, identity, gro
     const json = async path => JSON.parse(await readFile(join(app, path), "utf8").catch(() => "null"));
     const plan = previewPlan(copied, await json("package.json"), await json("package-lock.json"));
     if (!plan) return unavailable(sha, "자동 실행 방법을 확인하지 못했습니다. 정적 index.html, 단독 Node server.js/server.mjs/server.cjs 또는 npm start와 공개 npm 잠금 파일을 지원합니다. Jarvis 수정 요청으로 실행 조건을 준비할 수 있습니다.");
+    plan.persistent = persistent;
     let cliProfile = null;
     if (cliInference) {
       if (!plan.entry) throw Object.assign(new Error("preview_cli_config_unavailable"), { code: "preview_cli_config_unavailable", stage: "ai" });
@@ -343,11 +345,12 @@ export async function startMacPreview({ cwd, files, sha, stateDir, identity, gro
       `FROM ${IMAGE}`, "WORKDIR /app", "COPY app/ /app/",
       ...(plan.install ? ["RUN npm ci --ignore-scripts --no-audit --no-fund"] : []),
       ...(plan.build ? ["RUN --network=none npm run build --ignore-scripts"] : []),
-      "COPY server.mjs bridge.mjs plan.json cli-queue.mjs cli-profile.json /runtime/", "RUN chmod -R a+rX /app /runtime", "USER node", 'CMD ["node", "/runtime/server.mjs"]', "",
+      "COPY server.mjs bridge.mjs plan.json cli-queue.mjs cli-profile.json /runtime/", "RUN mkdir -p /persistent && chown node:node /persistent && chmod -R a+rX /app /runtime", "USER node", 'CMD ["node", "/runtime/server.mjs"]', "",
     ].join("\n"));
     // Only this sanitized context is uploaded to Docker, never the checkout or home directory.
     await docker(["build", "--pull", "--tag", image, directory], 300_000);
     stage = "application";
+    if (persistent) await docker(["volume", "create", "--label", `jarvis.project.data=${groupKey}`, `jarvis-data-${groupKey}`]);
     const expiresAt = new Date(Date.now() + TTL).toISOString(), token = randomUUID(), cliToken = randomUUID();
     await docker(["run", "--detach", "--rm", "--name", name, "--label", `jarvis.preview.key=${key}`, "--label", `jarvis.preview.sha=${sha}`,
       "--label", `jarvis.preview.runtime=${RUNTIME_ID}`,
@@ -356,6 +359,7 @@ export async function startMacPreview({ cwd, files, sha, stateDir, identity, gro
       "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
       "--memory", "1g", "--cpus", "1", "--pids-limit", "128", "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m",
       ...(plan.vite ? ["--tmpfs", "/app/node_modules/.vite-temp:rw,nosuid,nodev,noexec,size=16m,uid=1000,gid=1000"] : []),
+      ...(persistent ? ["--mount", `type=volume,src=jarvis-data-${groupKey},dst=/persistent`] : []),
       "--env", `JARVIS_PREVIEW_ID=${token}`, "--env", `JARVIS_PREVIEW_TTL=${TTL}`, ...(cliInference ? ["--env", `JARVIS_PREVIEW_CLI_TOKEN=${cliToken}`] : []), image]);
     for (let attempt = 0; attempt < 45; attempt++) {
       if (signal?.aborted) throw new Error("preview_cancelled");
@@ -367,7 +371,7 @@ export async function startMacPreview({ cwd, files, sha, stateDir, identity, gro
         // Retain the previous screen until the new authenticated HTTPS path works.
         stage = "connection";
         const published = publish ? await publish(ready) : ready;
-        for (const previous of old) { bridges.get(previous)?.close(); await docker(["rm", "-f", previous], 30_000, true).catch(() => {}); }
+        for (const previous of old) { bridges.get(previous)?.close(); await docker(["rm", "-f", previous], 30_000, true).catch(() => {}); await docker(["image", "rm", `${previous}:app`], 30_000, true).catch(() => {}); }
         return published;
       }
       await delay(1000);

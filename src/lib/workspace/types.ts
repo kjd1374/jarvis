@@ -2,6 +2,7 @@ import type { GitHubMonitoring } from "../automation/types";
 export type Space = "company" | "personal";
 export type TaskStatus = "todo" | "in_progress" | "decision" | "done";
 export type Project = {
+  setup?: import("../automation/provision").ProjectSetup;
   automation?: import("../automation/work-types").ProjectAutomation;
   id: string;
   space: Space;
@@ -148,6 +149,7 @@ export const requestLabels: Record<RequestStatus, string> = {
   failed: "실패",
 };
 export type WorkspaceData = {
+  providerConnections?: import("../automation/providers").ProviderConnections;
   version: 1;
   activeSpace: Space;
   activeProjects: Record<Space, string | null>;

@@ -12,6 +12,8 @@ import { useWorkspaceClock } from "./use-workspace-clock";
 import { Icon } from "./icon";
 import { BriefText } from "./brief-text";
 import { PreviewResult, previewMessage } from "./project-screen";
+import { ProjectSetupPanel } from "./project-setup";
+import { queueSetupRequest } from "@/lib/automation/provision";
 import { ServiceRegistrationButton } from "./services-panel";
 import styles from "./studio.module.css";
 const phases: Record<ProjectTurn["phase"], string> = { queued: "실행 대기", preparing: "저장소 확인 중", coding: "코드 수정 중", testing: "변경 검사 중", publishing: "GitHub 반영·검증 중", reporting: "결과 정리 중" };
@@ -88,10 +90,10 @@ export function ProjectAgent({ project }: { project: Project }) {
   const updateNeeded = online && (monitoring?.runnerConnection?.remoteWork === false || cliUpdateNeeded);
   const turnMonitoring = (turn: ProjectTurn) => services.find(s => s.id === turn.serviceId && s.monitoring?.repository === turn.repository)?.monitoring;
   async function submit(event: React.FormEvent) {
-    event.preventDefault(); if (pending.current || saving || !message.trim() || !service) return;
+    event.preventDefault(); if (pending.current || saving || !message.trim()) return;
     pending.current = true; setError("");
     try {
-      await mutate(d => enqueueWork(d, project.space, project.id, service.id, message, mode, publish, now(), requestId.current, source?.id));
+      await mutate(d => service ? enqueueWork(d, project.space, project.id, service.id, message, mode, publish, now(), requestId.current, source?.id, undefined, revision === "latest") : queueSetupRequest(d, project.space, project.id, message, mode, publish, now(), requestId.current));
       setMessage(""); requestId.current = id();
     } catch (e) { setError(e instanceof Error ? e.message : "요청을 저장하지 못했습니다."); }
     finally { pending.current = false; }
@@ -101,31 +103,36 @@ export function ProjectAgent({ project }: { project: Project }) {
     catch (e) { setError(e instanceof Error ? e.message : "상태를 변경하지 못했습니다."); }
   }
   return <section id="project-ai" className={`${styles.detailSection} ${styles.projectAgent}`} aria-label="프로젝트 AI 작업실">
-    <div className={styles.detailHeading}><h2><Icon name="message" size={18} /> AI와 프로젝트 작업</h2><span role="status" className={styles.runnerStatus} data-online={online && !updateNeeded}>{!service ? "GitHub 저장소 등록 필요" : updateNeeded ? "CLI 연결됨 · 새 기능 업데이트 필요" : online ? "Jarvis CLI 연결됨" : seen ? "Jarvis CLI 최근 응답 없음" : monitoring?.lastSuccessAt ? "CLI 실행 기록 있음 · 접속 미확인" : "CLI 연결 대기"}</span></div>
+    <div className={styles.detailHeading}><h2><Icon name="message" size={18} /> AI와 프로젝트 작업</h2><span role="status" className={styles.runnerStatus} data-online={online && !updateNeeded}>{!service ? project.setup ? "개발 환경 자동 준비" : "GitHub 저장소 등록 필요" : updateNeeded ? "CLI 연결됨 · 새 기능 업데이트 필요" : online ? "Jarvis CLI 연결됨" : seen ? "Jarvis CLI 최근 응답 없음" : monitoring?.lastSuccessAt ? "CLI 실행 기록 있음 · 접속 미확인" : "CLI 연결 대기"}</span></div>
     {seen && <p className={styles.runnerEvidence}>실행기 최근 응답 {dateLabel(seen)} · 버전 {monitoring?.runnerConnection?.version ?? "미확인"} · 아래 답변은 대상 저장소의 작업 결과입니다.</p>}
     {updateNeeded && <p className={styles.agentConnection}>{cliUpdateNeeded ? "구독 CLI 미리보기에는 실행기 2.5.0 이상이 필요합니다." : "최근 응답한 실행기는 자동 테스트·수정본 선택을 지원하지 않습니다."} <Link href="/settings#cli-runner">실행기 업데이트 안내 →</Link></p>}
-    {!service ? <div className={styles.agentConnection}><p>코드 작업과 화면 준비에 사용할 GitHub 저장소를 등록해주세요. 새 저장소는 README 등 초기 커밋이 있어야 합니다.</p><ServiceRegistrationButton preset="github" projectId={project.id}>GitHub 저장소 등록</ServiceRegistrationButton></div>
-      : !online && <p className={styles.agentConnection}>{account?.authenticated ? "이 영역에 연결된 실행기가 프로젝트를 자동으로 찾습니다. 다음 응답을 기다리고 있으며 요청은 저장됩니다." : "CLI 자동 실행은 서버에 연결된 업무실에서 사용할 수 있습니다. 현재 요청은 이 브라우저에 저장됩니다."} <Link href="/settings#cli-runner">CLI 연결 안내 →</Link></p>}
+    {(project.setup || !service) && <ProjectSetupPanel project={project} />}
+    {!service && !project.setup ? <div className={styles.agentConnection}><p>코드 작업과 화면 준비에 사용할 GitHub 저장소를 등록해주세요. 새 저장소는 README 등 초기 커밋이 있어야 합니다.</p><ServiceRegistrationButton preset="github" projectId={project.id}>GitHub 저장소 등록</ServiceRegistrationButton></div>
+      : service && !online && <p className={styles.agentConnection}>{account?.authenticated ? "이 영역에 연결된 실행기가 프로젝트를 자동으로 찾습니다. 다음 응답을 기다리고 있으며 요청은 저장됩니다." : "CLI 자동 실행은 서버에 연결된 업무실에서 사용할 수 있습니다. 현재 요청은 이 브라우저에 저장됩니다."} <Link href="/settings#cli-runner">CLI 연결 안내 →</Link></p>}
+    {project.setup && turns.length > 0 && <div className={styles.agentHistory} role="log" aria-label="프로젝트 개발 대화">
+      {turns.length > historyLimit && <button className={styles.textButton} onClick={() => setHistoryLimit(limit => limit + 10)}>이전 대화 더 보기</button>}
+      {turns.slice(-historyLimit).map(turn => <WorkTurn key={turn.id} turn={turn} project={project} saving={saving} onAction={act} monitoring={turnMonitoring(turn)} clock={clock} />)}
+    </div>}
     <form onSubmit={submit} className={styles.agentComposer}>
       <label htmlFor="project-agent-message">AI에게 요청</label>
-      <textarea id="project-agent-message" value={message} onChange={e => setMessage(e.target.value)} maxLength={8000} rows={2} placeholder="원하는 변경이나 질문을 적어주세요." disabled={!service} />
+      <textarea id="project-agent-message" value={message} onChange={e => setMessage(e.target.value)} maxLength={8000} rows={2} placeholder="원하는 변경이나 질문을 적어주세요." disabled={project.setup?.status === "cancelled"} />
       <div className={styles.agentComposerActions}>
         {services.length > 1 && <label>대상 저장소<select aria-label="대상 저장소" value={service?.id ?? ""} onChange={e => setServiceId(e.target.value)}>{services.map(s => <option key={s.id} value={s.id}>{repositoryFor(s)}</option>)}</select></label>}
         {recent && <label>작업할 코드<select aria-label="작업할 코드" value={revision} onChange={e => setRevision(e.target.value)}><option value="latest">최근 수정본 · PR 이어가기</option><option value="main">기본 브랜치</option></select></label>}
         <label>요청 방식<select aria-label="요청 방식" value={mode} onChange={e => setMode(e.target.value as "ask" | "change")}><option value="change">수정 요청</option><option value="ask">질문하기</option></select></label>
         {mode === "change" && <label>반영 범위<select aria-label="반영 범위" value={publish} onChange={e => setPublish(e.target.value as "pr" | "merge")}><option value="merge">검증 후 병합·자동 배포</option><option value="pr">PR 작성 후 내가 검토</option></select></label>}
-        <button type="submit" className={styles.primaryButton} disabled={saving || !service || !message.trim()}>요청 보내기 <Icon name="arrow" size={16} /></button>
+        <button type="submit" className={styles.primaryButton} disabled={saving || project.setup?.status === "cancelled" || !message.trim()}>요청 보내기 <Icon name="arrow" size={16} /></button>
       </div>
-      <p className={styles.detailFootnote}>{!service ? "먼저 이 프로젝트에 GitHub를 연결해주세요." : mode === "ask" ? "선택한 저장소를 읽고 답변합니다." : publish === "merge" ? "코드 수정 → 검증 통과 후 병합 · 기존 자동 배포 확인" : "코드 수정·검증 → PR 작성 · 병합은 직접 결정"}</p>
+      <p className={styles.detailFootnote}>{!service ? "요청을 보내면 개발 환경을 자동 준비한 뒤 이어서 실행합니다." : mode === "ask" ? "선택한 저장소를 읽고 답변합니다." : publish === "merge" ? "코드 수정 → 검증 통과 후 병합 · 기존 자동 배포 확인" : "코드 수정·검증 → PR 작성 · 병합은 직접 결정"}</p>
       {source && <p className={styles.detailFootnote}>최근 수정본 {source.result!.headSha!.slice(0, 8)}에서 이어갑니다. 실행기 2.4.0 이상이 필요합니다.</p>}
       {error && <p role="alert" className={styles.formError}>{error}</p>}
     </form>
-    {latest && <div className={styles.agentLatest} aria-label="최근 요청"><WorkTurn key={latest.id} turn={latest} project={project} saving={saving} onAction={act} monitoring={turnMonitoring(latest)} clock={clock} /></div>}
-    {needsAttention.length > 0 && <details className={styles.compactDisclosure}>
+    {!project.setup && latest && <div className={styles.agentLatest} aria-label="최근 요청"><WorkTurn key={latest.id} turn={latest} project={project} saving={saving} onAction={act} monitoring={turnMonitoring(latest)} clock={clock} /></div>}
+    {!project.setup && needsAttention.length > 0 && <details className={styles.compactDisclosure}>
       <summary>진행·확인 필요 {needsAttention.length}건</summary>
       <div className={styles.agentHistory}>{needsAttention.map(turn => <WorkTurn key={turn.id} turn={turn} project={project} saving={saving} onAction={act} monitoring={turnMonitoring(turn)} clock={clock} />)}</div>
     </details>}
-    {previous.length > 0 && <details className={styles.compactDisclosure}>
+    {!project.setup && previous.length > 0 && <details className={styles.compactDisclosure}>
       <summary>이전 대화 {previous.length}건</summary>
       <div className={styles.agentHistory}>{previous.slice(0, historyLimit).map(turn => <WorkTurn key={turn.id} turn={turn} project={project} saving={saving} onAction={act} monitoring={turnMonitoring(turn)} clock={clock} />)}
         {previous.length > historyLimit && <button className={styles.textButton} onClick={() => setHistoryLimit(limit => limit + 10)}>이전 대화 더 보기</button>}

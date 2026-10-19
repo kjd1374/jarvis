@@ -1,11 +1,11 @@
 import "server-only";
 import { authorize, CloudError, loadSpace, saveSpace } from "../cloud/server";
 import type { Space, WorkspaceData } from "../workspace/types";
-export async function changeWorkspace(request: Request, space: Space, transform: (data: WorkspaceData, deviceId: string) => { data: WorkspaceData; result: Record<string, unknown> }) {
+export async function changeWorkspace(request: Request, space: Space, transform: (data: WorkspaceData, deviceId: string, ownerId: string) => { data: WorkspaceData; result: Record<string, unknown> }) {
   const auth = await authorize(request);
   for (let attempt = 0; attempt < 3; attempt++) {
     const snapshot = await loadSpace(auth, space);
-    const { data, result } = transform(snapshot.data, auth.deviceId);
+    const { data, result } = transform(snapshot.data, auth.deviceId, auth.ownerId);
     if (data === snapshot.data) return result;
     try {
       await saveSpace(auth, space, data, snapshot.revision);

@@ -44,6 +44,7 @@ export function scopeWorkspace(
   const data = normalizeWorkspace(input);
   const scoped = emptyWorkspace();
   scoped.activeSpace = space;
+  if (projectId === undefined && data.providerConnections?.[space]) scoped.providerConnections = { [space]: data.providerConnections[space] };
   scoped.activeProjects[space] = data.activeProjects[space];
   scoped.activeConversations[space] = data.activeConversations[space];
   const allowed = (r: { space: Space; projectId?: string | null }) =>
