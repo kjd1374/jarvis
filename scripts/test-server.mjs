@@ -35,6 +35,12 @@ if (process.argv.includes("--local-cloud")) {
   env.JARVIS_CLOUD_STORAGE_ENABLED = "true";
   env.JARVIS_APP_ORIGIN = "http://127.0.0.1:4317";
   env.JARVIS_PREVIEW_SIGNING_KEY = generateKeyPairSync("ed25519").privateKey.export({ type: "pkcs8", format: "der" }).toString("base64");
+  if (process.env.JARVIS_TEST_PREVIEW_PROXY || process.env.JARVIS_TEST_PREVIEW_CA) {
+    const proxy = process.env.JARVIS_TEST_PREVIEW_PROXY, ca = process.env.JARVIS_TEST_PREVIEW_CA;
+    if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(proxy ?? "") || !ca?.startsWith(join(tmpdir(), "jarvis-lifecycle-")))
+      throw new Error("Preview tests require the disposable local provider proxy and CA");
+    Object.assign(env, { NODE_USE_ENV_PROXY: "1", HTTPS_PROXY: proxy, NO_PROXY: "127.0.0.1,localhost", NODE_EXTRA_CA_CERTS: ca });
+  }
 }
 let child;
 let closing = false;

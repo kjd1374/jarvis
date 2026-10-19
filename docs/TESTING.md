@@ -1,5 +1,7 @@
 # 회귀·저장·연결 검증
 
+현재 프로젝트 등록→실행기→실제 화면의 검증 범위와 완료 기준은 [PROJECT-LIFECYCLE.md](PROJECT-LIFECYCLE.md)를 따른다. 아래 날짜별 결과는 당시의 기록이며, 현재 검사 수는 실행 결과와 해당 PR의 CI에서 확인한다.
+
 Node 24 / npm 11, Playwright 1.64.0. 클라우드에서는 먼저 `source /workspace/.setup/jarvis-env.sh`를 적용한다. 일반 PC/CI에는 이 파일이 필요 없다.
 
 ## 실행 명령
@@ -9,11 +11,11 @@ npm ci
 npx playwright install chromium
 # Linux 브라우저 라이브러리 필요 시: npx playwright install --with-deps chromium
 npm run check          # ESLint, TypeScript, Next 16.4.0 production build
-npm run test:domain    # 합성 수집·검색·검증·이관 도메인 6건, 서버 불필요
-npm run test:e2e       # desktop 11 + Pixel 7 에뮬레이션 11건
-npm run test:storage   # 실제 브라우저 IndexedDB/파일 저장·백업 8건
-npm run test:all       # UI+저장 30건을 한 임시 서버에서 실행
-npm run test:deploy    # 배포 대상·비밀값 제외·운영 보호 합성 검증 4건
+npm run test:domain    # 합성 도메인 검사, 서버 불필요
+npm run test:e2e       # desktop + Pixel 7 에뮬레이션
+npm run test:storage   # 실제 브라우저 IndexedDB/파일 저장·백업
+npm run test:all       # UI+저장 검사를 한 임시 서버에서 실행
+npm run test:deploy    # 배포 대상·비밀값 제외·운영 보호 합성 검증
 ```
 
 4317 포트를 테스트 전용으로 사용한다. 기존 서버를 재사용하지 않으며, 소스만 복사한 임시 앱을 webpack으로 빌드한 뒤 종료 시 정리한다. `npm run check`는 원래 Turbopack 빌드도 유지한다. 별도 포트를 사용하는 개발 서버를 켤 필요가 없다. `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`로 Chromium을 지정할 수 있으나 기본/CI는 Playwright에 맞는 버전이다.

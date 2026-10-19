@@ -110,6 +110,17 @@ http.createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end(
   await assert.rejects(readFile(join(cwd, "node_modules/.vite-temp/config.mjs")), /ENOENT/);
   console.log("PASS: Vite preview config cache writes only to bounded temporary memory; application image and original source remain read-only.");
   activeBridge.close(); await runCommand("docker", ["rm", "-f", name]);
+  const staticRoot = join(dir, "static"); await mkdir(staticRoot);
+  await writeFile(join(staticRoot, "index.html"), '<h1>Loading static</h1><button>Save static</button><output></output><script type="module" src="/app.mjs"></script>');
+  await writeFile(join(staticRoot, "app.mjs"), `document.querySelector('h1').textContent='Static assets ready';const output=document.querySelector('output');output.textContent=localStorage.getItem('synthetic-static')||'0';document.querySelector('button').onclick=()=>{localStorage.setItem('synthetic-static','1');output.textContent='1';};`);
+  const staticPreview = await startMacPreview({ cwd: staticRoot, files: ["index.html", "app.mjs"], sha: "d".repeat(40), stateDir: dir, identity, run: runCommand,
+    bridge: async (...args) => activeBridge = await createPreviewBridge(...args) });
+  assert.equal(staticPreview.state, "ready", JSON.stringify(staticPreview)); await page.goto(staticPreview.url);
+  await page.waitForFunction(() => document.querySelector('h1')?.textContent === 'Static assets ready');
+  assert.equal(await page.locator('output').textContent(), '0'); await page.getByRole('button', { name: 'Save static', exact: true }).click();
+  await page.reload(); await page.waitForFunction(() => document.querySelector('output')?.textContent === '1');
+  console.log("PASS: static preview loads its actual module asset and preserves browser state across reload; HTML alone is not the verification.");
+  activeBridge.close(); await runCommand("docker", ["rm", "-f", name]);
   const standalone = join(dir, "standalone");
   await mkdir(join(standalone, "public"), { recursive: true }); await mkdir(join(standalone, "data"));
   await writeFile(join(standalone, "config.example.json"), '{"label":"Backend ready","profiles":{}}');
