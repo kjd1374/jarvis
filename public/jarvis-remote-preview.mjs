@@ -226,7 +226,7 @@ export async function probeRemoteHealth(value, options = {}, { platform = proces
   });
 }
 
-export async function waitForRemoteHealth({ url, remoteId, signal, transport = probeRemoteHealth, clock = Date.now, delay = ms => sleep(ms, undefined, { signal }), timeoutMs = 90_000, alive = () => true }) {
+export async function waitForRemoteHealth({ url, remoteId, signal, transport = probeRemoteHealth, clock = Date.now, delay = ms => sleep(ms, undefined, { signal }), timeoutMs = 180_000, alive = () => true }) {
   if (signal?.aborted) throw remoteFailure("preview_cancelled", "health");
   // Edge registration precedes DNS publication. An immediate NXDOMAIN can stay
   // cached on macOS for the whole probe window, even after the record exists.

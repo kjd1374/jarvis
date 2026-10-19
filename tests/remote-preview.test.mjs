@@ -95,6 +95,17 @@ test("public health tolerates delayed propagation, records HTTP failures and nev
     return { ok: true, status: 200, text: async () => "synthetic-id" };
   } });
   assert.equal(time - started, 65_000);
+  const slowDnsStarted = time;
+  await waitForRemoteHealth({ ...options, timeoutMs: undefined, transport: async () => {
+    if (time - slowDnsStarted < 125_000) throw Object.assign(new Error("Negative DNS cache"), { code: "ENOTFOUND" });
+    return { ok: true, status: 200, text: async () => "synthetic-id" };
+  } });
+  assert.equal(time - slowDnsStarted, 125_000);
+  const unavailableStarted = time;
+  await assert.rejects(waitForRemoteHealth({ ...options, timeoutMs: undefined, transport: async () => {
+    throw Object.assign(new Error("DNS unavailable"), { code: "ENOTFOUND" });
+  } }), error => error.code === "remote_health_dns");
+  assert.equal(time - unavailableStarted, 185_000);
   const cancelled = new AbortController(); cancelled.abort();
   await assert.rejects(waitForRemoteHealth({ ...options, signal: cancelled.signal, delay: () => assert.fail("cancelled startup must not wait"), transport: () => assert.fail("cancelled startup must not connect") }), error => error.code === "preview_cancelled");
 });
