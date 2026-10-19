@@ -63,7 +63,9 @@ test("preview recipes exclude credentials and unsupported or private dependencie
   assert.equal(previewPlan([], { scripts: { start: "node src/server.js" } }, null).kind, "node");
   assert.equal(previewPlan([], { scripts: { start: "node app.js" }, dependencies: { private: "1" } }, null), null);
   assert.equal(previewPlan([], { scripts: { start: "node app.js" } }, { packages: { x: { resolved: "file:../secret", link: true } } }), null);
-  assert.equal(previewPlan([], { scripts: { preview: "vite preview", build: "vite build" } }, null).start[1], "preview");
+  const vite = previewPlan([], { scripts: { preview: "vite preview", build: "vite build" } }, null);
+  assert.equal(vite.start[1], "preview"); assert.equal(vite.vite, true);
+  assert.equal(previewPlan([], { scripts: { start: "node server.js", preview: "vite preview" } }, null).vite, undefined);
 });
 test("a standalone Node server takes precedence over its public HTML without a package manifest", () => {
   const plan = previewPlan(["server.js", "public/index.html"], null, null);

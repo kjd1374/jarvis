@@ -77,7 +77,7 @@ export function previewPlan(files, pkg, lock) {
     if (dependencies.length && !lock) return null;
     if (lock && (!lock.packages || Object.values(lock.packages).some(p => p.link || p.resolved &&
       (!/^https:\/\/registry\.npmjs\.org\//.test(p.resolved) || !p.integrity)))) return null;
-    return { kind: "node", start, install: !!lock, build: typeof pkg.scripts.build === "string" };
+    return { kind: "node", start, install: !!lock, build: typeof pkg.scripts.build === "string", ...(start[0] === "run" ? { vite: true } : {}) };
   }
   // Dependency-free Node projects do not need an npm manifest. Their public
   // folder is the server's frontend, not proof that the app is a static site.
@@ -355,6 +355,7 @@ export async function startMacPreview({ cwd, files, sha, stateDir, identity, gro
       "--label", `jarvis.preview.group=${groupKey}`, "--label", `jarvis.preview.expires=${expiresAt}`, "--label", `jarvis.preview.id=${token}`,
       "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
       "--memory", "1g", "--cpus", "1", "--pids-limit", "128", "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m",
+      ...(plan.vite ? ["--tmpfs", "/app/node_modules/.vite-temp:rw,nosuid,nodev,noexec,size=16m,uid=1000,gid=1000"] : []),
       "--env", `JARVIS_PREVIEW_ID=${token}`, "--env", `JARVIS_PREVIEW_TTL=${TTL}`, ...(cliInference ? ["--env", `JARVIS_PREVIEW_CLI_TOKEN=${cliToken}`] : []), image]);
     for (let attempt = 0; attempt < 45; attempt++) {
       if (signal?.aborted) throw new Error("preview_cancelled");

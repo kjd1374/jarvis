@@ -93,6 +93,23 @@ const s=net.connect(443,'203.0.113.1');s.on('connect',()=>process.exit(2));s.on(
   assert.deepEqual(errors, []);
   console.log("PASS: hosted-page link → real Docker preview; SQLite write/reload; cross-site writes/API/frames blocked; no host mounts, credentials or external network.");
   activeBridge.close(); await runCommand("docker", ["rm", "-f", name]);
+  // Vite bundles its config into node_modules/.vite-temp before listening.
+  // Exercise that filesystem requirement without installing third-party code.
+  await writeFile(join(cwd, "package.json"), JSON.stringify({ type: "module", scripts: { preview: "vite preview", build: "node build.mjs" } }));
+  const viteProgram = `#!/usr/bin/env node
+const fs=require('node:fs'),http=require('node:http');
+fs.writeFileSync('/app/node_modules/.vite-temp/config.mjs','temporary config');
+let readonly=false;try{fs.writeFileSync('/app/original.txt','must fail');}catch(e){readonly=e.code==='EROFS';}
+if(!readonly)process.exit(1);
+http.createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end('<h1>Synthetic Vite cache ready</h1>');}).listen(3000,'127.0.0.1');`;
+  await writeFile(join(cwd, "build.mjs"), `import {mkdirSync,writeFileSync} from 'node:fs';mkdirSync('node_modules/.bin',{recursive:true});writeFileSync('node_modules/.bin/vite',${JSON.stringify(viteProgram)},{mode:0o755});`);
+  const vite = await startMacPreview({ cwd, files: ["package.json", "build.mjs"], sha: "c".repeat(40), stateDir: dir, identity, run: runCommand,
+    bridge: async (...args) => activeBridge = await createPreviewBridge(...args) });
+  assert.equal(vite.state, "ready", JSON.stringify(vite));
+  await page.goto(vite.url); assert.equal(await page.locator("h1").textContent(), "Synthetic Vite cache ready");
+  await assert.rejects(readFile(join(cwd, "node_modules/.vite-temp/config.mjs")), /ENOENT/);
+  console.log("PASS: Vite preview config cache writes only to bounded temporary memory; application image and original source remain read-only.");
+  activeBridge.close(); await runCommand("docker", ["rm", "-f", name]);
   const standalone = join(dir, "standalone");
   await mkdir(join(standalone, "public"), { recursive: true }); await mkdir(join(standalone, "data"));
   await writeFile(join(standalone, "config.example.json"), '{"label":"Backend ready","profiles":{}}');
