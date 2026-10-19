@@ -7,9 +7,9 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { completeWithSubscription } from "./jarvis-preview-cli.mjs";
+import { completeWithSubscription, createLocalInference } from "./jarvis-preview-cli.mjs";
 
-export const VERSION = "2.6.0";
+export const VERSION = "2.7.0";
 export class RunnerError extends Error {
   constructor(code) { super(code); this.code = code; }
 }
@@ -413,7 +413,7 @@ function dependencyFailureDetail(install) {
   return `의존성 준비 실패: ${reason}. 의존성이 필요한 로컬 검사는 완료로 판단할 수 없습니다.`;
 }
 export async function executeProjectWork(client, job, { stateDir, run = runCommand, model = runCodexWork, get = githubGet, delay = wait, log = console.log, previewEnabled = false, previewTools, testTools, remotePreview } = {}) {
-  if (!stateDir || !/^[a-f0-9-]{36}$/.test(job.id) || !/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/.test(job.repository) || job.repository.includes("..") || !["ask", "change", "preview", "test"].includes(job.mode) || !["pr", "merge"].includes(job.publish) || job.previewAI !== undefined && (job.previewAI !== "codex" || job.mode !== "preview")) throw new RunnerError("invalid_work_scope");
+  if (!stateDir || !/^[a-f0-9-]{36}$/.test(job.id) || !/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/.test(job.repository) || job.repository.includes("..") || !["ask", "change", "preview", "test"].includes(job.mode) || !["pr", "merge"].includes(job.publish) || job.previewAI !== undefined && (!["codex", "ollama"].includes(job.previewAI) || job.mode !== "preview")) throw new RunnerError("invalid_work_scope");
   const identity = { space: job.space, projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken };
   const abort = new AbortController();
   let progress = "preparing";
@@ -509,8 +509,9 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
             scope: { space: job.space, projectId: job.projectId, turnId: job.id }, binary: remotePreview.binary,
             directory: stateDir, attachCleanup: tools.attachPreviewCleanup, attachCliAuthorization: tools.attachPreviewCliAuthorization, signal: abort.signal });
         } : undefined;
+        const local = job.previewAI === "ollama" ? await createLocalInference({ signal: abort.signal }) : null;
         return await tools.startMacPreview({ cwd, files, sha, stateDir, identity: `${job.space}:${job.projectId}:${job.id}`, group: `${job.space}:${job.projectId}:${job.repository}`, persistent: job.context?.project?.environment?.target === "mac", run, signal: abort.signal, publish,
-          ...(job.previewAI === "codex" ? { cliInference: (body, options) => completeWithSubscription(body, { run, env: cliEnv, signal: options.signal }),
+          ...(job.previewAI ? { aiProvider: job.previewAI, cliInference: local ? local.inference : (body, options) => completeWithSubscription(body, { run, env: cliEnv, signal: options.signal }),
             authorizeCliPreparation: async () => { await pulse(); return true; } } : {}) });
       } catch (error) {
         if (tools?.previewFailure) return tools.previewFailure(sha, error, "application", !!remotePreview);
@@ -826,7 +827,7 @@ export async function main(argv = process.argv.slice(2)) {
     if (process.send && process.connected) { await new Promise(resolve => { const resume = message => { if (message?.type === "continue") { process.removeListener("message", resume); resolve(); } }; process.on("message", resume); import("./jarvis-preview.mjs").then(m => process.send({ type: "idle", activePreviews: m.activePreviewCount() })); }); }
     for (const scope of config.scopes) {
       const claimed = await resilientRequest("/api/automation/claim", { ...scope, provider: config.provider, runnerVersion: VERSION, provisionVersion: 1, workVersion: 1, remoteWorkVersion: 1, documentVersion: 1, previewVersion: config.preview?.enabled === true ? 1 : 0,
-        previewCliVersion: config.preview?.enabled === true && config.preview?.remote === true ? 1 : 0 });
+        previewLocalVersion: config.preview?.enabled === true && config.preview?.remote === true ? 1 : 0, previewCliVersion: config.preview?.enabled === true && config.preview?.remote === true ? 1 : 0 });
       if (claimed.job?.kind === "provision") { const { executeProvision } = await import("./jarvis-provision.mjs"); await executeProvision(client, claimed.job, { stateDir, run: runCommand }); }
       else if (claimed.job?.kind === "document") await executeDocumentQuestion(client, claimed.job, { stateDir });
       else if (claimed.job?.kind === "work") await executeProjectWork(client, claimed.job, { stateDir, previewEnabled: config.preview?.enabled === true,

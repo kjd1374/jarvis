@@ -439,6 +439,9 @@ test("기본 브랜치의 최신 준비 화면은 예전 PR에 가려지지 않�
     await expect(screen).not.toContainText("최근 수정본 bbbbbbbb");
     await page.reload(); await ready(page);
   }
+  await screen.getByLabel("미리보기 AI").selectOption("ollama");
+  await expect(screen.getByRole("link", { name: "이 PC에서 화면 열기" })).toHaveCount(0);
+  await screen.getByLabel("미리보기 AI").selectOption("none");
   await screen.getByRole("button", { name: "화면 준비", exact: true }).click();
   expect((await state(page))!.projects[0].automation!.turns.at(-1)?.sourceTurnId).toBeUndefined();
   await agent.getByLabel("AI에게 요청", { exact: true }).fill("확인한 화면에서 후속 수정");
@@ -471,4 +474,20 @@ test("PR 변경 실패에서 반영된 코드로 한 번에 화면 준비하며 
   expect(saved.at(-1)).toMatchObject({ mode: "preview", previewAI: "codex", status: "queued" });
   expect(saved.at(-1)?.sourceTurnId).toBeUndefined();
   expect(saved.find(t => t.id === failed.id)).toMatchObject({ status: "failed", error: "work_source_changed", sourceTurnId: job.id });
+});
+
+test("로컬 LLM 선택은 구독 CLI와 구분해 저장하고 구버전 실행기 대기를 설명한다", async ({page}) => {
+  const {observeWorkRunner}=await import("../../src/lib/automation/runner-status");
+  const stamp=new Date().toISOString();
+  const data=observeWorkRunner(automationWorkspace(stamp),{space:"company",projectIds:["auto-project"]},{runnerVersion:"2.6.0",previewVersion:1,remoteWorkVersion:1,previewCliVersion:1},stamp);
+  await seed(page,data);await page.goto('/projects/auto-project');await ready(page);
+  const screen=page.getByRole('region',{name:'수정된 화면 확인',exact:true});
+  await screen.getByLabel('미리보기 AI').selectOption('ollama');
+  await expect(screen).toContainText('맥미니에 설치된 TranslateGemma');
+  await screen.getByRole('button',{name:'화면 준비',exact:true}).click();
+  expect((await state(page))!.projects[0].automation!.turns.at(-1)?.previewAI).toBe('ollama');
+  await page.reload();await ready(page);
+  await expect(screen.getByLabel('미리보기 AI')).toHaveValue('ollama');
+  await expect(screen).toContainText('실행기 2.7.0 적용 대기');
+  await expect(page.getByRole('region',{name:'프로젝트 AI 작업실',exact:true})).toContainText('화면 준비 · 로컬 LLM 선택');
 });

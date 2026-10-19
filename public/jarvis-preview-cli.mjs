@@ -5,7 +5,7 @@ import { mkdtemp, writeFile, readFile, chmod, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const codes = new Set(["cli_login_required", "cli_unavailable", "cli_limit", "cli_timeout", "invalid_completion", "preview_cli_access_denied", "preview_cli_cancelled", "preview_cli_busy"]);
+const codes = new Set(["local_model_unavailable", "local_model_missing", "local_model_timeout", "cli_login_required", "cli_unavailable", "cli_limit", "cli_timeout", "invalid_completion", "preview_cli_access_denied", "preview_cli_cancelled", "preview_cli_busy"]);
 const fail = code => Object.assign(new Error(code), { code, stage: "ai" });
 export function completionInput(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw) || !Array.isArray(raw.messages) || !raw.messages.length || raw.messages.length > 48 ||
@@ -59,32 +59,33 @@ export async function completeWithSubscription(raw, { run, env = process.env, si
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
 
-export function previewCliProfile(template) {
+export function previewCliProfile(template, provider = "codex") {
   if (!template || typeof template !== "object" || !template.profiles || typeof template.profiles !== "object" || Array.isArray(template.profiles))
     throw Object.assign(new Error("preview_cli_config_unavailable"), { code: "preview_cli_config_unavailable", stage: "ai" });
-  return { ...template, active: "jarvis", profiles: { jarvis: { label: "구독 CLI", baseUrl: "http://127.0.0.1:3002/v1", model: "codex-subscription", apiKey: "", extraBody: {} } },
-    teacher: { ...template.teacher, provider: "profile", profile: "jarvis", model: "codex-subscription", apiKey: "" } };
+  const model = provider === "ollama" ? "translategemma:4b" : "codex-subscription";
+  return { ...template, active: "jarvis", profiles: { jarvis: { label: provider === "ollama" ? "로컬 젬마" : "구독 CLI", baseUrl: "http://127.0.0.1:3002/v1", model, warmup: false, apiKey: "", extraBody: {} } },
+    teacher: { ...template.teacher, provider: "profile", profile: "jarvis", model, apiKey: "" } };
 }
 
 export const previewCliQueueSource = `import http from 'node:http';\nimport {randomUUID} from 'node:crypto';\nconst normalize=${completionInput.toString()};\n` + String.raw`
-const messages={cli_login_required:'맥미니의 Codex 구독 로그인을 확인하지 못했습니다.',cli_limit:'구독 CLI의 사용 한도에 도달했습니다.',cli_timeout:'구독 CLI 응답 시간이 초과됐습니다.',preview_cli_access_denied:'승인된 Jarvis에서 화면을 다시 열어주세요.',preview_cli_busy:'동시에 처리할 수 있는 통역 요청을 넘었습니다. 잠시 후 다시 요청해주세요.'};
-export function startCliQueue(token){
+const messages={local_model_unavailable:'맥미니의 로컬 Ollama에 연결하지 못했습니다.',local_model_missing:'맥미니에 translategemma:4b 모델이 없습니다.',local_model_timeout:'로컬 모델 응답 시간이 초과됐습니다.',cli_login_required:'맥미니의 Codex 구독 로그인을 확인하지 못했습니다.',cli_limit:'구독 CLI의 사용 한도에 도달했습니다.',cli_timeout:'구독 CLI 응답 시간이 초과됐습니다.',preview_cli_access_denied:'승인된 Jarvis에서 화면을 다시 열어주세요.',preview_cli_busy:'동시에 처리할 수 있는 통역 요청을 넘었습니다. 잠시 후 다시 요청해주세요.'};
+export function startCliQueue(token,provider="codex"){
   const jobs=new Map();let next=null,closed=false,total=0;
   const json=(res,status,value)=>{if(res.destroyed)return;res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(value));};
-  const error=(res,code)=>json(res,code==='preview_cli_busy'?429:503,{error:{code,message:messages[code]||'구독 CLI 요청을 완료하지 못했습니다.'}});
+  const error=(res,code)=>json(res,code==='preview_cli_busy'?429:503,{error:{code,message:messages[code]||(provider==='ollama'?'로컬 LLM 요청을 완료하지 못했습니다.':'구독 CLI 요청을 완료하지 못했습니다.')}});
   const read=async req=>{req.setEncoding('utf8');let text='';for await(const part of req){text+=part;if(text.length>80000)throw Error();}return JSON.parse(text);};
   const dispatch=()=>{if(!next)return;const job=[...jobs.values()].find(j=>!j.claimed);if(!job)return;job.claimed=true;const res=next;next=null;json(res,200,{id:job.id,body:job.body});};
   const finish=(job,answer)=>{if(!jobs.delete(job.id))return;clearTimeout(job.timer);if(answer.error){error(job.res,answer.error);return;}
     if(typeof answer.content!=='string'||!answer.content.trim()||answer.content.length>16000){error(job.res,'invalid_completion');return;}
-    if(job.stream){job.res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-store'});job.res.end('data: '+JSON.stringify({id:job.id,object:'chat.completion.chunk',model:'codex-subscription',choices:[{index:0,delta:{content:answer.content},finish_reason:null}]})+'\n\ndata: [DONE]\n\n');}
-    else json(job.res,200,{id:job.id,object:'chat.completion',model:'codex-subscription',choices:[{index:0,message:{role:'assistant',content:answer.content},finish_reason:'stop'}]});
+    if(job.stream){job.res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-store'});job.res.end('data: '+JSON.stringify({id:job.id,object:'chat.completion.chunk',model:provider==='ollama'?'translategemma:4b':'codex-subscription',choices:[{index:0,delta:{content:answer.content},finish_reason:null}]})+'\n\ndata: [DONE]\n\n');}
+    else json(job.res,200,{id:job.id,object:'chat.completion',model:provider==='ollama'?'translategemma:4b':'codex-subscription',choices:[{index:0,message:{role:'assistant',content:answer.content},finish_reason:'stop'}]});
   };
   const server=http.createServer(async(req,res)=>{try{
     if(closed||req.url!=='/v1/chat/completions'||req.method!=='POST'){json(res,404,{});return;}
-    if(jobs.size>=4||total>=20){error(res,'preview_cli_busy');return;}
+    if(jobs.size>=4||total>=(provider==="ollama"?200:20)){error(res,'preview_cli_busy');return;}
     const raw=await read(req),body=normalize(raw),id=randomUUID();total++;
     const job={id,body:{messages:body.messages,...(body.json?{response_format:{type:'json_object'}}:{}),max_tokens:body.maxTokens},stream:raw.stream===true,res,claimed:false};
-    job.timer=setTimeout(()=>finish(job,{error:'cli_timeout'}),65000);jobs.set(id,job);res.once('close',()=>{if(jobs.delete(id))clearTimeout(job.timer);});dispatch();
+    job.timer=setTimeout(()=>finish(job,{error:provider==='ollama'?'local_model_timeout':'cli_timeout'}),65000);jobs.set(id,job);res.once('close',()=>{if(jobs.delete(id))clearTimeout(job.timer);});dispatch();
   }catch{error(res,'invalid_completion');}});
   server.listen(3002,'127.0.0.1');
   const control=async(req,res)=>{
@@ -120,7 +121,7 @@ export function cliBridgeRequest(url, token, path, { body, signal, timeout = 150
   });
 }
 const workers = new Set();let handlers = false;
-export function startPreviewCliWorker({ url, token, inference, authorize }) {
+export function startPreviewCliWorker({ url, token, inference, authorize, provider = "codex" }) {
   const life = new AbortController(), active = new Set();let check = authorize;
   const request = (path, options={}) => cliBridgeRequest(url,token,path,{signal:life.signal,...options});
   const permitted = async()=>!life.signal.aborted && await check()===true;
@@ -134,7 +135,7 @@ export function startPreviewCliWorker({ url, token, inference, authorize }) {
     if(!life.signal.aborted)await request(`/__jarvis_cli/result/${job.id}`,{body:answer}).catch(()=>{});
   };
   const loop=(async()=>{while(!life.signal.aborted){try{
-    if(active.size>=2)await Promise.race(active);if(life.signal.aborted)break;
+    if(active.size>=(provider==="ollama"?1:2))await Promise.race(active);if(life.signal.aborted)break;
     const next=await request('/__jarvis_cli/next');if(next.status!==200||typeof next.body?.id!=='string'||!/^[a-f0-9-]{36}$/.test(next.body.id)){if(next.status!==204)await new Promise(r=>setTimeout(r,100));continue;}
     const task=execute(next.body).catch(()=>{});active.add(task);void task.finally(()=>active.delete(task));
   }catch{if(!life.signal.aborted)await new Promise(r=>setTimeout(r,500));}}})();
@@ -143,11 +144,46 @@ export function startPreviewCliWorker({ url, token, inference, authorize }) {
   void loop.catch(close);
   return {close,setAuthorization(fn){check=fn;},async probe(){
     try {
-    const result=await request('/__jarvis_cli/probe',{body:{messages:[{role:'system',content:'Translate the Korean greeting into Vietnamese. Reply with only its translation.'},{role:'user',content:'안녕하세요'}],stream:false,max_tokens:64},timeout:65000});
+    const result=await request('/__jarvis_cli/probe',{body:{messages:provider==='ollama'?[{role:'user',content:'You are a professional Korean (ko) to Vietnamese (vi) translator. Translate only the following text into Vietnamese, without commentary:\n\n안녕하세요'}]:[{role:'system',content:'Translate the Korean greeting into Vietnamese. Reply with only its translation.'},{role:'user',content:'안녕하세요'}],stream:false,max_tokens:64},timeout:65000});
     const content=result.body?.choices?.[0]?.message?.content;
     if(result.status!==200||typeof content!=='string'||!content.trim()||content.length>160)throw fail(codes.has(result.body?.error?.code)?result.body.error.code:'invalid_completion');
     if(!/^(?:xin\s+)?chào(?:\s+bạn)?[.!]?$/iu.test(content.normalize('NFC').replace(/["“”]/g,'').trim()))throw fail('invalid_completion');
-    return {provider:'codex',verifiedAt:new Date().toISOString(),sample:content};
+    return {provider,...(provider==='ollama'?{model:'translategemma:4b'}:{}),verifiedAt:new Date().toISOString(),sample:content};
     } catch(error) { throw fail(codes.has(error.code)?error.code:'cli_unavailable'); }
   }};
+}
+
+// Only this host loopback service is reachable. The app cannot choose a URL,
+// model, tool, file or Ollama administration endpoint through the bridge.
+export const LOCAL_MODEL = 'translategemma:4b';
+export function ollamaRequest(path, { body, signal } = {}) {
+  if (!['/api/tags', '/v1/chat/completions'].includes(path)) throw fail('local_model_unavailable');
+  return new Promise((resolve, reject) => {
+    const bytes = body === undefined ? null : JSON.stringify(body);
+    const req = http.request({ hostname: '127.0.0.1', port: 11434, path, method: bytes === null ? 'GET' : 'POST', agent: false,
+      signal, headers: bytes === null ? {} : { 'content-type': 'application/json' } }, res => {
+      let text = ''; res.setEncoding('utf8');
+      res.on('data', b => { text += b; if (text.length > 100000) req.destroy(fail('invalid_completion')); });
+      res.on('error', reject);
+      res.on('end', () => { try { resolve({ status: res.statusCode, body: JSON.parse(text) }); } catch { reject(fail('invalid_completion')); } });
+    });
+    req.setTimeout(45000, () => req.destroy(fail('local_model_timeout')));
+    req.on('error', error => reject(signal?.aborted ? fail('preview_cli_cancelled') : codes.has(error.code) ? error : fail('local_model_unavailable')));
+    req.end(bytes);
+  });
+}
+export async function createLocalInference({ request = ollamaRequest, signal } = {}) {
+  const inventory = await request('/api/tags', { signal });
+  if (inventory.status !== 200 || !Array.isArray(inventory.body?.models)) throw fail('local_model_unavailable');
+  if (!inventory.body.models.some(m => m.name === LOCAL_MODEL || m.model === LOCAL_MODEL)) throw fail('local_model_missing');
+  return { model: LOCAL_MODEL, inference: async (raw, { signal } = {}) => {
+    const input = completionInput(raw);
+    const result = await request('/v1/chat/completions', { signal, body: { model: LOCAL_MODEL, messages: input.messages, stream: false,
+      temperature: 0, max_tokens: input.maxTokens, ...(input.json ? { response_format: { type: 'json_object' } } : {}) } });
+    if (result.status !== 200) throw fail('local_model_unavailable');
+    const choice = result.body?.choices?.[0], content = choice?.message?.content;
+    if (choice?.finish_reason !== 'stop' || typeof content !== 'string' || !content.trim() || content.length > 16000) throw fail('invalid_completion');
+    if (input.json) { try { JSON.parse(content); } catch { throw fail('invalid_completion'); } }
+    return content;
+  } };
 }

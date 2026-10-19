@@ -165,7 +165,7 @@ import { resolve, extname } from 'node:path';
 import { startCliQueue } from '/runtime/cli-queue.mjs';
 const plan=JSON.parse(await readFile('/runtime/plan.json','utf8'));
 const token=process.env.JARVIS_PREVIEW_ID;
-const cli=plan.cli?startCliQueue(process.env.JARVIS_PREVIEW_CLI_TOKEN):null;
+const cli=plan.cli?startCliQueue(process.env.JARVIS_PREVIEW_CLI_TOKEN,plan.aiProvider):null;
 const types={'.html':'text/html; charset=utf-8','.js':'text/javascript','.mjs':'text/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.ico':'image/x-icon','.woff2':'font/woff2'};
 const root=resolve('/app',plan.root||'.');
 let child;
@@ -243,10 +243,11 @@ export function previewFailure(sha, error, stage, remote = false) {
     connection: "맥미니와 Cloudflare 사이의 연결을 완료하지 못했습니다. 연결 진단에 원인을 기록했습니다.",
     health: "임시 주소는 발급됐지만 외부에서 화면 연결을 확인하지 못했습니다. 연결 진단에 응답 상태를 기록했습니다.",
     module: "미리보기 실행 모듈을 불러오지 못했습니다. 실행기 설치 파일을 확인해야 합니다.",
-    ai: "구독 CLI의 실제 응답을 확인하지 못했습니다. 연결 진단에 로그인·사용 한도·응답 상태를 기록했습니다. 준비 완료로 처리하지 않았습니다.",
+    ai: "선택한 AI의 실제 응답을 확인하지 못했습니다. 연결 진단에 로그인·사용 한도·응답 상태를 기록했습니다. 준비 완료로 처리하지 않았습니다.",
   };
-  const message = code === "preview_cli_config_unavailable"
-    ? "이 앱은 구독 CLI 미리보기 연결을 지원하지 않습니다. CLI를 호출하기 전에 준비를 중단했습니다. 화면만 확인하려면 미리보기 AI를 ‘연결 안 함’으로 선택해주세요." : messages[stage];
+  const localMessages = { local_model_missing: "맥미니에 translategemma:4b 모델이 없습니다. 다른 모델이나 구독 CLI로 전환하지 않았습니다.", local_model_unavailable: "맥미니의 Ollama 응답을 확인하지 못했습니다. 로컬 모델 서버의 실행 상태를 확인해야 합니다.", local_model_timeout: "맥미니의 로컬 모델 응답 시간이 초과됐습니다. 준비 완료로 처리하지 않았습니다." };
+  const message = localMessages[code] ?? (code === "preview_cli_config_unavailable"
+    ? "이 앱은 구독 CLI 미리보기 연결을 지원하지 않습니다. CLI를 호출하기 전에 준비를 중단했습니다. 화면만 확인하려면 미리보기 AI를 ‘연결 안 함’으로 선택해주세요." : messages[stage]);
   return unavailable(sha, message, "failed", remote ? "remote" : "mac", diagnostic);
 }
 export async function findDeploymentPreview(repository, sha, get, publicUrl) {
@@ -265,7 +266,7 @@ export async function findDeploymentPreview(repository, sha, get, publicUrl) {
   return null;
 }
 
-export async function startMacPreview({ cwd, files, sha, stateDir, identity, group = identity, persistent = false, run, signal, transport = directProbe, bridge = createPreviewBridge, publish, cliInference, authorizeCliPreparation, delay = ms => new Promise(r => setTimeout(r, ms)) }) {
+export async function startMacPreview({ cwd, files, sha, stateDir, identity, group = identity, persistent = false, run, signal, transport = directProbe, bridge = createPreviewBridge, publish, cliInference, aiProvider = "codex", authorizeCliPreparation, delay = ms => new Promise(r => setTimeout(r, ms)) }) {
   if (!shaPattern.test(sha)) throw new Error("invalid_preview_sha");
   const docker = async (args, timeout = 30_000, cleanup = false) => {
     const result = await run("docker", args, { signal: cleanup ? undefined : signal, timeout, maxBytes: 2_000_000 });
@@ -283,7 +284,7 @@ export async function startMacPreview({ cwd, files, sha, stateDir, identity, gro
     const item = bridges.get(name), token = info.Config?.Env?.find(value => value.startsWith("JARVIS_PREVIEW_CLI_TOKEN="))?.slice("JARVIS_PREVIEW_CLI_TOKEN=".length);
     if (!item || !/^[a-f0-9-]{36}$/.test(token ?? "") || typeof authorizeCliPreparation !== "function") throw Object.assign(new Error("preview_cli_unavailable"), { code: "preview_cli_unavailable", stage: "ai" });
     await item.cliWorker?.close();
-    const worker = startPreviewCliWorker({ url: ready.url, token, inference: cliInference, authorize: authorizeCliPreparation });
+    const worker = startPreviewCliWorker({ url: ready.url, token, inference: cliInference, authorize: authorizeCliPreparation, provider: aiProvider });
     item.cliWorker = worker; item.cleanups.add(worker.close);
     const stop = () => worker.close(); signal?.addEventListener("abort", stop, { once: true });
     try { const ai = await worker.probe(); worker.setAuthorization(async () => false); return { ...ready, ai }; }
@@ -295,7 +296,7 @@ export async function startMacPreview({ cwd, files, sha, stateDir, identity, gro
   const probe = async (info) => {
     if (!info?.State?.Running || info.Config?.Labels?.["jarvis.preview.key"] !== key || info.Config.Labels["jarvis.preview.sha"] !== sha) return null;
     if (info.Config.Labels["jarvis.preview.runtime"] !== RUNTIME_ID) return null;
-    if (info.Config.Labels["jarvis.preview.ai"] !== (cliInference ? "codex" : "none")) return null;
+    if (info.Config.Labels["jarvis.preview.ai"] !== (cliInference ? aiProvider : "none")) return null;
     const expiresAt = info.Config.Labels["jarvis.preview.expires"];
     if (!(Date.parse(expiresAt) > Date.now())) return null;
     const { url } = await bridge(name, expiresAt);
@@ -334,7 +335,7 @@ export async function startMacPreview({ cwd, files, sha, stateDir, identity, gro
     let cliProfile = null;
     if (cliInference) {
       if (!plan.entry) throw Object.assign(new Error("preview_cli_config_unavailable"), { code: "preview_cli_config_unavailable", stage: "ai" });
-      cliProfile = previewCliProfile(await json("config.example.json")); plan.cli = true;
+      cliProfile = previewCliProfile(await json("config.example.json"), aiProvider); plan.cli = true; plan.aiProvider = aiProvider;
     }
     await writeFile(join(directory, "server.mjs"), previewServerSource);
     await writeFile(join(directory, "bridge.mjs"), bridgeSource);
@@ -354,7 +355,7 @@ export async function startMacPreview({ cwd, files, sha, stateDir, identity, gro
     const expiresAt = new Date(Date.now() + TTL).toISOString(), token = randomUUID(), cliToken = randomUUID();
     await docker(["run", "--detach", "--rm", "--name", name, "--label", `jarvis.preview.key=${key}`, "--label", `jarvis.preview.sha=${sha}`,
       "--label", `jarvis.preview.runtime=${RUNTIME_ID}`,
-      "--label", `jarvis.preview.ai=${cliInference ? "codex" : "none"}`,
+      "--label", `jarvis.preview.ai=${cliInference ? aiProvider : "none"}`,
       "--label", `jarvis.preview.group=${groupKey}`, "--label", `jarvis.preview.expires=${expiresAt}`, "--label", `jarvis.preview.id=${token}`,
       "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
       "--memory", "1g", "--cpus", "1", "--pids-limit", "128", "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m",

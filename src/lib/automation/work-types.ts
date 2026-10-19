@@ -8,7 +8,7 @@ export type WorkPreview = {
   checkedAt: string;
   expiresAt: string | null;
   message: string;
-  ai?: { provider: "codex"; verifiedAt: string; sample: string };
+  ai?: { provider: "codex" | "ollama"; model?: string; verifiedAt: string; sample: string };
   diagnostic?: { stage: "docker" | "build" | "application" | "configuration" | "provisioning" | "connection" | "health" | "module" | "ai"; code: string; statusCode?: number; exitCode?: number };
 };
 export type WorkCheck = { name: string; status: "passed" | "failed" | "not_run"; detail: string };
@@ -36,7 +36,7 @@ export type ProjectTurn = {
   mode: "ask" | "change" | "preview" | "test";
   sourceTurnId?: string;
   followLatest?: true;
-  previewAI?: "codex";
+  previewAI?: "codex" | "ollama";
   publish: "pr" | "merge";
   status: "queued" | "running" | "completed" | "failed" | "interrupted" | "cancelled";
   phase: "queued" | "preparing" | "coding" | "testing" | "publishing" | "reporting";
