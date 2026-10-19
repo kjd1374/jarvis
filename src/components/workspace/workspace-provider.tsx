@@ -37,7 +37,7 @@ type Workspace = {
   syncStatus: "local" | "waiting" | "saving" | "saved" | "error" | "conflict";
   conflict: CloudConflict | null;
   retryLoad: () => void;
-  retryCloud: () => Promise<void>;
+  retryCloud: (recheckConflict?: boolean) => Promise<void>;
   resolveConflict: (preferLocal: boolean) => Promise<void>;
   mutate: (
     transform: (data: WorkspaceData) => WorkspaceData,
@@ -61,10 +61,11 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const syncing = useRef(false);
   const conflictRef = useRef<CloudConflict | null>(null);
 
-  const retryCloud = useCallback(async function flush(): Promise<void> {
+  const retryCloud = useCallback(async function flush(recheckConflict = false): Promise<void> {
     const accountId = accountRef.current?.accountId;
-    if (!accountId || !accountRef.current?.authenticated || syncing.current || conflictRef.current)
+    if (!accountId || !accountRef.current?.authenticated || syncing.current || conflictRef.current && !recheckConflict)
       return;
+    if (recheckConflict) conflictRef.current = null;
     syncing.current = true;
     setSyncStatus("saving");
     let failed = false;

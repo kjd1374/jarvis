@@ -70,3 +70,46 @@ test("legacy local preference preserves current runner observations while a hear
   expect(merged.data.projects[0].name).toBe("보존할 내 이름");
   expect(merged.data.services[0].monitoring!.runnerSeenAt).toBe("2026-10-15T10:02:00Z");
 });
+
+test("two devices selecting different projects do not block independent saved work", () => {
+  const base = fixture();
+  base.projects.push({ ...base.projects[0], id: "second", name: "다른 프로젝트" });
+  base.activeProjects.company = null;
+  const local = structuredClone(base), remote = structuredClone(base);
+  local.activeProjects.company = "project";
+  remote.activeProjects.company = "second";
+  local.projects[0].description = "휴대폰 요청 설명";
+  remote.projects[1].description = "맥미니 결과";
+  const result = mergeCloudWorkspace(base, local, remote);
+  expect(result.conflicts).toEqual([]);
+  expect(result.data.activeProjects.company).toBe("project");
+  expect(result.data.projects.map(p => p.description)).toEqual(["휴대폰 요청 설명", "맥미니 결과"]);
+});
+
+test("lost save acknowledgement adopts the exact submitted request already claimed by the runner", async () => {
+  const { enqueueWork, claimProjectWork } = await import("../../src/lib/automation/work");
+  const base = automationWorkspace();
+  const local = enqueueWork(base, "company", "auto-project", "auto-service", "화면 준비", "preview", "pr", stamp);
+  const remote = claimProjectWork(local, { space: "company", projectIds: ["auto-project"], deviceId: "runner", previews: true }, stamp).data;
+  const result = mergeCloudWorkspace(base, local, remote);
+  expect(result.conflicts).toEqual([]);
+  expect(result.data.projects[0].automation?.turns).toEqual(remote.projects[0].automation?.turns);
+  expect(result.data.projects[0].automation?.turns).toHaveLength(1);
+});
+
+test("acknowledgement recovery also preserves the claimed change task without replaying it", async () => {
+  const { enqueueWork, claimProjectWork } = await import("../../src/lib/automation/work");
+  const base = automationWorkspace();
+  const local = enqueueWork(base, "company", "auto-project", "auto-service", "수정 요청", "change", "pr", stamp);
+  const remote = claimProjectWork(local, { space: "company", projectIds: ["auto-project"], deviceId: "runner", remoteWork: true }, stamp).data;
+  const merged = mergeCloudWorkspace(base, local, remote);
+  expect(merged.conflicts).toEqual([]);
+  expect(merged.data.tasks).toEqual(remote.tasks);
+  expect(merged.data.projects[0].automation?.turns).toEqual(remote.projects[0].automation?.turns);
+  const cancel = structuredClone(local);
+  cancel.projects[0].automation!.turns[0].status = "cancelled";
+  expect(mergeCloudWorkspace(base, cancel, remote).conflicts).toContain(`projects.auto-project.automation.turns.${cancel.projects[0].automation!.turns[0].id}`);
+  const changed = structuredClone(local);
+  changed.projects[0].automation!.turns[0].request = "다른 요청";
+  expect(mergeCloudWorkspace(base, changed, remote).conflicts.length).toBeGreaterThan(0);
+});

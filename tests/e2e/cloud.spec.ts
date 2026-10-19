@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { test, expect, ready, projectForm, state } from "../support/fixtures";
-import { emptyWorkspace, type Space } from "../../src/lib/workspace/types";
+import { emptyWorkspace, type Space, type WorkspaceData } from "../../src/lib/workspace/types";
 import { automationWorkspace } from "../support/automation";
 const owner = "11111111-1111-4111-8111-111111111111";
 function fixture() {
@@ -28,7 +28,7 @@ function fixture() {
   };
 }
 async function connect(page: Page, remote = fixture()) {
-  const control = { failWrites: false, loseAcknowledgement: false, puts: 0, collideWrites: 0, holdAck: null as Promise<void> | null };
+  const control = { afterSave: null as ((data: WorkspaceData) => WorkspaceData) | null, failWrites: false, loseAcknowledgement: false, puts: 0, collideWrites: 0, holdAck: null as Promise<void> | null };
   await page.route("**/api/account", (route) =>
     route.fulfill({
       json: {
@@ -72,7 +72,7 @@ async function connect(page: Page, remote = fixture()) {
         status: 409,
         json: { error: "합성 버전 충돌", code: "revision_conflict" },
       });
-    target.data = body.data;
+    target.data = control.afterSave ? control.afterSave(body.data) : body.data;
     target.revision++;
     const savedRevision = target.revision;
     if (control.holdAck) {
@@ -356,4 +356,60 @@ test("저장 응답을 기다리는 동안 추가한 입력과 새 서버 결과
   await page.reload(); await ready(page);
   await expect(page.getByRole("heading", { name: "응답 대기 중 첫 입력", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "응답 대기 중 둘째 입력", exact: true })).toBeVisible();
+});
+
+test("두 기기가 다른 프로젝트를 선택하고 요청해도 저장 검토로 멈추지 않는다", async ({ page, browser }) => {
+  const remote = fixture();
+  remote.company.data.projects.push({ ...remote.company.data.projects[0], id: "second-project", name: "두 번째 프로젝트" });
+  await connect(page, remote);
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  try {
+    const phone = await context.newPage(); await connect(phone, remote);
+    await page.goto("/projects"); await ready(page);
+    await phone.goto("http://127.0.0.1:4317/projects"); await ready(phone);
+    await page.getByRole("combobox", { name: "프로젝트 범위" }).selectOption("company-project");
+    await expect(page.getByRole("status").filter({ hasText: "서버에 저장됨" })).toBeVisible();
+    await phone.getByRole("combobox", { name: "프로젝트 범위" }).selectOption("second-project");
+    await expect(phone.getByRole("status").filter({ hasText: "서버에 저장됨" })).toBeVisible();
+    await create(phone, "휴대폰에서 추가한 요청 프로젝트");
+    await expect.poll(() => remote.company.data.projects.length).toBe(3);
+    await expect(phone.getByRole("link", { name: "서버 변경 검토", exact: true })).toHaveCount(0);
+    expect(remote.personal.data.projects).toHaveLength(1);
+  } finally { await context.close(); }
+});
+
+test("요청 저장 확인이 유실되어도 실행 중인 같은 요청을 중복 제출하지 않는다", async ({ page }) => {
+  const { claimProjectWork } = await import("../../src/lib/automation/work");
+  const data = fixture(); data.company.data = automationWorkspace();
+  const { remote, control } = await connect(page, data);
+  await page.goto("/projects/auto-project"); await ready(page);
+  control.afterSave = value => claimProjectWork(value, { space: "company", projectIds: ["auto-project"], deviceId: "runner", previews: true }, new Date().toISOString()).data;
+  control.loseAcknowledgement = true;
+  await page.getByRole("button", { name: "화면 준비", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "합성 응답 유실" }).first()).toBeVisible();
+  await page.getByRole("button", { name: "서버 저장 다시 시도", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "서버에 저장됨" })).toBeVisible();
+  expect(remote.company.data.projects[0].automation?.turns).toHaveLength(1);
+  expect(remote.company.data.projects[0].automation?.turns[0].status).toBe("running");
+  await expect(page.getByRole("link", { name: "서버 변경 검토", exact: true })).toHaveCount(0);
+});
+
+test("충돌 화면에서 최신 기록을 다시 비교해도 입력을 버리지 않는다", async ({ page }) => {
+  const { remote } = await connect(page);
+  await page.goto("/projects/company-project"); await ready(page);
+  await page.getByRole("button", { name: "프로젝트 수정", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "프로젝트 수정" });
+  await editor.getByLabel("프로젝트 설명", { exact: true }).fill("보존할 휴대폰 입력");
+  remote.company.data.projects[0].description = "다른 기기 입력"; remote.company.revision++;
+  await editor.getByRole("button", { name: "변경 저장", exact: true }).click();
+  await page.getByRole("link", { name: "서버 변경 검토", exact: true }).click();
+  const review = page.getByRole("region", { name: "서버 변경 충돌 검토", exact: true });
+  await review.getByRole("button", { name: "최신 기록과 다시 비교" }).click();
+  await expect(review).toBeVisible();
+  expect(remote.company.data.projects[0].description).toBe("다른 기기 입력");
+  remote.company.data.projects[0].description = "서버 초기 내용"; remote.company.revision++;
+  await review.getByRole("button", { name: "최신 기록과 다시 비교" }).click();
+  await expect(review).not.toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "서버에 저장됨" })).toBeVisible();
+  expect(remote.company.data.projects[0].description).toBe("보존할 휴대폰 입력");
 });
