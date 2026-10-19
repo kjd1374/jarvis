@@ -6,10 +6,10 @@ import { spaceLabels } from "@/lib/workspace/types";
 import { mergeCloudWorkspace } from "@/lib/cloud/merge";
 import styles from "./studio.module.css";
 export function CloudConflictReview() {
-  const { conflict, resolveConflict } = useWorkspace();
-  return conflict ? <ConflictReview key={conflict.reviewId} conflict={conflict} resolveConflict={resolveConflict} /> : null;
+  const { conflict, resolveConflict, retryCloud } = useWorkspace();
+  return conflict ? <ConflictReview key={conflict.reviewId} conflict={conflict} resolveConflict={resolveConflict} retryCloud={retryCloud} /> : null;
 }
-function ConflictReview({ conflict, resolveConflict }: { conflict: CloudConflict; resolveConflict: (preferLocal: boolean) => Promise<void> }) {
+function ConflictReview({ conflict, resolveConflict, retryCloud }: { conflict: CloudConflict; resolveConflict: (preferLocal: boolean) => Promise<void>; retryCloud: (recheckConflict?: boolean) => Promise<void> }) {
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -54,6 +54,17 @@ function ConflictReview({ conflict, resolveConflict }: { conflict: CloudConflict
           안전하게 병합할 수 없는 자료입니다. 먼저 백업해 내용을 확인해주세요.
         </p>
       )}
+      {counts && counts.conflicts.length > 0 && <ul>{[...new Set(counts.conflicts.map(path => {
+        const parts = path.split(".");
+        if (parts[0] === "projects" && parts.includes("automation")) return "AI 작업의 요청 또는 진행 상태";
+        if (parts[0] === "projects" && parts.at(-1) === "description") return "프로젝트 설명";
+        if (parts[0] === "projects" && parts.at(-1) === "name") return "프로젝트 이름";
+        return ({ projects: "프로젝트 내용", services: "서비스 연결", tasks: "할 일", notes: "메모", documents: "문서", messages: "대화 내용", conversations: "대화", activeProjects: "프로젝트 선택", activeConversations: "대화 선택" } as Record<string, string>)[parts[0]] ?? "기록 내용";
+      }))].map(label => <li key={label}>{label}</li>)}</ul>}
+      <button className={styles.secondaryButton} disabled={busy} onClick={async () => {
+        setBusy(true);
+        try { await retryCloud(true); } finally { setBusy(false); }
+      }}>최신 기록과 다시 비교</button>
       <details>
         <summary>양쪽 기록 상세 비교</summary>
         <pre className={styles.jsonPreview}>

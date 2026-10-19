@@ -8,6 +8,18 @@ const object = (value: unknown): value is Record<string, unknown> =>
 const same = (a: unknown, b: unknown) =>
   a === undefined || b === undefined ? a === b : canonical(a) === canonical(b);
 
+// A lost HTTP acknowledgement can leave the exact initial request locally while
+// the server has already claimed it. Adopt the complete server record, never
+// reconstruct a lease or reinterpret a cancellation/retry as an initial send.
+function acknowledgedWork(local: unknown, remote: unknown) {
+  if (!object(local) || !object(remote) || local.status !== "queued" || local.phase !== "queued" ||
+    local.attempt !== 0 || local.updatedAt !== local.createdAt ||
+    ["executionDevice", "leaseOwner", "leaseToken", "leaseUntil", "error", "result"].some(key => local[key] !== undefined)) return false;
+  const identity = ["id", "serviceId", "repository", "request", "mode", "publish", "sourceTurnId", "followLatest", "previewAI", "createdAt"];
+  return identity.every(key => same(local[key], remote[key])) &&
+    Number.isInteger(remote.attempt) && (remote.attempt as number) >= 0;
+}
+
 // Baseline is the last acknowledged server snapshot, never a guessed timestamp.
 // Without one (old caches), preserve additions and require review of differences.
 export function mergeCloudWorkspace(
@@ -35,6 +47,8 @@ export function mergeCloudWorkspace(
       if (l === undefined) return r;
       if (r === undefined) return l;
     }
+    // The selected view is a device preference, not conflicting user content.
+    if (path.length === 2 && ["activeProjects", "activeConversations"].includes(path[0])) return l;
     // Removing a connected sheet also removes its in-flight work; a late runner
     // heartbeat or another browser's save must not resurrect that connection.
     if (base && path.length === 2 && path[0] === "documents" && object(b) && object(b.sheet) && (l === undefined || r === undefined)) return undefined;
@@ -50,6 +64,15 @@ export function mergeCloudWorkspace(
       path.length === 3 && path[0] === "sourceRecords" && path[2] !== "taskId";
     if (path[0] === "providerConnections") return r;
     if (observation || path.length === 4 && path[0] === "documents" && path[2] === "sheet" && path[3] === "runnerSeenAt") return r;
+    if (base && b === undefined && turn && acknowledgedWork(l, r)) return r;
+    // The task created by that same initial send may already be in progress.
+    if (base && b === undefined && path.length === 2 && path[0] === "tasks" && object(l) && object(r) &&
+      l.status === "todo" && ["in_progress", "done", "decision"].includes(String(r.status)) &&
+      same({ ...l, status: r.status }, r)) {
+      const left = local.projects.find(p => p.id === l.projectId)?.automation?.turns.find(t => t.id === l.sourceMessageId);
+      const right = remote.projects.find(p => p.id === r.projectId)?.automation?.turns.find(t => t.id === r.sourceMessageId);
+      if (l.id === `work-${left?.id}` && acknowledgedWork(left, right)) return r;
+    }
     // Never splice lease/result fields or roll back a progressing execution during review.
     if (turn || job || question || path.length === 3 && path[0] === "projects" && path[2] === "setup") {
       conflicts.push(path.join("."));
