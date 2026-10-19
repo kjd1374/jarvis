@@ -2,7 +2,7 @@
 // this process. No Jarvis production API, database, user repository or model calls.
 import assert from "node:assert/strict";
 import http from "node:http";
-import { lookup, resolve4, resolve6 } from "node:dns/promises";
+import { lookup, resolve4, resolve6, Resolver } from "node:dns/promises";
 import { spawn } from "node:child_process";
 import { generateKeyPairSync, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -22,8 +22,13 @@ const publicKey = ticketPublicKey(key), sha = "a".repeat(40);
 const scope = { space: "personal", projectId: "synthetic-live-check", turnId: randomUUID() };
 let approved = true, writes = 0, cleanup, browser, diagnostics = "", syntheticHost, nextDnsEvidence = 0;
 async function diagnoseDns(name, label) {
+  const authoritative = async () => {
+    const resolver = new Resolver({ timeout: 2000, tries: 1 });
+    resolver.setServers(await resolve4("kevin.ns.cloudflare.com"));
+    return resolver.resolve4(name);
+  };
   const results = await Promise.allSettled([lookup(name, { all: true }), resolve4(name), resolve6(name),
-    fetch(`https://cloudflare-dns.com/dns-query?name=${name}&type=A`, { headers: { accept: "application/dns-json" }, signal: AbortSignal.timeout(5000) }).then(r => r.json()).then(r => ({ status: r.Status, answers: r.Answer?.length ?? 0 }))]);
+    ...["https://cloudflare-dns.com/dns-query", "https://dns.google/resolve"].map(endpoint => fetch(`${endpoint}?name=${name}&type=A`, { headers: { accept: "application/dns-json" }, signal: AbortSignal.timeout(5000) }).then(r => r.json()).then(r => ({ status: r.Status, answers: r.Answer?.length ?? 0, negativeTtl: r.Authority?.[0]?.TTL }))), authoritative()]);
   console.log("DNS evidence", label, results.map(r => r.status === "fulfilled" ? (Array.isArray(r.value) ? { answers: r.value.length } : r.value) : { code: r.reason.code ?? r.reason.cause?.code ?? r.reason.name }));
 }
 const app = http.createServer((req, res) => {
@@ -58,6 +63,7 @@ try {
       return child;
       } });
       syntheticHost = new URL(tunnel.url).hostname;
+      console.log("Synthetic allocated hostname", syntheticHost, "provider log hostnames", [...new Set(diagnostics.match(/[a-z0-9]+(?:-[a-z0-9]+)*\.trycloudflare\.com/g))]);
       return tunnel;
     },
   });
