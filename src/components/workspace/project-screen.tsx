@@ -1,7 +1,7 @@
 "use client";
 import { useRef, useState } from "react";
 import Link from "next/link";
-import { enqueueWork, latestWorkSource } from "@/lib/automation/work";
+import { enqueueWork, latestWorkSource, preferredWorkRevision } from "@/lib/automation/work";
 import { repositoryFor } from "@/lib/automation/state";
 import { queuedWorkMessage } from "@/lib/automation/runner-status";
 import { dateLabel, id, now, type Project } from "@/lib/workspace/types";
@@ -43,7 +43,8 @@ export function ProjectScreen({ project }: { project: Project }) {
   const [selected, setSelected] = useState(services[0]?.id ?? "");
   const service = services.find(s => s.id === selected) ?? services[0];
   const [error, setError] = useState("");
-  const [revision, setRevision] = useState("latest");
+  const [revisionChoice, setRevision] = useState<{ serviceId: string; value: string } | null>(null);
+  const revision = revisionChoice && revisionChoice.serviceId === service?.id ? revisionChoice.value : service ? preferredWorkRevision(project, service.id, repositoryFor(service)!) : "main";
   const [previewAI, setPreviewAI] = useState<"none" | "codex">([...project.automation?.turns ?? []].reverse().find(t => t.mode === "preview")?.previewAI ?? "none");
   const recent = service && latestWorkSource(project, service.id, repositoryFor(service)!);
   const source = revision === "latest" ? recent : undefined;
@@ -52,11 +53,12 @@ export function ProjectScreen({ project }: { project: Project }) {
   const latest = [...turns].reverse().find(t => t.result?.preview && (source ? t.id === source.id || t.sourceTurnId === source.id : !t.sourceTurnId && t.result.outcome !== "pr_open"));
   const waiting = turns.find(t => t.mode === "preview" && ["queued", "running"].includes(t.status));
   const testing = turns.find(t => t.mode === "test" && ["queued", "running"].includes(t.status));
-  async function prepare(mode: "preview" | "test", chosenAI = previewAI) {
+  const sourceChanged = source && turns.some(t => t.sourceTurnId === source.id && t.error === "work_source_changed");
+  async function prepare(mode: "preview" | "test", chosenAI = previewAI, chosenRevision = revision) {
     if (!service || pending.current || saving || (mode === "preview" ? waiting : testing)) return;
     pending.current = true; setError("");
     try {
-      await mutate(d => enqueueWork(d, project.space, project.id, service.id, mode === "test" ? "선택한 코드의 자동 테스트를 실행해주세요." : "선택한 코드의 웹 화면을 준비해주세요.", mode, "pr", now(), requestId.current, source?.id, mode === "preview" && chosenAI === "codex" ? "codex" : undefined));
+      await mutate(d => enqueueWork(d, project.space, project.id, service.id, mode === "test" ? "선택한 코드의 자동 테스트를 실행해주세요." : "선택한 코드의 웹 화면을 준비해주세요.", mode, "pr", now(), requestId.current, chosenRevision === "latest" ? recent?.id : undefined, mode === "preview" && chosenAI === "codex" ? "codex" : undefined));
       requestId.current = id();
     } catch (e) { setError(e instanceof Error ? e.message : "화면 준비 요청을 저장하지 못했습니다."); }
     finally { pending.current = false; }
@@ -69,8 +71,12 @@ export function ProjectScreen({ project }: { project: Project }) {
       </div>
     </div>
     {services.length > 1 && <label>화면을 볼 저장소<select aria-label="화면을 볼 저장소" value={service?.id ?? ""} onChange={e => setSelected(e.target.value)}>{services.map(s => <option key={s.id} value={s.id}>{repositoryFor(s)}</option>)}</select></label>}
-    {recent && <label>확인할 코드<select aria-label="확인할 코드" value={revision} onChange={e => setRevision(e.target.value)}><option value="latest">최근 수정본 · PR 반영 대기</option><option value="main">기본 브랜치 · 반영된 코드</option></select></label>}
+    {recent && <label>확인할 코드<select aria-label="확인할 코드" value={revision} onChange={e => setRevision({ serviceId: service!.id, value: e.target.value })}><option value="latest">저장된 PR 수정본</option><option value="main">기본 브랜치 · 반영된 코드</option></select></label>}
     {source && <p>최근 수정본 {source.result!.headSha!.slice(0, 8)}을 확인합니다. 기록상 반영 대기이며 실행할 때 GitHub 상태를 다시 확인합니다.</p>}
+    {!source && recent && <p>기본 브랜치의 반영된 코드를 확인합니다. 이전 PR 기록은 작업 내역에 보관됩니다.</p>}
+    {sourceChanged && <div role="status"><p>저장된 PR의 코드나 상태가 달라졌습니다. 이미 반영한 화면을 확인하려면 기본 브랜치로 준비해주세요.</p>
+      <button className={styles.secondaryButton} disabled={saving || !!waiting} onClick={() => { setRevision({ serviceId: service!.id, value: "main" }); void prepare("preview", previewAI, "main"); }}>반영된 코드로 화면 준비</button>
+    </div>}
     <label>미리보기 AI<select aria-label="미리보기 AI" value={previewAI} onChange={e => setPreviewAI(e.target.value === "codex" ? "codex" : "none")}>
       <option value="none">연결 안 함 · 화면·저장 확인</option><option value="codex">현재 구독 CLI · 사용량 소모</option>
     </select></label>
