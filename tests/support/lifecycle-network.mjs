@@ -56,7 +56,7 @@ const request=http.request({hostname:'127.0.0.1',port:${control.address().port},
 setInterval(()=>{},30000);process.on('SIGTERM',()=>process.exit(0));
 `, { mode: 0o700 });
   return {
-    ca, directory, binary, proxy: `http://127.0.0.1:${proxy.address().port}`,
+    ca, directory, binary, tlsPort: web.address().port, proxy: `http://127.0.0.1:${proxy.address().port}`,
     disconnect() { const previous = target; target = null; return () => { target = previous; }; },
     async fetch(url, options = {}) {
       assert.equal(new URL(url).origin, new URL(lifecycleRemote).origin);

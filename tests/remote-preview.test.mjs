@@ -3,13 +3,34 @@ import assert from "node:assert/strict";
 import { verifyPreviewTicket, previewOrigin } from "../public/jarvis-preview-auth.mjs";
 import { randomUUID } from "node:crypto";
 import { fixture, ticket, publicKey, expected, viewer, enter, cookieOf } from "./support/remote-preview.mjs";
-import { startQuickTunnel, tunnelFailure, waitForRemoteHealth } from "../public/jarvis-remote-preview.mjs";
+import { startQuickTunnel, tunnelFailure, waitForRemoteHealth, probeRemoteHealth } from "../public/jarvis-remote-preview.mjs";
+import http from "node:http";
+import https from "node:https";
+import { createLifecycleNetwork, lifecycleRemote } from "./support/lifecycle-network.mjs";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+test("macOS health bypasses stale system lookup through real verified HTTPS without priming the OS cache", async () => {
+  const network = await createLifecycleNetwork(), server = http.createServer((_req, res) => res.end("fresh-dns-gateway"));
+  await new Promise(r => server.listen(0, "127.0.0.1", r));
+  const agent = new https.Agent({ ca: await readFile(network.ca) }), untrusted = new https.Agent(); let tunnel, lookups = 0;
+  const request = selected => (url, options, done) => {
+    assert.equal(url.hostname, new URL(lifecycleRemote).hostname); assert.equal(options.rejectUnauthorized, undefined);
+    return https.get(url, { ...options, port: network.tlsPort, agent: selected, headers: { Host: url.hostname } }, done);
+  };
+  const options = { platform: "darwin", transport: () => assert.fail("system lookup must not prime a negative cache"),
+    resolve: async hostname => { assert.equal(hostname, new URL(lifecycleRemote).hostname); lookups++; return ["127.0.0.1"]; }, request: request(agent) };
+  try {
+    tunnel = await startQuickTunnel({ binary: network.binary, localUrl: `http://127.0.0.1:${server.address().port}/`, directory: network.directory });
+    const response = await probeRemoteHealth(lifecycleRemote + "_jarvis/health", {}, options);
+    assert.equal(response.status, 200); assert.equal(await response.text(), "fresh-dns-gateway"); assert(lookups > 0);
+    await assert.rejects(probeRemoteHealth(lifecycleRemote + "_jarvis/health", {}, { ...options, request: request(untrusted) }), /self.signed|certificate/i);
+    await assert.rejects(probeRemoteHealth("https://untrusted.invalid/_jarvis/health", {}, options), /invalid_remote_health_url/);
+  } finally { tunnel?.close(); agent.destroy(); untrusted.destroy(); server.closeAllConnections(); await new Promise(r => server.close(r)); await network.close(); }
+});
 test("tunnel startup uses a fresh explicit config and environment without provider credentials", async () => {
   const directory = await mkdtemp(join(tmpdir(), "jarvis-tunnel-unit-"));
   let child, configFile, killed = false;

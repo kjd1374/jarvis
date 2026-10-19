@@ -1,9 +1,9 @@
 {
-  "version": "2.5.1",
+  "version": "2.5.2",
   "files": {
-    "jarvis-runner.mjs": "648fe5e04c3f686e6a0b319f8da5cca72a8cc22c95df33f1b87490227b68f073",
+    "jarvis-runner.mjs": "e5589be4498493cba0da5d078fa9ef7b2dd79e021911ce7fc71e3a068200e189",
     "jarvis-preview.mjs": "cd07286fad01de7d0f9d2ee1f79f5756f8b27ea288cfbbed3beec7fcfa2c674f",
-    "jarvis-remote-preview.mjs": "659748de926841e0640a69404d543b8962884a3588dbe9cfc70da7a0aad78deb",
+    "jarvis-remote-preview.mjs": "b1e506d4be48a011cde555ad2897c3c7293288fcfeba9b82d4727935ab636351",
     "jarvis-preview-auth.mjs": "5fe9b1442b41e860e053c58a45592aabd65c406c20a5f655c4e18da18baa4572",
     "jarvis-preview-cli.mjs": "8c7732d37fc3150e41d6f0aa32a9d6e9ce20f89bf2e4e0cbd7787c76b83c1967"
   }

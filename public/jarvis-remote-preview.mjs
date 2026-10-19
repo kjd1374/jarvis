@@ -1,5 +1,7 @@
 // Authenticated HTTPS access to one disposable preview. Never forwards runner credentials.
 import http from "node:http";
+import https from "node:https";
+import { resolve4 } from "node:dns/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 import { spawn } from "node:child_process";
 import { randomBytes, randomUUID, createHash } from "node:crypto";
@@ -193,7 +195,38 @@ export async function startQuickTunnel({ binary, localUrl, directory, signal, la
   finally { signal?.removeEventListener("abort", abort); }
 }
 
-export async function waitForRemoteHealth({ url, remoteId, signal, transport = fetch, clock = Date.now, delay = ms => sleep(ms, undefined, { signal }), timeoutMs = 90_000, alive = () => true }) {
+export async function probeRemoteHealth(value, options = {}, { platform = process.platform, transport = fetch, resolve = resolve4, request = https.get } = {}) {
+  const url = new URL(value);
+  if (!previewOrigin(`${url.origin}/`) || url.pathname !== "/_jarvis/health" || url.search || url.hash || url.username || url.password)
+    throw remoteFailure("invalid_remote_health_url", "health");
+  if (platform !== "darwin") return transport(value, options);
+  // A fresh hostname can remain NXDOMAIN in macOS getaddrinfo while DNS already
+  // returns its published addresses. Query configured DNS directly for this
+  // bounded public probe. Keep hostname/SNI and certificate verification, and
+  // never follow redirects.
+  return new Promise((resolveResponse, reject) => {
+    const lookup = (hostname, lookupOptions, callback) => {
+      resolve(hostname).then(addresses => {
+        if (!addresses.length) { callback(Object.assign(new Error("DNS not published"), { code: "ENOTFOUND" })); return; }
+        if (lookupOptions?.all) callback(null, addresses.map(address => ({ address, family: 4 })));
+        else callback(null, addresses[0], 4);
+      }, callback);
+    };
+    const upstream = request(url, { lookup, signal: options.signal ?? AbortSignal.timeout(5000), headers: { Accept: "text/plain" } }, response => {
+      const parts = []; let size = 0;
+      response.on("data", bytes => {
+        size += bytes.length;
+        if (size > 1024) { reject(remoteFailure("remote_health_mismatch", "health")); response.destroy(); return; }
+        parts.push(bytes);
+      });
+      response.on("error", reject);
+      response.on("end", () => resolveResponse({ ok: response.statusCode >= 200 && response.statusCode < 300, status: response.statusCode, text: async () => Buffer.concat(parts).toString() }));
+    });
+    upstream.on("error", reject);
+  });
+}
+
+export async function waitForRemoteHealth({ url, remoteId, signal, transport = probeRemoteHealth, clock = Date.now, delay = ms => sleep(ms, undefined, { signal }), timeoutMs = 90_000, alive = () => true }) {
   if (signal?.aborted) throw remoteFailure("preview_cancelled", "health");
   // Edge registration precedes DNS publication. An immediate NXDOMAIN can stay
   // cached on macOS for the whole probe window, even after the record exists.
@@ -228,14 +261,14 @@ export async function waitForRemoteHealth({ url, remoteId, signal, transport = f
       code = statusCode === 403 ? "remote_health_denied" : "remote_health_http";
     } catch (error) {
       if (error.code === "remote_health_mismatch") throw error;
-      if (/ENOTFOUND|EAI_AGAIN/.test(error.cause?.code ?? "")) code = "remote_health_dns";
+      if (/ENOTFOUND|EAI_AGAIN/.test(error.cause?.code ?? error.code ?? "")) code = "remote_health_dns";
     }
     if (clock() < until) await delay(Math.min(1000, until - clock()));
   } while (clock() < until);
   throw remoteFailure(code, "health", Number.isInteger(statusCode) ? { statusCode } : {});
 }
 
-export async function publishRemotePreview({ local, appOrigin, client, scope, binary, directory, attachCleanup, attachCliAuthorization, signal, transport = fetch, tunnel = startQuickTunnel }) {
+export async function publishRemotePreview({ local, appOrigin, client, scope, binary, directory, attachCleanup, attachCliAuthorization, signal, transport = probeRemoteHealth, tunnel = startQuickTunnel }) {
   const remoteId = randomUUID();
   let config;
   try { config = await client.request("/api/preview/config"); }

@@ -104,7 +104,7 @@ export function ProjectAgent({ project }: { project: Project }) {
     <div className={styles.detailHeading}><h2><Icon name="message" size={18} /> AI와 프로젝트 작업</h2><span role="status" className={styles.runnerStatus} data-online={online && !updateNeeded}>{!service ? "GitHub 저장소 등록 필요" : updateNeeded ? "CLI 연결됨 · 새 기능 업데이트 필요" : online ? "Jarvis CLI 연결됨" : seen ? "Jarvis CLI 최근 응답 없음" : monitoring?.lastSuccessAt ? "CLI 실행 기록 있음 · 접속 미확인" : "CLI 연결 대기"}</span></div>
     {seen && <p className={styles.runnerEvidence}>실행기 최근 응답 {dateLabel(seen)} · 버전 {monitoring?.runnerConnection?.version ?? "미확인"} · 아래 답변은 대상 저장소의 작업 결과입니다.</p>}
     {updateNeeded && <p className={styles.agentConnection}>{cliUpdateNeeded ? "구독 CLI 미리보기에는 실행기 2.5.0 이상이 필요합니다." : "최근 응답한 실행기는 자동 테스트·수정본 선택을 지원하지 않습니다."} <Link href="/settings#cli-runner">실행기 업데이트 안내 →</Link></p>}
-    {!service ? <div className={styles.agentConnection}><p>코드 작업과 화면 준비에 사용할 기존 GitHub 저장소를 먼저 등록해주세요.</p><ServiceRegistrationButton preset="github" projectId={project.id}>GitHub 저장소 등록</ServiceRegistrationButton></div>
+    {!service ? <div className={styles.agentConnection}><p>코드 작업과 화면 준비에 사용할 GitHub 저장소를 등록해주세요. 새 저장소는 README 등 초기 커밋이 있어야 합니다.</p><ServiceRegistrationButton preset="github" projectId={project.id}>GitHub 저장소 등록</ServiceRegistrationButton></div>
       : !online && <p className={styles.agentConnection}>{account?.authenticated ? "이 영역에 연결된 실행기가 프로젝트를 자동으로 찾습니다. 다음 응답을 기다리고 있으며 요청은 저장됩니다." : "CLI 자동 실행은 서버에 연결된 업무실에서 사용할 수 있습니다. 현재 요청은 이 브라우저에 저장됩니다."} <Link href="/settings#cli-runner">CLI 연결 안내 →</Link></p>}
     <form onSubmit={submit} className={styles.agentComposer}>
       <label htmlFor="project-agent-message">AI에게 요청</label>
