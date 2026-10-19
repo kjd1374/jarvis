@@ -3,6 +3,24 @@ import { analyzed, collected, analysisRaw, automationWorkspace } from "../suppor
 import { applyAnalysis } from "../../src/lib/automation/state";
 import { parseAnalysis } from "../../src/lib/automation/facts";
 test.setTimeout(60_000);
+test("저장소 없는 프로젝트는 CLI 대기 대신 등록할 항목을 안내하고 같은 프로젝트에 연결한다", async ({ page }) => {
+  const data = automationWorkspace(new Date().toISOString()); data.services = [];
+  await seed(page, data); await page.goto("/projects/auto-project"); await ready(page);
+  const agent = page.getByRole("region", { name: "프로젝트 AI 작업실", exact: true });
+  const screen = page.getByRole("region", { name: "수정된 화면 확인", exact: true });
+  await expect(agent.getByRole("status").first()).toHaveText("GitHub 저장소 등록 필요");
+  await expect(agent.getByRole("link", { name: "CLI 연결 안내 →", exact: true })).toHaveCount(0);
+  await expect(screen).toContainText("GitHub 저장소를 먼저 등록해주세요");
+  await expect(screen.getByRole("button", { name: "화면 준비", exact: true })).toBeDisabled();
+  await agent.getByRole("button", { name: "GitHub 저장소 등록", exact: true }).click();
+  const form = page.getByRole("dialog", { name: "서비스 등록", exact: true });
+  await form.getByLabel("서비스 웹 주소", { exact: true }).fill("https://github.com/example/synthetic-new");
+  await form.getByRole("button", { name: "서비스 저장", exact: true }).click();
+  await expect(form).not.toBeVisible();
+  expect((await state(page))!.services[0]).toMatchObject({ projectId: "auto-project", space: "company", webUrl: "https://github.com/example/synthetic-new" });
+  await expect(agent.getByRole("status").first()).toHaveText("CLI 연결 대기");
+  await page.reload(); await ready(page); await expect(screen.getByRole("button", { name: "화면 준비", exact: true })).toBeEnabled();
+});
 test("앱의 구독 CLI 미지원은 접속 실패와 구분하고 같은 수정본을 AI 없이 다시 준비한다", async ({ page }) => {
   const { enqueueWork, claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
   const { observeWorkRunner } = await import("../../src/lib/automation/runner-status");

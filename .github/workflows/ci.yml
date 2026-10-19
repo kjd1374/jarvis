@@ -81,5 +81,6 @@ jobs:
             test-results/device-*.png
             test-results/other-owner.png
             test-results/large-transfer-failure.png
+            test-results/project-lifecycle-*.png
           retention-days: 7
           if-no-files-found: warn

@@ -75,7 +75,7 @@ export function ProjectScreen({ project }: { project: Project }) {
       <option value="none">연결 안 함 · 화면·저장 확인</option><option value="codex">현재 구독 CLI · 사용량 소모</option>
     </select></label>
     {previewAI === "codex" && <p>지원 앱 안의 AI 기능을 구독 CLI에 연결하는 선택입니다. Jarvis의 코드 수정용 CLI 연결과는 별개입니다. 짧은 번역 응답을 실제 확인하며 요청마다 구독 사용량이 소모됩니다. API 키 과금으로 전환하지 않으며 임시 화면 한 개에서 최대 20회 요청할 수 있습니다.</p>}
-    {latest?.result?.preview ? <PreviewResult preview={latest.result.preview} project={project} turnId={latest.id} /> : <p>{previewAI === "codex"
+    {latest?.result?.preview ? <PreviewResult preview={latest.result.preview} project={project} turnId={latest.id} /> : <p>{!service ? "화면 준비와 자동 테스트에 사용할 GitHub 저장소를 먼저 등록해주세요." : previewAI === "codex"
       ? "현재 코드의 임시 앱을 실행하고 구독 CLI의 번역 응답을 확인합니다. 준비가 끝나면 이 PC에서 열 수 있습니다."
       : "배포 주소가 없으면 맥미니에서 임시 화면을 준비합니다. AI는 연결하지 않습니다."}</p>}
     {latest?.result?.preview?.state === "failed" && latest.result.preview.diagnostic?.code === "preview_cli_config_unavailable" && <button className={styles.secondaryButton} disabled={saving || !service || !!waiting} onClick={() => { setPreviewAI("none"); void prepare("preview", "none"); }}>AI 연결 없이 화면 준비</button>}

@@ -12,6 +12,7 @@ import { useWorkspaceClock } from "./use-workspace-clock";
 import { Icon } from "./icon";
 import { BriefText } from "./brief-text";
 import { PreviewResult, previewMessage } from "./project-screen";
+import { ServiceRegistrationButton } from "./services-panel";
 import styles from "./studio.module.css";
 const phases: Record<ProjectTurn["phase"], string> = { queued: "실행 대기", preparing: "저장소 확인 중", coding: "코드 수정 중", testing: "변경 검사 중", publishing: "GitHub 반영·검증 중", reporting: "결과 정리 중" };
 const outcomes = { answered: "답변 완료", no_changes: "검토 완료 · 코드 변경 없음", pr_open: "PR 작성 · 반영 대기", merged: "병합 완료 · 배포 확인 중", deployed: "배포 확인 완료", blocked: "확인 필요" };
@@ -100,10 +101,11 @@ export function ProjectAgent({ project }: { project: Project }) {
     catch (e) { setError(e instanceof Error ? e.message : "상태를 변경하지 못했습니다."); }
   }
   return <section id="project-ai" className={`${styles.detailSection} ${styles.projectAgent}`} aria-label="프로젝트 AI 작업실">
-    <div className={styles.detailHeading}><h2><Icon name="message" size={18} /> AI와 프로젝트 작업</h2><span role="status" className={styles.runnerStatus} data-online={online && !updateNeeded}>{updateNeeded ? "CLI 연결됨 · 새 기능 업데이트 필요" : online ? "Jarvis CLI 연결됨" : seen ? "Jarvis CLI 최근 응답 없음" : monitoring?.lastSuccessAt ? "CLI 실행 기록 있음 · 접속 미확인" : "CLI 연결 대기"}</span></div>
+    <div className={styles.detailHeading}><h2><Icon name="message" size={18} /> AI와 프로젝트 작업</h2><span role="status" className={styles.runnerStatus} data-online={online && !updateNeeded}>{!service ? "GitHub 저장소 등록 필요" : updateNeeded ? "CLI 연결됨 · 새 기능 업데이트 필요" : online ? "Jarvis CLI 연결됨" : seen ? "Jarvis CLI 최근 응답 없음" : monitoring?.lastSuccessAt ? "CLI 실행 기록 있음 · 접속 미확인" : "CLI 연결 대기"}</span></div>
     {seen && <p className={styles.runnerEvidence}>실행기 최근 응답 {dateLabel(seen)} · 버전 {monitoring?.runnerConnection?.version ?? "미확인"} · 아래 답변은 대상 저장소의 작업 결과입니다.</p>}
     {updateNeeded && <p className={styles.agentConnection}>{cliUpdateNeeded ? "구독 CLI 미리보기에는 실행기 2.5.0 이상이 필요합니다." : "최근 응답한 실행기는 자동 테스트·수정본 선택을 지원하지 않습니다."} <Link href="/settings#cli-runner">실행기 업데이트 안내 →</Link></p>}
-    {!online && <p className={styles.agentConnection}>{account?.authenticated ? "이 영역에 연결된 실행기가 프로젝트를 자동으로 찾습니다. 다음 응답을 기다리고 있으며 요청은 저장됩니다." : "CLI 자동 실행은 서버에 연결된 업무실에서 사용할 수 있습니다. 현재 요청은 이 브라우저에 저장됩니다."} <Link href="/settings#cli-runner">CLI 연결 안내 →</Link></p>}
+    {!service ? <div className={styles.agentConnection}><p>코드 작업과 화면 준비에 사용할 기존 GitHub 저장소를 먼저 등록해주세요.</p><ServiceRegistrationButton preset="github" projectId={project.id}>GitHub 저장소 등록</ServiceRegistrationButton></div>
+      : !online && <p className={styles.agentConnection}>{account?.authenticated ? "이 영역에 연결된 실행기가 프로젝트를 자동으로 찾습니다. 다음 응답을 기다리고 있으며 요청은 저장됩니다." : "CLI 자동 실행은 서버에 연결된 업무실에서 사용할 수 있습니다. 현재 요청은 이 브라우저에 저장됩니다."} <Link href="/settings#cli-runner">CLI 연결 안내 →</Link></p>}
     <form onSubmit={submit} className={styles.agentComposer}>
       <label htmlFor="project-agent-message">AI에게 요청</label>
       <textarea id="project-agent-message" value={message} onChange={e => setMessage(e.target.value)} maxLength={8000} rows={2} placeholder="원하는 변경이나 질문을 적어주세요." disabled={!service} />

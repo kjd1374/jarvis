@@ -12,6 +12,8 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 import { chromium } from "playwright";
 import { emptyWorkspace } from "../src/lib/workspace/types.ts";
+import { createLifecycleNetwork } from "../tests/support/lifecycle-network.mjs";
+import { runProjectLifecycle } from "../tests/support/project-lifecycle.mjs";
 
 const root = new URL("../", import.meta.url);
 const info = JSON.parse(
@@ -58,6 +60,7 @@ await mkdir(new URL("../test-results", import.meta.url), { recursive: true });
 const log = createWriteStream(
   new URL("../test-results/server-storage.log", import.meta.url),
 );
+const lifecycleNetwork = await createLifecycleNetwork();
 const server = spawn(
   process.execPath,
   ["scripts/test-server.mjs", "--local-cloud"],
@@ -67,6 +70,8 @@ const server = spawn(
       ...process.env,
       JARVIS_TEST_SUPABASE_URL: info.API_URL,
       JARVIS_TEST_SUPABASE_KEY: info.ANON_KEY,
+      JARVIS_TEST_PREVIEW_PROXY: lifecycleNetwork.proxy,
+      JARVIS_TEST_PREVIEW_CA: lifecycleNetwork.ca,
     },
     stdio: ["ignore", "pipe", "pipe"],
   },
@@ -1105,6 +1110,7 @@ try {
   assert.equal(afterInspectionPresence.body.data.services.find(s => s.id === busyInspectionProject.serviceId).monitoring.runnerConnection.projectScope, "space");
   assert.equal((await api("/api/workspace?space=personal", a.token)).body.revision, personalBeforeDiscovery.body.revision);
   recordCheck("installed 2.5.0 discovers new/25+ projects despite removed legacy IDs; work/document/inspection heartbeats refresh new connections; selected scopes, device leases, concurrent claims and other spaces remain isolated");
+  await runProjectLifecycle({ base, api, account: a, sql, users, network: lifecycleNetwork, recordCheck });
   console.log(
     JSON.stringify(
       {
@@ -1129,6 +1135,7 @@ try {
     new Promise((r) => setTimeout(r, 5000)),
   ]);
   log.end();
+  await lifecycleNetwork.close();
   for (const space of ["company", "personal"]) {
     const folder = `${workspaceId}/${space}`;
     const listed = await admin.storage
