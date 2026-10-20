@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, writeFile, rm, realpath, readFile } from 'node:fs/promi
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { readFileSync } from 'node:fs';
-import { startDevelopmentPreview, developmentStatus, developmentEnvironment, developmentSandbox, runDevelopmentTests } from '../public/jarvis-development.mjs';
+import { startDevelopmentPreview, developmentStatus, developmentEnvironment, developmentSandbox, developmentRuntimeLibraries, runDevelopmentTests } from '../public/jarvis-development.mjs';
 import { runCommand } from '../public/jarvis-runner.mjs';
 const group = 'personal:synthetic:example/fixture';
 test('native app environment drops all inherited credentials and sandbox does not allow arbitrary network/home paths', () => {
@@ -20,6 +20,40 @@ test('unsupported hosts do not run untrusted native code', async () => {
   let ran = false;
   assert.equal(await startDevelopmentPreview({}, { platform: 'linux', launch: () => { ran = true; } }), null);
   assert.equal(ran, false);
+});
+test('runtime library discovery canonicalizes loaded Mach-O files without granting their containing directory', async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'jarvis-libraries-'));
+ try{
+  const library=join(dir,'lib synthetic.dylib'),alias=join(dir,'alias.dylib'),privateFile=join(dir,'private.txt');
+  await writeFile(library,Buffer.from([0xcf,0xfa,0xed,0xfe,0,0,0,0]));await writeFile(privateFile,'PRIVATE_DATA');
+  const {symlink}=await import('node:fs/promises');await symlink(library,alias);
+  const paths=await developmentRuntimeLibraries([alias,library,privateFile,'relative.dylib',join(dir,'missing.dylib')]);
+  assert.deepEqual(paths,[await realpath(library)]);
+  const policy=developmentSandbox('/private/release','/private/project-data',[],process.execPath,paths);
+  assert(policy.includes(`(literal ${JSON.stringify(await realpath(library))})`));assert(!policy.includes(`(subpath ${JSON.stringify(dir)})`));assert(!policy.includes('private.txt'));
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+test('failed sandbox probe preserves its exit status and scoped logs without starting app code',async()=>{
+ const dir=await realpath(await mkdtemp(join(tmpdir(),'jarvis-probe-'))),cwd=join(dir,'source'),stateDir=join(dir,'state'),group='personal:probe:example/fixture';await mkdir(cwd);await mkdir(stateDir);await writeFile(join(cwd,'index.html'),'<h1>Synthetic</h1>');let launched=false;
+ try{
+  for(const [probe,status]of [[{code:126},126],[{code:null,terminationSignal:'SIGABRT'},134]]){
+   const result=await startDevelopmentPreview({cwd,files:['index.html'],sha:'a'.repeat(40),stateDir,group,run:async()=>({...probe,out:'',err:'dyld: Library not loaded: /synthetic/runtime/libfixture.dylib'})},{platform:'darwin',launch:()=>{launched=true;throw Error('untrusted app must not run');}});
+   assert.equal(result.state,'failed');assert.equal(result.diagnostic.code,'development_sandbox_unavailable');assert.equal(result.diagnostic.exitCode,status);assert.equal(launched,false);assert(!JSON.stringify(result).includes('/synthetic/runtime'));
+  }
+  assert.match(developmentStatus(group).detail,/Library not loaded/);assert(!developmentStatus('company:probe:example/fixture').detail.includes('Library not loaded'));
+ }finally{developmentStatus(group,'stop');await rm(dir,{recursive:true,force:true});}
+});
+test('macOS runtime loads an external dylib with an exact read grant while sibling files stay private',{skip:process.platform!=='darwin'},async()=>{
+ const dir=await realpath(await mkdtemp(join(tmpdir(),"jarvis-external-lib-'"))),root=join(dir,'release'),bin=join(dir,'runtime','bin'),deps=join(dir,'dependencies'),data=join(root,'data');for(const path of[root,bin,deps,data])await mkdir(path,{recursive:true});
+ const library=join(deps,'libfixture.dylib'),secret=join(deps,'private-original.txt'),executable=join(bin,'fixture'),profile=join(root,'sandbox.sb');
+ try{
+  await writeFile(secret,'PRIVATE_ORIGINAL');await writeFile(join(root,'library.c'),'int fixture(void){return 42;}');await writeFile(join(root,'main.c'),'#include <stdio.h>\nextern int fixture(void);int main(int argc,char**argv){if(argc>1){FILE*f=fopen(argv[1],"r");if(f){fclose(f);return 88;}}printf("runtime-library-%d",fixture());return 0;}');
+  for(const args of [['-dynamiclib',join(root,'library.c'),'-install_name',library,'-o',library],[join(root,'main.c'),library,'-o',executable]]){const r=await runCommand('/usr/bin/clang',args,{cwd:root});assert.equal(r.code,0,r.err);}
+  await writeFile(profile,developmentSandbox(root,data,[],executable));
+  const denied=await runCommand('/usr/bin/sandbox-exec',['-f',profile,executable,secret],{cwd:root,env:developmentEnvironment(root,0)});assert.notEqual(denied.code,0,'baseline must reproduce a loader failure outside the runtime directory');assert.match(denied.err,/Library not loaded/);assert(denied.err.includes(library));
+  await writeFile(profile,developmentSandbox(root,data,[],executable,await developmentRuntimeLibraries([library])));
+  const allowed=await runCommand('/usr/bin/sandbox-exec',['-f',profile,executable,secret],{cwd:root,env:developmentEnvironment(root,0)});assert.equal(allowed.code,0,allowed.err);assert.equal(allowed.out,'runtime-library-42');
+ }finally{await rm(dir,{recursive:true,force:true});}
 });
 test('macOS native lifecycle reuses a live server, preserves DATA_DIR across versions, stops/restarts and enforces isolation', { skip: process.platform !== 'darwin' }, async () => {
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'jarvis-native-test-'))), cwd = join(dir, 'source'), stateDir = join(dir, 'state'), secret = join(dir, 'other-project');

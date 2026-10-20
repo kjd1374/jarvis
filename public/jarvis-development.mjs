@@ -1,10 +1,11 @@
 // Managed macOS processes. App code never inherits the runner's home, credentials or network.
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile, rm, cp, realpath } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { mkdir, readFile, writeFile, rm, cp, realpath, open } from 'node:fs/promises';
+import { dirname, join, isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import net from 'node:net';
+import { constants as osConstants } from 'node:os';
 import { copyProject, previewPlan, projectTestPlan, previewServerSource, directProbe, registerDevelopmentBridge, previewFailure } from './jarvis-preview.mjs';
 import { previewCliQueueSource, previewCliProfile, startPreviewCliWorker } from './jarvis-preview-cli.mjs';
 const servers = new Map(), failures = new Map();
@@ -18,10 +19,25 @@ export function developmentEnvironment(root, port) {
     PORT: String(port), HOST: '127.0.0.1', HOSTNAME: '127.0.0.1', NODE_ENV: 'production', NEXT_TELEMETRY_DISABLED: '1', CI: 'true',
     npm_config_userconfig: join(root, 'npmrc'), npm_config_globalconfig: join(root, 'global-npmrc'), npm_config_cache: join(root, 'npm-cache') };
 }
-export function developmentSandbox(root, data, ports, executable = process.execPath) {
+export async function developmentRuntimeLibraries(objects = process.report.getReport().sharedObjects) {
+  // Only binaries already loaded by the trusted runner, never project-provided paths.
+  // Homebrew may keep Node's dylibs outside the Node installation directory.
+  const libraries = new Set();
+  for (const value of Array.isArray(objects) ? objects.slice(0,256) : []) {
+    if (typeof value !== 'string' || !isAbsolute(value) || value.includes('\0')) continue;
+    let file;
+    try {
+      const path = await realpath(value); file = await open(path,'r');
+      const bytes = Buffer.alloc(4), result = await file.read(bytes,0,4,0);
+      if (result.bytesRead === 4 && [0xfeedface,0xcefaedfe,0xfeedfacf,0xcffaedfe,0xcafebabe,0xbebafeca,0xcafebabf,0xbfbafeca].includes(bytes.readUInt32BE())) libraries.add(path);
+    } catch {} finally { await file?.close(); }
+  }
+  return [...libraries].sort();
+}
+export function developmentSandbox(root, data, ports, executable = process.execPath, libraries = []) {
   // No blanket home, /private/var, /Library or outbound-network permission.
   const runtime = dirname(dirname(executable));
-  return `(version 1)\n(deny default)\n(allow process-fork process-exec sysctl-read mach-lookup)\n(allow file-read-metadata)\n(allow file-map-executable)\n(allow signal (target self))\n(allow file-read* (literal "/") (subpath "/System") (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/Library/Apple") (subpath ${quote(runtime)}) (subpath ${quote(root)}) (subpath ${quote(data)}) (literal "/dev/null") (literal "/dev/random") (literal "/dev/urandom") (literal "/private/etc/localtime") (literal "/private/etc/hosts"))\n(allow file-write* (subpath ${quote(root)}) (subpath ${quote(data)}) (literal "/dev/null"))\n${ports.map(p => `(allow network-bind network-inbound (local ip "localhost:${p}"))\n(allow network-outbound (remote ip "localhost:${p}"))`).join('\n')}\n`;
+  return `(version 1)\n(deny default)\n(allow process-fork process-exec sysctl-read mach-lookup)\n(allow file-read-metadata)\n(allow file-map-executable)\n(allow signal (target self))\n(allow file-read* (literal "/") (subpath "/System") (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/Library/Apple") (subpath ${quote(runtime)}) (subpath ${quote(root)}) (subpath ${quote(data)}) ${libraries.filter(p=>typeof p==='string'&&isAbsolute(p)&&!p.includes('\0')).map(p=>`(literal ${quote(p)})`).join(' ')} (literal "/dev/null") (literal "/dev/random") (literal "/dev/urandom") (literal "/private/etc/localtime") (literal "/private/etc/hosts"))\n(allow file-write* (subpath ${quote(root)}) (subpath ${quote(data)}) (literal "/dev/null"))\n${ports.map(p => `(allow network-bind network-inbound (local ip "localhost:${p}"))\n(allow network-outbound (remote ip "localhost:${p}"))`).join('\n')}\n`;
 }
 async function freePort() {
   const socket = net.createServer();
@@ -81,10 +97,13 @@ export async function startDevelopmentPreview(options, { platform = process.plat
     const env = developmentEnvironment(directory, ports[0]);
     const executable = await realpath(process.execPath);
     const profile = join(directory, 'sandbox.sb');
-    await writeFile(profile, developmentSandbox(directory, persistent ? data : join(directory, 'tmp', 'app-data'), ports, executable), { mode: 0o600 });
+    await writeFile(profile, developmentSandbox(directory, persistent ? data : join(directory, 'tmp', 'app-data'), ports, executable, await developmentRuntimeLibraries()), { mode: 0o600 });
     // Fail closed if the installed macOS sandbox cannot run. Never silently execute on the host.
     const supported = await command('/usr/bin/sandbox-exec', ['-f', profile, executable, '-e', 'process.stdout.write("sandbox-ready")'], { cwd: app, env, signal, timeout: 10_000 });
-    if (supported.code !== 0 || supported.out !== 'sandbox-ready') throw new Error('development_sandbox_unavailable');
+    if (supported.code !== 0 || supported.out !== 'sandbox-ready') {
+      const signalCode = osConstants.signals[supported.terminationSignal];
+      throw Object.assign(new Error('development_sandbox_unavailable'), { exitCode: Number.isInteger(supported.code) ? supported.code : Number.isInteger(signalCode) ? 128 + signalCode : undefined });
+    }
     if (plan.install) await prepareDependencies({ app, directory, root, key, run: command, signal });
     const sandboxRun = async (bin, args) => command('/usr/bin/sandbox-exec', ['-f', profile, bin, ...args], { cwd: app, env, signal, timeout: 300_000, maxBytes: 2_000_000 });
     if (plan.build && (await sandboxRun('/usr/bin/env', ['npm', 'run', 'build', '--ignore-scripts'])).code !== 0) throw new Error('development_build_failed');
@@ -158,7 +177,7 @@ export async function runDevelopmentTests({ cwd, files, stateDir, identity, run,
     const preload = join(directory, 'test-loopback.mjs');
     await writeFile(preload, `import net from 'node:net';import fs from 'node:fs';const ports=${JSON.stringify(ports)},locks=${JSON.stringify(locks)},listen=net.Server.prototype.listen;
 net.Server.prototype.listen=function(...args){const options=args[0],ephemeral=options===0||options&&typeof options==='object'&&options.port===0;if(!ephemeral)return listen.apply(this,args);let chosen;for(const port of ports){try{fs.mkdirSync(locks+'/'+port);chosen=port;break;}catch(error){if(error.code!=='EEXIST')throw error;}}if(!chosen)throw Error('test_loopback_capacity');let released=false;const release=()=>{if(released)return;released=true;try{fs.rmdirSync(locks+'/'+chosen)}catch{}};this.once('close',release);this.once('error',release);if(options===0){args[0]=chosen;if(typeof args[1]!=='string')args.splice(1,0,'127.0.0.1');}else args[0]={...options,port:chosen,host:options.host??'127.0.0.1'};try{return listen.apply(this,args)}catch(error){release();throw error;}};`, {mode:0o600});
-    await writeFile(profile, developmentSandbox(directory, join(directory, 'data'), ports, executable), { mode: 0o600 });
+    await writeFile(profile, developmentSandbox(directory, join(directory, 'data'), ports, executable, await developmentRuntimeLibraries()), { mode: 0o600 });
     env.NODE_OPTIONS = `--import=${pathToFileURL(preload).href}`;
     if (plan.install) await prepareDependencies({ app, directory, root, key: keyOf(identity.replace(/:checks$/, '')), run, signal });
     const checks = [];

@@ -63,3 +63,14 @@ test("완성 서비스 카드는 서비스로 연결하고 관리는 내부 화�
   await expect(page.getByRole("link", { name: "서비스 열기 ↗", exact: true })).toHaveAttribute("href", "https://example.invalid/updated");
   expect((await state(page))!.projects[0].setup).toBeUndefined();
 });
+
+test('이전 프로젝트는 수정 창에서 개발 단계를 확정하고 입력 중인 정보와 기록을 보존한다',async({page})=>{
+ const {automationWorkspace}=await import('../support/automation'),data=automationWorkspace(stamp),original=structuredClone(data.projects[0]);
+ expect(original.stage).toBeUndefined();await seed(page,data);await page.goto('/projects/auto-project');await ready(page);
+ await page.getByRole('button',{name:'프로젝트 수정',exact:true}).click();const dialog=page.getByRole('dialog',{name:'프로젝트 수정',exact:true});
+ await dialog.getByLabel('프로젝트 이름',{exact:true}).fill('저장 전 이름 초안');await dialog.getByRole('button',{name:'개발 단계로 설정',exact:true}).click();
+ await expect(dialog.getByRole('group',{name:'프로젝트 단계',exact:true})).toHaveText('프로젝트 단계 · 개발');await expect(dialog.getByLabel('프로젝트 이름',{exact:true})).toHaveValue('저장 전 이름 초안');
+ const saved=(await state(page))!;expect(saved.projects[0]).toEqual({...original,stage:'development'});expect(saved.services).toEqual(data.services);expect(saved.projects[0].setup).toBeUndefined();
+ await dialog.getByRole('button',{name:'취소',exact:true}).click();await page.reload();await ready(page);expect((await state(page))!.projects[0].stage).toBe('development');
+ await page.getByRole('button',{name:'프로젝트 수정',exact:true}).click();await expect(dialog.getByRole('button',{name:'개발 단계로 설정',exact:true})).toHaveCount(0);
+});
