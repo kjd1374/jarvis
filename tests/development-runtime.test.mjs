@@ -31,6 +31,7 @@ test('macOS native lifecycle reuses a live server, preserves DATA_DIR across ver
   const options = { cwd, files: ['server.mjs'], sha: 'a'.repeat(40), stateDir, group, persistent: true, run: async (bin,args,options) => { const result=await runCommand(bin,args,options); if(result.code!==0) console.error("synthetic native check:",bin,result.code,result.terminationSignal,result.err.slice(-4000)); return result; } };
   try {
     const first = await startDevelopmentPreview(options);
+    if(first.state!=='ready')console.error('synthetic application log',developmentStatus(group).detail);
     assert.equal(first.state, 'ready', JSON.stringify(first)); assert.equal(first.execution, 'native');
     assert.equal(await (await fetch(first.url + 'save')).text(), '1');
     assert.deepEqual(await (await fetch(first.url + 'isolation')).json(), { denied: true, home: (await (await fetch(first.url+'isolation')).json()).home, credential: false });

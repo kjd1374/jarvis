@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import net from 'node:net';
 import { copyProject, previewPlan, projectTestPlan, previewServerSource, directProbe, registerDevelopmentBridge, previewFailure } from './jarvis-preview.mjs';
 import { previewCliQueueSource, previewCliProfile, startPreviewCliWorker } from './jarvis-preview-cli.mjs';
-const servers = new Map();
+const servers = new Map(), failures = new Map();
 const ttl = 2 * 60 * 60_000;
 const keyOf = value => createHash('sha256').update(value).digest('hex').slice(0, 24);
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -30,7 +30,7 @@ async function freePort() {
 }
 export function developmentStatus(group, action = 'logs', redact = value => value) {
   const key = keyOf(group), item = servers.get(key);
-  if (!item) return { running: false, detail: '실행 중인 로컬 서버가 없습니다. 화면 준비로 시작할 수 있습니다.' };
+  if (!item) return { running: false, detail: redact(failures.get(key) ?? '실행 중인 로컬 서버가 없습니다. 화면 준비로 시작할 수 있습니다.').slice(-1600) };
   const detail = redact(item.log).replace(/\x1b\[[0-9;]*m/g, '').slice(-1600) || '서버가 실행 중입니다. 출력된 로그가 없습니다.';
   if (action === 'stop' || action === 'restart') item.close();
   return { running: action === 'logs', detail: action === 'stop' ? '프로젝트 서버와 원격 연결을 종료했습니다. 프로젝트 데이터는 보존됩니다.' : detail };
@@ -41,24 +41,26 @@ export async function startDevelopmentPreview(options, { platform = process.plat
   const key = keyOf(group), provider = cliInference ? aiProvider : 'none';
   let previous = servers.get(key);
   if (previous && previous.sha === sha && previous.provider === provider && Date.parse(previous.ready.expiresAt) > Date.now()) {
-    try {
-      const health = await directProbe(`${previous.ready.url}__jarvis_preview_health`);
-      if (health.ok && await health.text() === previous.token) {
-        await authorizeCliPreparation?.();
-        const ready = { ...previous.ready, reused: true };
-        // Each request receives a new, scoped gateway; the app and verified AI remain running.
-        return publish ? await publish(ready) : ready;
-      }
-    } catch (error) { if (signal?.aborted) throw error; }
+    let healthy = false;
+    try { const health = await directProbe(`${previous.ready.url}__jarvis_preview_health`); healthy = health.ok && await health.text() === previous.token; }
+    catch (error) { if (signal?.aborted) throw error; }
+    if (healthy) {
+      await authorizeCliPreparation?.();
+      const ready = { ...previous.ready, reused: true };
+      return publish ? await publish(ready) : ready;
+    }
   }
   if (servers.size - Number(!!previous) >= 3) throw Object.assign(new Error('development_capacity'), { stage: 'application' });
   const root = await realpath(stateDir), directory = join(root, `development-${key}-${randomUUID()}`), app = join(directory, 'app');
   const data = join(root, `development-data-${key}`);
-  let child, bridge, closed = false, stage = 'build';
+  let child, bridge, closed = false, stage = 'build', appLog = ''; 
   const close = () => {
     if (closed) return; closed = true;
     bridge?.close();
-    if (child?.pid) { try { process.kill(-child.pid, 'SIGTERM'); } catch {} const pid = child.pid; const timer = setTimeout(() => { try { process.kill(-pid, 'SIGKILL'); } catch {} }, 1500); timer.unref(); }
+    if (child?.pid && child.exitCode === null && child.signalCode === null) {
+      // Kill this owned process group while its leader is still live. Never schedule a later kill against a potentially reused PID.
+      try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+    }
     if (servers.get(key)?.close === close) servers.delete(key);
     // Durable data and lock-keyed dependency cache are intentionally outside this release.
     void rm(directory, { recursive: true, force: true });
@@ -87,7 +89,7 @@ export async function startDevelopmentPreview(options, { platform = process.plat
     plan.persistent = persistent; plan.cli = !!cliInference; plan.aiProvider = aiProvider;
     if (plan.vite) plan.start = plan.start.map(value => value === '3000' ? String(ports[0]) : value);
     const nativeApp = app; // no second copy: this release is already disposable.
-    let source = previewServerSource.replaceAll('/runtime/', directory + '/').replaceAll("'/app'", quote(app)).replaceAll("'/tmp/jarvis-preview-app'", quote(nativeApp))
+    let source = previewServerSource.replace("if(plan.entry) await cp('/app',cwd,{recursive:true});", '').replace(/'\/runtime\/([^']+)'/g, (_match, name) => quote(join(directory, name))).replaceAll("'/app'", quote(app)).replaceAll("'/tmp/jarvis-preview-app'", quote(nativeApp))
       .replace("if(plan.entry) await cp('/app',cwd,{recursive:true});", '')
       .replaceAll("'/persistent'", quote(data)).replaceAll("'/tmp/app-data'", quote(join(directory, 'tmp', 'app-data')))
       .replaceAll("HOME:'/tmp',TMPDIR:'/tmp'", `HOME:${quote(env.HOME)},TMPDIR:${quote(env.TMPDIR)}`)
@@ -107,7 +109,7 @@ export async function startDevelopmentPreview(options, { platform = process.plat
     const expiresAt = new Date(Date.now() + ttl).toISOString();
     child = launch('/usr/bin/sandbox-exec', ['-f', profile, executable, join(directory, 'server.mjs')], { cwd: app, env: { ...env, JARVIS_PREVIEW_ID: token, JARVIS_PREVIEW_CLI_TOKEN: cliToken, JARVIS_PREVIEW_TTL: String(ttl) }, detached: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
     const item = { sha, provider, token, close, log: '', ready: null };
-    for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => { item.log = (item.log + chunk.toString()).slice(-16_000); });
+    for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => { item.log = (item.log + chunk.toString()).slice(-16_000); appLog = item.log; });
     child.on('error', close); child.on('exit', close);
     bridge = registerDevelopmentBridge(`development-${key}-${token}`, `http://127.0.0.1:${ports[1]}/`, expiresAt, close);
     let healthy = false;
@@ -127,10 +129,10 @@ export async function startDevelopmentPreview(options, { platform = process.plat
     }
     stage = 'connection';
     const published = publish ? await publish(ready) : ready;
-    item.ready = ready; servers.set(key, item); previous?.close();
+    item.ready = ready; servers.set(key, item); failures.delete(key); previous?.close();
     if (!handlers) { handlers = true; process.once('exit', () => { for (const item of servers.values()) item.close(); }); }
     return published;
-  } catch (error) { close(); return previewFailure(sha, error, stage, !!publish); }
+  } catch (error) { if (failures.size >= 20) failures.delete(failures.keys().next().value); failures.set(key, appLog || error.code || error.message); close(); return { ...previewFailure(sha, error, stage, !!publish), execution: 'native' }; }
 }
 
 export async function runDevelopmentTests({ cwd, files, stateDir, identity, run, signal, redact = value => value }) {
