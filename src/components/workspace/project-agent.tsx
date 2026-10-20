@@ -29,6 +29,7 @@ const errors: Record<string, string> = {
   github_auth_required: "실행기의 GitHub 저장소 접근 권한을 확인해주세요.", github_write_failed: "GitHub 반영을 마치지 못했습니다. 저장소 권한·보호 규칙을 확인해주세요.",
   base_changed: "작업 중 기본 브랜치가 변경돼 병합을 멈췄습니다. PR에서 최신 변경과 함께 확인해주세요.",
   branch_changed: "작업 브랜치가 변경돼 자동 반영을 멈췄습니다.", change_scope_exceeded: "자동 변경 범위를 벗어난 파일이 있어 확인이 필요합니다.",
+  private_image_in_change: "첨부한 사진 원본이 변경 파일에 포함돼 GitHub 게시를 중단했습니다. 원본을 제외한 새 수정 요청으로 이어갈 수 있습니다.",
   secret_in_change: "변경 파일에 인증값으로 보이는 내용이 있어 게시를 멈췄습니다.",
   work_source_changed: "선택한 PR이 변경되거나 닫혔습니다. 확인할 코드를 다시 선택해 요청해주세요.",
 };
@@ -56,7 +57,7 @@ function WorkTurn({ turn, project, saving, onAction, monitoring, clock }: { turn
         {turn.result.preview && <details className={styles.compactDisclosure}><summary>이 작업의 화면</summary><PreviewResult preview={turn.result.preview} project={project} turnId={turn.id} /></details>}
         {turn.result.prUrl && <a href={turn.result.prUrl} target="_blank" rel="noopener noreferrer">변경 PR 열기 ↗</a>}
         {turn.result.deployment.url && <a href={turn.result.deployment.url} target="_blank" rel="noopener noreferrer">반영된 화면 열기 ↗</a>}
-      </> : !turn.error && <p>{turn.status === "queued" ? queuedWorkMessage(turn, monitoring, clock) : turn.status === "cancelled" ? "이미 반영된 변경은 유지됩니다." : "작업 중입니다. 결과는 자동으로 갱신됩니다."}</p>}
+      </> : !turn.error && <p>{turn.status === "queued" ? queuedWorkMessage(turn, monitoring, clock, project.stage === "development") : turn.status === "cancelled" ? "이미 반영된 변경은 유지됩니다." : "작업 중입니다. 결과는 자동으로 갱신됩니다."}</p>}
       {turn.error && <p role="status">{errors[turn.error] ?? "실행을 마치지 못했습니다. 저장된 결과를 확인한 뒤 이어서 시도해주세요."}</p>}
       <div className={styles.agentTurnActions}>
         <span>{turn.mode === "test" ? "자동 테스트 · 코드 게시·AI 호출 없음" : turn.mode === "preview" ? turn.previewAI === "ollama" ? "화면 준비 · 로컬 LLM 선택" : turn.previewAI === "codex" ? "화면 준비 · 구독 CLI 선택" : "화면 준비 · AI 호출 없음" : turn.mode === "ask" ? "질문" : turn.publish === "merge" ? "수정·검증 후 반영" : "수정 후 PR 검토"}</span>
@@ -93,7 +94,8 @@ export function ProjectAgent({ project }: { project: Project }) {
   const seen = monitoring?.runnerSeenAt;
   const online = runnerOnline(monitoring, clock);
   const cliUpdateNeeded = turns.some(t => t.serviceId === service?.id && t.status === "queued" && t.previewAI === "codex") && !monitoring?.runnerConnection?.previewCli;
-  const updateNeeded = online && (monitoring?.runnerConnection?.remoteWork === false || cliUpdateNeeded);
+  const nativeUpdateNeeded = project.stage === "development" && !monitoring?.runnerConnection?.development && turns.some(turn => ["queued", "running"].includes(turn.status) && turn.mode !== "ask");
+  const updateNeeded = online && (nativeUpdateNeeded || monitoring?.runnerConnection?.remoteWork === false || cliUpdateNeeded);
   const turnMonitoring = (turn: ProjectTurn) => services.find(s => s.id === turn.serviceId && s.monitoring?.repository === turn.repository)?.monitoring;
   async function submit(event: React.FormEvent) {
     event.preventDefault(); if (pending.current || saving || preparingImages || !message.trim()) return;
@@ -116,7 +118,7 @@ export function ProjectAgent({ project }: { project: Project }) {
   return <section id="project-ai" className={`${styles.detailSection} ${styles.projectAgent}`} aria-label="프로젝트 AI 작업실">
     <div className={styles.detailHeading}><h2><Icon name="message" size={18} /> AI와 프로젝트 작업</h2><span role="status" className={styles.runnerStatus} data-online={online && !updateNeeded}>{!service ? project.setup ? "개발 환경 자동 준비" : "GitHub 저장소 등록 필요" : updateNeeded ? "CLI 연결됨 · 새 기능 업데이트 필요" : online ? "Jarvis CLI 연결됨" : seen ? "Jarvis CLI 최근 응답 없음" : monitoring?.lastSuccessAt ? "CLI 실행 기록 있음 · 접속 미확인" : "CLI 연결 대기"}</span></div>
     {seen && <p className={styles.runnerEvidence}>실행기 최근 응답 {dateLabel(seen)} · 버전 {monitoring?.runnerConnection?.version ?? "미확인"} · 아래 답변은 대상 저장소의 작업 결과입니다.</p>}
-    {updateNeeded && <p className={styles.agentConnection}>{cliUpdateNeeded ? "구독 CLI 미리보기에는 실행기 2.5.0 이상이 필요합니다." : "최근 응답한 실행기는 자동 테스트·수정본 선택을 지원하지 않습니다."} <Link href="/settings#cli-runner">실행기 업데이트 안내 →</Link></p>}
+    {updateNeeded && <p className={styles.agentConnection}>{nativeUpdateNeeded ? "로컬 개발 서버에는 실행기 2.9.0 이상이 필요합니다." : cliUpdateNeeded ? "구독 CLI 미리보기에는 실행기 2.5.0 이상이 필요합니다." : "최근 응답한 실행기는 자동 테스트·수정본 선택을 지원하지 않습니다."} <Link href="/settings#cli-runner">실행기 업데이트 안내 →</Link></p>}
     {(project.setup || !service) && <ProjectSetupPanel project={project} />}
     {!service && !project.setup ? <div className={styles.agentConnection}><p>코드 작업과 화면 준비에 사용할 GitHub 저장소를 등록해주세요. 새 저장소는 README 등 초기 커밋이 있어야 합니다.</p><ServiceRegistrationButton preset="github" projectId={project.id}>GitHub 저장소 등록</ServiceRegistrationButton></div>
       : service && !online && <p className={styles.agentConnection}>{account?.authenticated ? "이 영역에 연결된 실행기가 프로젝트를 자동으로 찾습니다. 다음 응답을 기다리고 있으며 요청은 저장됩니다." : "CLI 자동 실행은 서버에 연결된 업무실에서 사용할 수 있습니다. 현재 요청은 이 브라우저에 저장됩니다."} <Link href="/settings#cli-runner">CLI 연결 안내 →</Link></p>}

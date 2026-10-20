@@ -78,7 +78,8 @@ test('native npm releases and separate checks reuse the same lock cache without 
  const options={cwd,files:['server.mjs','package.json','package-lock.json','fixture.test.mjs'],sha:'d'.repeat(40),stateDir,group,run:async(bin,args,opts)=>{if(bin==='npm'&&args[0]==='ci')installs++;return runCommand(bin,args,opts);}};
  try{
   const first=await startDevelopmentPreview(options);assert.equal(first.state,'ready',JSON.stringify(first)+' '+developmentStatus(group).detail);assert.equal(installs,1);
-  const changed=await startDevelopmentPreview({...options,sha:'e'.repeat(40)});assert.equal(changed.state,'ready',JSON.stringify(changed)+' '+developmentStatus(group).detail);assert.equal(installs,1);
+  const persistent=await startDevelopmentPreview({...options,persistent:true});assert.equal(persistent.dataPersistence,'project');assert.notEqual(persistent.url,first.url);assert.equal(installs,1);
+  const changed=await startDevelopmentPreview({...options,persistent:true,sha:'e'.repeat(40)});assert.equal(changed.state,'ready',JSON.stringify(changed)+' '+developmentStatus(group).detail);assert.equal(installs,1);
   const checks=await runDevelopmentTests({...options,identity:group+':checks'});assert.equal(checks[0].status,'passed',JSON.stringify(checks));assert.equal(installs,1);
  }finally{developmentStatus(group,'stop');await new Promise(resolve=>setTimeout(resolve,100));await rm(dir,{recursive:true,force:true});}
 });

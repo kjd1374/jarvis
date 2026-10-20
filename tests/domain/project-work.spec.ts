@@ -283,3 +283,10 @@ test("서버 종료 이후 로그 조회가 이전 화면을 되살리지 않고
   project.automation.turns.push({ ...ready, id: "44444444-4444-4444-8444-444444444444" });
   expect(currentPreviewTurn(project, base.serviceId, base.repository)?.id).toBe("44444444-4444-4444-8444-444444444444");
 });
+
+
+test("새 개발 단계는 기존 저장소여도 새 실행기의 로컬 실행 역량을 기다린다", () => {
+  const data = queued(); data.projects[0].stage = "development";
+  expect(claimProjectWork(data, scope, stamp).job).toBeNull();
+  expect(claimProjectWork(data, { ...scope, development: true }, stamp).job!.context.project.stage).toBe("development");
+});

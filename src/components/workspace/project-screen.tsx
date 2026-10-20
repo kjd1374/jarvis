@@ -117,8 +117,8 @@ export function ProjectScreen({ project }: { project: Project }) {
         <small>기기에서 화면을 제한하면 위의 새 탭으로 열기를 사용해주세요. 마이크 권한도 열린 앱에서 허용할 수 있습니다.</small></>}
     </div>}
     {latest?.result?.preview?.state === "failed" && latest.result.preview.diagnostic?.code === "preview_cli_config_unavailable" && <button className={styles.secondaryButton} disabled={saving || !service || !!waiting} onClick={() => { setPreviewAI("none"); void prepare("preview", "none"); }}>AI 연결 없이 화면 준비</button>}
-    {waiting && <p role="status">화면 준비: {waiting.status === "queued" ? queuedWorkMessage(waiting, service?.monitoring, clock) : "실행기가 화면을 준비하고 있습니다. 완료되면 화면 열기 버튼이 표시됩니다."}</p>}
-    {testing && <p role="status">자동 테스트: {testing.status === "queued" ? queuedWorkMessage(testing, service?.monitoring, clock) : "실행 중입니다. 결과는 아래 프로젝트 작업에 표시됩니다."}</p>}
+    {waiting && <p role="status">화면 준비: {waiting.status === "queued" ? queuedWorkMessage(waiting, service?.monitoring, clock, project.stage === "development") : "실행기가 화면을 준비하고 있습니다. 완료되면 화면 열기 버튼이 표시됩니다."}</p>}
+    {testing && <p role="status">자동 테스트: {testing.status === "queued" ? queuedWorkMessage(testing, service?.monitoring, clock, project.stage === "development") : "실행 중입니다. 결과는 아래 프로젝트 작업에 표시됩니다."}</p>}
     <details className={styles.compactDisclosure}><summary>맥미니 미리보기 이용 안내</summary>
       <p>자동 테스트는 실행 서버에서 처리합니다. 화면 표시, 자동 검증, 실제 AI·외부 서비스 연결은 각각 확인해야 합니다.</p>
       <p>승인된 Jarvis 기기에서 미리보기를 열 수 있으며 2시간 후 종료됩니다. 맥미니와 실행기가 켜져 있어야 합니다. 실행기 2.9.0의 macOS 로컬 서버는 Docker 없이 실행합니다. 다른 실행 환경에서는 Docker 호환 경로를 사용합니다. 노트북·데스크탑에는 실행기를 설치하지 않아도 됩니다.</p>

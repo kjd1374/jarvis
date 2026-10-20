@@ -37,11 +37,11 @@ export function runnerOnline(monitoring: GitHubMonitoring | undefined, clock: nu
   return !!monitoring?.runnerSeenAt && clock - Date.parse(monitoring.runnerSeenAt) < 120_000;
 }
 
-export function queuedWorkMessage(turn: Pick<ProjectTurn, "mode" | "sourceTurnId" | "previewAI" | "images" | "runtimeAction">, monitoring: GitHubMonitoring | undefined, clock: number) {
+export function queuedWorkMessage(turn: Pick<ProjectTurn, "mode" | "sourceTurnId" | "previewAI" | "images" | "runtimeAction">, monitoring: GitHubMonitoring | undefined, clock: number, native = false) {
   if (!runnerOnline(monitoring, clock)) return "실행기의 최근 응답이 없습니다. 연결되면 저장된 요청을 처리합니다.";
   const connection = monitoring?.runnerConnection;
   if (!connection) return "실행기 접속은 확인됐지만 지원 기능은 아직 확인되지 않았습니다. 다음 응답을 기다리고 있습니다.";
-  if ((turn.images?.length || turn.runtimeAction) && !connection.development) return "사진 전달·서버 관리를 지원하는 실행기 2.9.0 적용 대기 중입니다. 요청과 사진은 보관됩니다.";
+  if ((native && turn.mode !== "ask" || turn.images?.length || turn.runtimeAction) && !connection.development) return "로컬 개발·사진 전달·서버 관리를 지원하는 실행기 2.9.0 적용 대기 중입니다. 요청과 사진은 보관됩니다.";
   if ((turn.mode === "test" || turn.sourceTurnId) && !connection.remoteWork)
     return "최근 응답한 실행기는 자동 테스트·수정본 선택을 지원하지 않습니다. 맥미니 실행기를 2.4.1 이상으로 업데이트해야 이 요청을 시작할 수 있습니다.";
   if (turn.mode === "preview" && !connection.previews)

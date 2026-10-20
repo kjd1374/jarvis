@@ -41,7 +41,7 @@ export async function startDevelopmentPreview(options, { platform = process.plat
   if (platform !== 'darwin') return null; // The existing isolated Docker path remains the explicit compatibility path.
   const key = keyOf(group), provider = cliInference ? aiProvider : 'none';
   let previous = servers.get(key);
-  if (previous && previous.sha === sha && previous.provider === provider && Date.parse(previous.ready.expiresAt) > Date.now()) {
+  if (previous && previous.sha === sha && previous.persistent === !!persistent && previous.provider === provider && Date.parse(previous.ready.expiresAt) > Date.now()) {
     let healthy = false;
     try { const health = await directProbe(`${previous.ready.url}__jarvis_preview_health`); healthy = health.ok && await health.text() === previous.token; }
     catch (error) { if (signal?.aborted) throw error; }
@@ -79,7 +79,7 @@ export async function startDevelopmentPreview(options, { platform = process.plat
     const env = developmentEnvironment(directory, ports[0]);
     const executable = await realpath(process.execPath);
     const profile = join(directory, 'sandbox.sb');
-    await writeFile(profile, developmentSandbox(directory, data, ports, executable), { mode: 0o600 });
+    await writeFile(profile, developmentSandbox(directory, persistent ? data : join(directory, 'tmp', 'app-data'), ports, executable), { mode: 0o600 });
     // Fail closed if the installed macOS sandbox cannot run. Never silently execute on the host.
     const supported = await run('/usr/bin/sandbox-exec', ['-f', profile, executable, '-e', 'process.stdout.write("sandbox-ready")'], { cwd: app, env, signal, timeout: 10_000 });
     if (supported.code !== 0 || supported.out !== 'sandbox-ready') throw new Error('development_sandbox_unavailable');
@@ -106,10 +106,11 @@ export async function startDevelopmentPreview(options, { platform = process.plat
       await writeFile(join(directory, 'cli-profile.json'), JSON.stringify(config), { mode: 0o600 });
     }
     if (persistent) await migrateDevelopmentData({ data, key, run, signal, legacyDockerData: options.legacyDockerData });
+    if (previous && (persistent || previous.persistent)) { previous.close(); previous = undefined; }
     stage = 'application';
     const expiresAt = new Date(Date.now() + ttl).toISOString();
     child = launch('/usr/bin/sandbox-exec', ['-f', profile, executable, join(directory, 'server.mjs')], { cwd: app, env: { ...env, JARVIS_PREVIEW_ID: token, JARVIS_PREVIEW_CLI_TOKEN: cliToken, JARVIS_PREVIEW_TTL: String(ttl) }, detached: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
-    const item = { sha, provider, token, close, log: '', ready: null };
+    const item = { sha, provider, persistent: !!persistent, token, close, log: '', ready: null };
     for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => { item.log = (item.log + chunk.toString()).slice(-16_000); appLog = item.log; });
     child.on('error', close); child.on('exit', close);
     bridge = registerDevelopmentBridge(`development-${key}-${token}`, `http://127.0.0.1:${ports[1]}/`, expiresAt, close);

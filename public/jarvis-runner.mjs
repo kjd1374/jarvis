@@ -502,7 +502,7 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
       let tools;
       try {
         tools = previewTools ?? await import("./jarvis-preview.mjs");
-        const deployed = job.runtimeAction || job.previewAI || job.context?.project?.environment?.target === "mac" ? null : await tools.findDeploymentPreview(job.repository, sha, get, publicWebUrl);
+        const deployed = job.runtimeAction || job.previewAI || job.context?.project?.stage === "development" || job.context?.project?.environment?.target === "mac" ? null : await tools.findDeploymentPreview(job.repository, sha, get, publicWebUrl);
         if (deployed) return deployed;
         if (!previewEnabled) return { state: "unavailable", kind: "mac", url: null, sha, checkedAt: new Date().toISOString(), expiresAt: null, message: "맥미니 미리보기 설정이 필요합니다. 설정에서 맥미니 실행기를 설치해주세요." };
         if (job.previewAI && !remotePreview) throw Object.assign(new Error("preview_cli_remote_required"), { code: "preview_cli_remote_required", stage: "ai" });
@@ -519,7 +519,7 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
         } : undefined;
         const local = job.previewAI === "ollama" ? await createLocalInference({ signal: abort.signal }) : null;
         if (job.runtimeAction === "restart") await tools.controlDevelopmentServer?.(`${job.space}:${job.projectId}:${job.repository}`, "restart", redact);
-        return await (tools.startDevelopmentPreview ?? tools.startMacPreview)({ cwd, files, sha, stateDir, identity: `${job.space}:${job.projectId}:${job.repository}:${sha}:${job.previewAI ?? "none"}`, group: `${job.space}:${job.projectId}:${job.repository}`, persistent: job.context?.project?.environment?.target === "mac", legacyDockerData: job.context?.project?.legacyDockerData === true, run, signal: abort.signal, publish,
+        return await (tools.startDevelopmentPreview ?? tools.startMacPreview)({ cwd, files, sha, stateDir, identity: `${job.space}:${job.projectId}:${job.repository}:${sha}:${job.previewAI ?? "none"}`, group: `${job.space}:${job.projectId}:${job.repository}`, persistent: job.context?.project?.stage === "development" || job.context?.project?.environment?.target === "mac", legacyDockerData: job.context?.project?.legacyDockerData === true, run, signal: abort.signal, publish,
           ...(job.previewAI ? { aiProvider: job.previewAI, cliInference: local ? local.inference : (body, options) => completeWithSubscription(body, { run, env: cliEnv, signal: options.signal }),
             authorizeCliPreparation: async () => { await pulse(); return true; } } : {}) });
       } catch (error) {
@@ -621,7 +621,13 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
         if (!allowedWorkPath(path) || journal.omittedPaths?.includes(path)) throw new RunnerError("change_scope_exceeded");
         const info = await lstat(join(cwd, path)).catch(() => null);
         if (info?.isSymbolicLink() || info && (!info.isFile() || info.size > 1_000_000)) throw new RunnerError("change_scope_exceeded");
-        if (info) { const text = await readFile(join(cwd, path), "utf8"); if (redact(text) !== text) throw new RunnerError("secret_in_change"); }
+        if (info) {
+          const bytes = await readFile(join(cwd, path)), text = bytes.toString("utf8");
+          const imageHashes = new Set((job.images ?? []).map(image => image.sha256));
+          const privateImage = imageHashes.has(createHash("sha256").update(bytes).digest("hex")) || imageHashes.size > 0 && [...text.matchAll(/[A-Za-z0-9+/]{128,}={0,2}/g)].some(match => imageHashes.has(createHash("sha256").update(Buffer.from(match[0], "base64")).digest("hex")));
+          if (privateImage) throw new RunnerError("private_image_in_change");
+          if (redact(text) !== text) throw new RunnerError("secret_in_change");
+        }
       }
       result.changes = paths.slice(0, 50);
       const whitespace = await git(["diff", "--check"], false);
