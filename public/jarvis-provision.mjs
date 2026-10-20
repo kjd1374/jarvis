@@ -41,7 +41,7 @@ export async function providerRequest(provider, path, { token, team, method = 'G
   if (!response.ok) throw fail(response.status === 401 || response.status === 403 ? `${provider}_connection_required` : `${provider}_setup_failed`);
   const raw=await response.text();return raw?JSON.parse(raw):{};
 }
-export async function executeProvision(client, job, { stateDir, run, env = process.env, transport = fetch, delay = ms => new Promise(r => setTimeout(r, ms)), log = console.log } = {}) {
+export async function executeProvision(client, job, { stateDir, run, env = process.env, platform = process.platform, transport = fetch, delay = ms => new Promise(r => setTimeout(r, ms)), log = console.log } = {}) {
   if (!stateDir || !run || !/^[a-f0-9-]{36}$/.test(job.id) || !['company','personal'].includes(job.space) || typeof job.projectId !== 'string' || !['auto','mac','vercel'].includes(job.target) || !['auto','none','supabase'].includes(job.database)) throw fail('invalid_setup_scope');
   const identity = { space: job.space, projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken };
   const directory = join(stateDir, 'setup-' + createHash('sha256').update(`${job.space}:${job.projectId}:${job.id}`).digest('hex'));
@@ -67,13 +67,13 @@ export async function executeProvision(client, job, { stateDir, run, env = proce
     const organization = job.credentials?.supabase?.organization ?? env[prefix+'SUPABASE_ORG'];
     const available = { vercel:!!vercelToken, supabase:!!supabaseToken&&!!organization };
     const team=job.credentials?.vercel?.organization ?? env[prefix+'VERCEL_TEAM'];
-    if(available.vercel){try{const account=await providerRequest('vercel',team?`/v2/teams/${team}`:'/v2/user',{token:vercelToken,transport,signal:abort.signal});available.vercel=(account.team??account.user??account)?.billing?.plan==='hobby';}catch{available.vercel=false;}}
-    if(available.supabase){try{const orgs=await providerRequest('supabase','/v1/organizations',{token:supabaseToken,transport,signal:abort.signal});available.supabase=orgs.some(o=>(o.slug??o.id)===organization);if(available.supabase){const org=await providerRequest('supabase',`/v1/organizations/${organization}`,{token:supabaseToken,transport,signal:abort.signal});available.supabase=org.plan==='free';}}catch{available.supabase=false;}}
+    if(job.target!=='mac'&&available.vercel){try{const account=await providerRequest('vercel',team?`/v2/teams/${team}`:'/v2/user',{token:vercelToken,transport,signal:abort.signal});available.vercel=(account.team??account.user??account)?.billing?.plan==='hobby';}catch{available.vercel=false;}}
+    if(job.target!=='mac'&&available.supabase){try{const orgs=await providerRequest('supabase','/v1/organizations',{token:supabaseToken,transport,signal:abort.signal});available.supabase=orgs.some(o=>(o.slug??o.id)===organization);if(available.supabase){const org=await providerRequest('supabase',`/v1/organizations/${organization}`,{token:supabaseToken,transport,signal:abort.signal});available.supabase=org.plan==='free';}}catch{available.supabase=false;}}
     if(journal.plan?.target==='vercel'&&!available.vercel)throw fail('vercel_connection_required');
     if(journal.plan?.database==='supabase'&&!available.supabase)throw fail('supabase_connection_required');
     const plan = journal.plan ?? chooseEnvironment(job,available);
     journal.plan=plan; await save();
-    if(plan.target==='mac'){const docker=await run('docker',['version','--format','{{.Server.Version}}'],{timeout:15000,signal:abort.signal});if(docker.code!==0||!docker.out.trim())throw fail('docker_unavailable');}
+    if(plan.target==='mac'&&platform!=='darwin'){const docker=await run('docker',['version','--format','{{.Server.Version}}'],{timeout:15000,signal:abort.signal});if(docker.code!==0||!docker.out.trim())throw fail('docker_unavailable');}
     const name=journal.name??setupName(job), marker=`Jarvis managed project ${job.id}`;
     journal.name=name;await save();
     phase='비공개 GitHub 저장소 준비';

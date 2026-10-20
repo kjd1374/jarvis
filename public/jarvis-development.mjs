@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, rm, cp, realpath } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import net from 'node:net';
 import { copyProject, previewPlan, projectTestPlan, previewServerSource, directProbe, registerDevelopmentBridge, previewFailure } from './jarvis-preview.mjs';
 import { previewCliQueueSource, previewCliProfile, startPreviewCliWorker } from './jarvis-preview-cli.mjs';
@@ -145,8 +146,15 @@ export async function runDevelopmentTests({ cwd, files, stateDir, identity, run,
     const copied = await copyProject(cwd, files, app), json = async name => JSON.parse(await readFile(join(app, name), 'utf8').catch(() => 'null'));
     const plan = projectTestPlan(copied, await json('package.json'), await json('package-lock.json'));
     if (plan.reason) return [{ name: '자동 테스트', status: 'not_run', detail: plan.reason }];
-    const env = developmentEnvironment(directory, 0), profile = join(directory, 'sandbox.sb'), executable = await realpath(process.execPath);
-    await writeFile(profile, developmentSandbox(directory, join(directory, 'data'), [], executable), { mode: 0o600 });
+    const ports = [];
+    while (ports.length < 16) { const port = await freePort(); if (!ports.includes(port)) ports.push(port); }
+    const env = developmentEnvironment(directory, ports[0]), profile = join(directory, 'sandbox.sb'), executable = await realpath(process.execPath);
+    const locks = join(directory, 'tmp', 'ports'); await mkdir(locks);
+    const preload = join(directory, 'test-loopback.mjs');
+    await writeFile(preload, `import net from 'node:net';import fs from 'node:fs';const ports=${JSON.stringify(ports)},locks=${JSON.stringify(locks)},listen=net.Server.prototype.listen;
+net.Server.prototype.listen=function(...args){const options=args[0],ephemeral=options===0||options&&typeof options==='object'&&options.port===0;if(!ephemeral)return listen.apply(this,args);let chosen;for(const port of ports){try{fs.mkdirSync(locks+'/'+port);chosen=port;break;}catch(error){if(error.code!=='EEXIST')throw error;}}if(!chosen)throw Error('test_loopback_capacity');let released=false;const release=()=>{if(released)return;released=true;try{fs.rmdirSync(locks+'/'+chosen)}catch{}};this.once('close',release);this.once('error',release);if(options===0){args[0]=chosen;if(typeof args[1]!=='string')args.splice(1,0,'127.0.0.1');}else args[0]={...options,port:chosen,host:options.host??'127.0.0.1'};try{return listen.apply(this,args)}catch(error){release();throw error;}};`, {mode:0o600});
+    await writeFile(profile, developmentSandbox(directory, join(directory, 'data'), ports, executable), { mode: 0o600 });
+    env.NODE_OPTIONS = `--import=${pathToFileURL(preload).href}`;
     if (plan.install) await prepareDependencies({ app, directory, root, key: keyOf(identity.replace(/:checks$/, '')), run, signal });
     const checks = [];
     for (const command of plan.commands) {

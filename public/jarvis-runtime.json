@@ -3,11 +3,11 @@
   "files": {
     "jarvis-runner.mjs": "f8655d9719404e2226539f83c65bab1ca4d016dd81a9eedbc8658f21340f065f",
     "jarvis-preview.mjs": "e1ed38380f2fa377dc81617bc09550841dcd23f15f08364e48aace41be256752",
-    "jarvis-development.mjs": "a823dc3d51ff6877113242ac95cfc0070fa99a0590408c7aa66aa1fa9a41f477",
+    "jarvis-development.mjs": "9a60b62a450642843003ed4b3b63c54a5fc5e9328264eca2c703b6e4e3dfe3d4",
     "jarvis-remote-preview.mjs": "ba3054e338488d669b1f5d9c7a129c2545a8e9bb38248df286ef4321354e0b2f",
     "jarvis-preview-auth.mjs": "5fe9b1442b41e860e053c58a45592aabd65c406c20a5f655c4e18da18baa4572",
     "jarvis-preview-cli.mjs": "47f66922e970626695b59a14682835d5a5bfb213947500c97c6b7e0452f5bfb0",
-    "jarvis-provision.mjs": "8a9cae18045b305a7df6099c5fe6faa46d4874c30817d015d189def800f9ed5d",
+    "jarvis-provision.mjs": "c635eca506006504eb6da40122808985e47068121c9f04785388740f275d0d12",
     "jarvis-supervisor.mjs": "612bd4de26ee008c30dac8fbb300955e985712b6a81021e2c0407a5e013cc065",
     "jarvis-mac.mjs": "adcc164a4ce5101211bdbd5230ffed27d6df919964e88ae2556bd4e6d3fdc829"
   }
