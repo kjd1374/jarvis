@@ -80,19 +80,7 @@ export async function startDevelopmentPreview(options, { platform = process.plat
     // Fail closed if the installed macOS sandbox cannot run. Never silently execute on the host.
     const supported = await run('/usr/bin/sandbox-exec', ['-f', profile, executable, '-e', 'process.stdout.write("sandbox-ready")'], { cwd: app, env, signal, timeout: 10_000 });
     if (supported.code !== 0 || supported.out !== 'sandbox-ready') throw new Error('development_sandbox_unavailable');
-    if (plan.install) {
-      const lock = await readFile(join(app, 'package-lock.json'));
-      const cache = join(root, `development-deps-${key}-${keyOf(Buffer.concat([lock, Buffer.from(process.version + process.arch)]))}`);
-      let cached = false;
-      try { cached = await readFile(join(cache, 'complete'), 'utf8') === 'ready'; } catch {}
-      if (cached) await cp(join(cache, 'node_modules'), join(app, 'node_modules'), { recursive: true });
-      else {
-        const installed = await run('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: app, env, signal, timeout: 300_000, maxBytes: 2_000_000 });
-        if (installed.code !== 0) throw new Error('development_install_failed');
-        await rm(cache, { recursive: true, force: true }); await mkdir(cache, { mode: 0o700 });
-        await cp(join(app, 'node_modules'), join(cache, 'node_modules'), { recursive: true }); await writeFile(join(cache, 'complete'), 'ready');
-      }
-    }
+    if (plan.install) await prepareDependencies({ app, directory, root, key, run, signal });
     const sandboxRun = async (bin, args) => run('/usr/bin/sandbox-exec', ['-f', profile, bin, ...args], { cwd: app, env, signal, timeout: 300_000, maxBytes: 2_000_000 });
     if (plan.build && (await sandboxRun('/usr/bin/env', ['npm', 'run', 'build', '--ignore-scripts'])).code !== 0) throw new Error('development_build_failed');
     // The trusted proxy/queue and untrusted app share only this release and fixed loopback ports.
@@ -157,10 +145,7 @@ export async function runDevelopmentTests({ cwd, files, stateDir, identity, run,
     if (plan.reason) return [{ name: '자동 테스트', status: 'not_run', detail: plan.reason }];
     const env = developmentEnvironment(directory, 0), profile = join(directory, 'sandbox.sb'), executable = await realpath(process.execPath);
     await writeFile(profile, developmentSandbox(directory, join(directory, 'data'), [], executable), { mode: 0o600 });
-    if (plan.install) {
-      const prepared = await run('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: app, env, signal, timeout: 300_000, maxBytes: 2_000_000 });
-      if (prepared.code !== 0) return [{ name: '의존성 준비', status: 'not_run', detail: '로컬 테스트 의존성 설치 실패. 테스트를 실행하지 않았습니다.' }];
-    }
+    if (plan.install) await prepareDependencies({ app, directory, root, key: keyOf(identity.replace(/:checks$/, '')), run, signal });
     const checks = [];
     for (const command of plan.commands) {
       const result = await run('/usr/bin/sandbox-exec', ['-f', profile, '/usr/bin/env', ...command.args], { cwd: app, env, signal, timeout: 300_000, maxBytes: 2_000_000 });
@@ -199,4 +184,21 @@ export async function migrateDevelopmentData({ data, key, run, signal, legacyDoc
     await rm(data, { recursive: true }); await rename(staging, data);
   }
   await writeFile(`${data}.initialized`, 'ready', { mode: 0o600 });
+}
+
+async function prepareDependencies({ app, directory, root, key, run, signal }) {
+  const lock = await readFile(join(app, 'package-lock.json'));
+  const prefix = `development-deps-${key}-`, cache = join(root, prefix + keyOf(Buffer.concat([lock, Buffer.from(process.version + process.arch)])));
+  let cached = false;
+  try { cached = await readFile(join(cache, 'complete'), 'utf8') === 'ready'; } catch {}
+  if (cached) { await cp(join(cache, 'node_modules'), join(app, 'node_modules'), { recursive: true }); return; }
+  const installed = await run('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: app, env: developmentEnvironment(directory, 0), signal, timeout: 300_000, maxBytes: 2_000_000 });
+  if (installed.code !== 0) throw new Error('development_install_failed');
+  // Empty npm projects do not necessarily create node_modules.
+  await mkdir(join(app, 'node_modules'), { recursive: true });
+  await rm(cache, { recursive: true, force: true }); await mkdir(cache, { mode: 0o700 });
+  await cp(join(app, 'node_modules'), join(cache, 'node_modules'), { recursive: true }); await writeFile(join(cache, 'complete'), 'ready');
+  const { readdir, stat } = await import('node:fs/promises');
+  const prior = await Promise.all((await readdir(root)).filter(name => name.startsWith(prefix) && join(root,name) !== cache).map(async name => ({ path: join(root,name), time: (await stat(join(root,name))).mtimeMs })));
+  for (const item of prior.sort((a,b) => b.time-a.time).slice(1)) await rm(item.path, { recursive: true, force: true });
 }

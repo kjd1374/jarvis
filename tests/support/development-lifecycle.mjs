@@ -11,7 +11,8 @@ export async function runDevelopmentLifecycle({ base, browser, runner, approve, 
     const page = await context.newPage(); await page.goto(base+'/settings'); await page.getByText(/기기 확인 번호:/).waitFor();
     await approve(await (await context.request.get(base+'/api/account')).json());
     await page.getByRole('button',{name:'기기 연결 다시 확인',exact:true}).click(); await page.getByRole('button',{name:'개인',exact:true}).click();
-    await page.goto(base+'/projects/'+projectId);
+    await expect(page.getByRole('button',{name:'개인',exact:true})).toHaveAttribute('aria-pressed','true');
+    await page.goto(base+'/projects/'+projectId); await expect(page.locator('h1')).toContainText('합성 연결 전체 흐름');
     const agent = page.getByRole('region',{name:'프로젝트 AI 작업실',exact:true});
     const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jP1kAAAAASUVORK5CYII=','base64');
     await agent.getByLabel('프로젝트 사진 첨부').setInputFiles({name:'synthetic-screen.png',mimeType:'image/png',buffer:png});

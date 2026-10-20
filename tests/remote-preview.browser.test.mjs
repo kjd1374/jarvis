@@ -16,3 +16,12 @@ test("two browsers use real HTTPS redirects and host cookies: approved viewer in
     const unauthenticated = await other.newPage(); assert.equal((await unauthenticated.goto(remoteUrl)).status(), 403);
     f.revoke(); f.advance(10_001); assert.equal((await page.reload()).status(), 403);
 })));
+
+for(const engine of ['chromium','webkit'])test(`signed iframe works with partitioned credentials in ${engine}, with no copied-link access`,async()=>fixture(async f=>withPreviewHttps(f,async browser=>{
+  const context=await browser.newContext({ignoreHTTPSErrors:true}),page=await context.newPage();
+  await page.goto(appOrigin);
+  const frame=page.frameLocator('iframe[title="Development app"]');await frame.getByRole('heading',{name:'Synthetic remote preview'}).waitFor();
+  await frame.getByRole('button',{name:'Save',exact:true}).click();await frame.locator('output').filter({hasText:'1'}).waitFor();
+  assert.equal(new URL(page.url()).origin,appOrigin);assert(!(await frame.locator('body').evaluate(()=>document.cookie)).includes('jarvis-embed'));
+  const other=await browser.newContext({ignoreHTTPSErrors:true});assert.equal((await(await other.newPage()).goto(remoteUrl)).status(),403);await other.close();await context.close();
+},{embed:true,engine})));

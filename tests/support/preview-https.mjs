@@ -6,10 +6,10 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { chromium } from "playwright";
+import { chromium, webkit } from "playwright";
 import { appOrigin, remoteUrl } from "./remote-preview.mjs";
 
-export async function withPreviewHttps(f, run) {
+export async function withPreviewHttps(f, run, { embed = false, engine = "chromium" } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "jarvis-preview-tls-"));
   const sockets = new Set();
   let browser, web, proxy;
@@ -18,7 +18,8 @@ export async function withPreviewHttps(f, run) {
     web = https.createServer({ key: await readFile(join(directory, "key")), cert: await readFile(join(directory, "cert")) }, async (req, res) => {
       if (req.headers.host === new URL(appOrigin).host) {
         res.setHeader("Content-Type", "text/html"); res.setHeader("Referrer-Policy", "strict-origin");
-        res.end(`<form method="post" action="${remoteUrl}_jarvis/open"><input type="hidden" name="ticket" value="${f.ticket()}"><button>Open screen</button></form><script>document.forms[0].submit()</script>`); return;
+        if (embed && req.url === "/") { res.end(`<h1>Jarvis fixture</h1><iframe title="Development app" src="/embed-open" allow="microphone; camera"></iframe>`); return; }
+        res.end(`<form method="post" action="${remoteUrl}_jarvis/open"><input type="hidden" name="ticket" value="${f.ticket(embed ? {embed:true} : {})}"><button>Open screen</button></form><script>document.forms[0].submit()</script>`); return;
       }
       if (req.headers.host !== new URL(remoteUrl).host) { res.writeHead(403); res.end(); return; }
       const target = new URL(f.gate.localUrl);
@@ -39,7 +40,7 @@ export async function withPreviewHttps(f, run) {
       for (const peer of [socket, upstream]) { sockets.add(peer); peer.on("close", () => sockets.delete(peer)); peer.on("error", () => { socket.destroy(); upstream.destroy(); }); }
     });
     await new Promise(r => proxy.listen(0, "127.0.0.1", r));
-    browser = await chromium.launch({ proxy: { server: `http://127.0.0.1:${proxy.address().port}` },
+    browser = await (engine === "webkit" ? webkit : chromium).launch({ proxy: { server: `http://127.0.0.1:${proxy.address().port}` },
       ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } : {}) });
     await run(browser);
   } finally {

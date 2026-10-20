@@ -58,7 +58,7 @@ test('macOS native lifecycle reuses a live server, preserves DATA_DIR across ver
 test('synthetic macOS sandbox compatibility diagnostics', { skip: process.platform !== 'darwin' }, async () => {
  const root=await realpath(await mkdtemp(join(tmpdir(),'jarvis-native-policy-'))), node=await realpath(process.execPath);
  try { const base=developmentSandbox(root,root,[],node);
- for(const [name,addition] of [['strict',''],['process-info','(allow process-info*)'],['system-socket','(allow system-socket)'],['system-read','(allow file-read*)']]) {
+ for(const [name,addition] of [['strict',''],['devices','(allow file-read* (subpath "/dev"))'],['etc','(allow file-read* (subpath "/private/etc"))'],['system-cache','(allow file-read* (subpath "/private/var/db"))'],['homebrew','(allow file-read* (subpath "/opt/homebrew"))'],['library','(allow file-read* (subpath "/Library"))'],['root','(allow file-read* (literal "/"))'],['system-read','(allow file-read*)']]) {
  const result=await runCommand('/usr/bin/sandbox-exec',['-p',base+'\n'+addition,node,'-e','process.stdout.write("compatibility")'],{cwd:root,env:developmentEnvironment(root,0),timeout:10000});
  console.log('synthetic policy probe',name,result.code,result.terminationSignal,result.out,result.err.slice(-1500));
  }

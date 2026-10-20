@@ -534,7 +534,7 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
       catch { return [{ name: "자동 테스트", status: "not_run", detail: "검사 모듈이 설치되지 않았습니다. 기존 실행기를 최신 Mac 설치기로 업데이트하면 Jarvis에서 테스트할 수 있습니다." }]; }
       const files = (await git(["ls-files", "-z"])).out.split("\0").filter(Boolean);
       const untracked = (await git(["ls-files", "--others", "--exclude-standard", "-z"])).out.split("\0").filter(Boolean);
-      return tools.runProjectTests({ cwd, files: [...new Set([...files, ...untracked])], stateDir, identity: `${key}:checks`, run, signal: abort.signal, redact });
+      return tools.runProjectTests({ cwd, files: [...new Set([...files, ...untracked])], stateDir, identity: `${job.space}:${job.projectId}:${job.repository}:checks`, run, signal: abort.signal, redact });
     };
     if (job.mode === "test") {
       progress = "testing"; await pulse();
