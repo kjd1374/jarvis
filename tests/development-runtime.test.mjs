@@ -11,7 +11,7 @@ test('native app environment drops all inherited credentials and sandbox does no
   assert(!env.OPENAI_API_KEY && !env.GH_TOKEN && !env.JARVIS_PREVIEW_CLI_TOKEN);
   assert.equal(env.HOME, '/private/release/home');
   const policy = developmentSandbox('/private/release', '/private/project-data', [4567,4568,4569], '/opt/runtime/bin/node');
-  assert(policy.includes('(deny default)')); assert(policy.includes('127.0.0.1:4567'));
+  assert(policy.includes('(deny default)')); assert(policy.includes('localhost:4567'));
   assert(!policy.includes('(allow network*)') && !policy.includes('(subpath "/Users")') && !policy.includes('11434'));
 });
 test('unsupported hosts do not run untrusted native code', async () => {

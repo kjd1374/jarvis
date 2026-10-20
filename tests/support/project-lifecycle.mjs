@@ -1,4 +1,5 @@
 import { runAutopilotLifecycle } from "./autopilot-lifecycle.mjs";
+import { runDevelopmentLifecycle } from "./development-lifecycle.mjs";
 import { runPlanningLifecycle } from "./planning-lifecycle.mjs";
 // Connected browser -> real private storage -> runner -> Git -> Docker -> TLS
 // -> signed viewer ticket -> app persistence. External CLI/provider data is synthetic.
@@ -129,7 +130,7 @@ http.createServer((req,res)=>{
       assert.fail(`Unexpected synthetic GitHub request: ${path}`);
     };
     const options = { stateDir: directory, run, get, log() {}, previewEnabled: true, remotePreview: { origin: base, binary: network.binary },
-      previewTools: { ...preview, startMacPreview: opts => preview.startMacPreview({ ...opts, bridge: async (...args) => bridge = await preview.createPreviewBridge(...args) }) } };
+      previewTools: { ...preview, startDevelopmentPreview: opts => preview.startDevelopmentPreview({ ...opts, bridge: async (...args) => bridge = await preview.createPreviewBridge(...args) }) } };
     await executeProjectWork(runner, job, options);
     await expect(agent).toContainText("합성 CLI 응답이 서버에 도착했습니다.", { timeout: 40_000 });
     await expect(agent.getByRole("status").first()).toHaveText("Jarvis CLI 연결됨");
@@ -140,7 +141,7 @@ http.createServer((req,res)=>{
     await expect.poll(async () => (await snapshot()).data.projects.find(p => p.id === project.id).automation.turns.at(-1).mode).toBe("preview");
     const previewJob = (await resumed.request("/api/automation/claim", installedScope)).job;
     assert.equal(previewJob.mode, "preview"); assert.equal(previewJob.previewAI, undefined);
-    container = `jarvis-preview-${createHash("sha256").update(`${space}:${project.id}:${previewJob.id}`).digest("hex").slice(0, 24)}`;
+    container = `jarvis-preview-${createHash("sha256").update(`${space}:${project.id}:${repository}:${sha}:none`).digest("hex").slice(0, 24)}`;
     await executeProjectWork(resumed, previewJob, options);
     const saved = await snapshot(), result = saved.data.projects.find(p => p.id === project.id).automation.turns.at(-1).result;
     assert.equal(result.preview?.state, "ready", JSON.stringify(result)); assert.equal(result.preview.kind, "remote"); assert.equal(result.preview.sha, sha); assert.equal(modelCalls, 1);
@@ -164,6 +165,7 @@ http.createServer((req,res)=>{
     assert(!(await api("/api/workspace?space=company", account.token)).body.data.projects.some(p => p.id === project.id));
     recordCheck("connected lifecycle: browser registration -> existing scoped runner discovery -> synthetic CLI answer -> resumed runner -> real Git/Docker -> persisted result -> real signed-ticket HTTPS open -> isolated app save/reload; outage, copied links, revoked device and cross-space access rejected; no production/model calls");
     await runAutopilotLifecycle({ base, browser, runner: resumed, network, approve, snapshot, recordCheck });
+    await runDevelopmentLifecycle({ base, browser, runner: resumed, approve, snapshot, projectId: project.id, options, recordCheck });
     await runPlanningLifecycle({ base, browser, runner: resumed, approve, snapshot, recordCheck });
   } catch (error) {
     await page?.screenshot({ path: "test-results/project-lifecycle-failure.png", fullPage: true }).catch(() => {});
