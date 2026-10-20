@@ -2,7 +2,8 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {inspectRelease,cloudApi,advanceRelease,migrationQuery} from '../src/lib/releases/engine.mjs';
-import {runReleaseWorker} from '../scripts/cloud-release-worker.mjs';
+import {verifyReleaseIdentity} from '../src/lib/releases/identity.mjs';
+import {dispatchTicket,runReleaseWorker} from '../scripts/cloud-release-worker.mjs';
 import {releaseProvider,releaseCredentials,releaseRepo,releaseSha,databaseRef} from './support/release-provider.mjs';
 const project={id:'release-test',space:'personal',name:'Synthetic',description:'A web app'};
 async function setup(database='none'){
@@ -51,8 +52,8 @@ test('wrong repo, moving alias and wrong commit block readiness; access protecti
 });
 test('cloud worker continues multiple bounded steps and stops on revoked or failed grants without logging a ticket',async()=>{
  let n=0;const logs=[];const transport=async(url,options)=>{assert.equal(new URL(url).pathname,'/api/projects/release/step');assert.equal(JSON.parse(options.body).ticket,'synthetic_ticket');return Response.json({status:++n<4?'running':'deployed',phase:n<4?'deployment_wait':'done',retryAfter:1});};
- await runReleaseWorker({origin:'https://jarvis.invalid',ticket:'synthetic_ticket',transport,delay:async()=>{},log:v=>logs.push(v)});assert.equal(n,4);assert(!logs.join('').includes('synthetic_ticket'));
- await assert.rejects(runReleaseWorker({origin:'https://jarvis.invalid',ticket:'synthetic_ticket',transport:async()=>new Response('',{status:403}),delay:async()=>{},log:()=>{}}),/denied/);
+ await runReleaseWorker({origin:'https://jarvis.invalid',ticket:'synthetic_ticket',getIdentityToken:async()=> 'synthetic_identity',transport,delay:async()=>{},log:v=>logs.push(v)});assert.equal(n,4);assert(!logs.join('').includes('synthetic_ticket'));
+ await assert.rejects(runReleaseWorker({origin:'https://jarvis.invalid',ticket:'synthetic_ticket',getIdentityToken:async()=> 'synthetic_identity',transport:async()=>new Response('',{status:403}),delay:async()=>{},log:()=>{}}),/denied/);
 });
 test('migration wrapper journals exact immutable hashes and rejects delimiter injection',()=>{
  const query=migrationQuery([{path:'supabase/migrations/a.sql',sha:'a'.repeat(40),text:'create table sample(id int);'}]);assert.match(query,/migration_changed/);assert.match(query,/revoke all on schema/);
@@ -68,7 +69,7 @@ test('automatic selection follows committed DB schema and discovers an existing 
 test('unfinished GitHub checks block deployment, while transient worker errors retry the same scoped request',async()=>{
  const f=releaseProvider();const transport=async(url,opts)=>new URL(url).pathname.endsWith('/check-runs')?Response.json({total_count:1,check_runs:[{status:'in_progress'}]}):f.transport(url,opts);
  await assert.rejects(inspectRelease({project,repository:releaseRepo,ownerId:'owner',database:'none'},cloudApi(releaseCredentials,transport),releaseCredentials),/source_checks_pending/);
- let attempts=0;await runReleaseWorker({origin:'https://jarvis.invalid',ticket:'synthetic_ticket',delay:async()=>{},log:()=>{},transport:async()=>++attempts===1?new Response('',{status:503}):Response.json({status:'deployed',phase:'done'})});assert.equal(attempts,2);
+ let attempts=0;await runReleaseWorker({origin:'https://jarvis.invalid',ticket:'synthetic_ticket',getIdentityToken:async()=> 'synthetic_identity',delay:async()=>{},log:()=>{},transport:async()=>++attempts===1?new Response('',{status:503}):Response.json({status:'deployed',phase:'done'})});assert.equal(attempts,2);
 });
 test('a definite provider denial clears only its intent so fixing the connection can safely retry',async()=>{
  const f=await setup();await f.advance();let first=true,current=f.current();
@@ -77,3 +78,7 @@ test('a definite provider denial clears only its intent so fixing the connection
  await assert.rejects(advanceRelease(current,api,releaseCredentials,checkpoint,f.transport),/vercel_connection_required/);assert.equal(current.vercelIntent,false);
  current=await advanceRelease(current,api,releaseCredentials,checkpoint,f.transport);assert.equal(current.phase,'deployment');assert.equal(current.vercelId,'prj_fixture');
 });
+
+test('worker identity requires the trusted main workflow, audience and authentic GitHub signature',async()=>{const f=releaseProvider(),options={origin:'https://jarvis.invalid',repository:'kjd1374/jarvis',transport:f.transport};assert.equal((await verifyReleaseIdentity(f.issueIdentity(options.origin),options)).runId,'123');for(const claims of [{aud:'https://wrong.invalid'},{repository:'untrusted/fork'},{ref:'refs/pull/1/merge'},{exp:1}])await assert.rejects(verifyReleaseIdentity(f.issueIdentity(options.origin,claims),options));});
+
+test('dispatch grant is read from the event payload without a workflow environment interpolation',async()=>{const{mkdtemp,writeFile,readFile,rm}=await import('node:fs/promises');const{tmpdir}=await import('node:os');const{join}=await import('node:path');const dir=await mkdtemp(join(tmpdir(),'jarvis-release-event-'));try{const path=join(dir,'event.json');await writeFile(path,JSON.stringify({inputs:{ticket:'synthetic_dispatch_grant'}}));assert.equal(dispatchTicket({GITHUB_EVENT_PATH:path}),'synthetic_dispatch_grant');const workflow=await readFile(new URL('../.github/workflows/project-release.yml',import.meta.url),'utf8');assert(!workflow.includes('JARVIS_RELEASE_TICKET:'));assert(workflow.includes('id-token: write'));}finally{await rm(dir,{recursive:true,force:true});}});

@@ -1,4 +1,5 @@
 import "server-only";
+import { verifyReleaseIdentity } from "./identity.mjs";
 import { randomUUID } from "node:crypto";
 import { authorize, CloudError, loadSpace, saveSpace } from "../cloud/server";
 import { credentialsFor } from "../automation/providers";
@@ -110,6 +111,7 @@ export async function releaseAction(request: Request, auth: Auth, space: Space, 
   return projectForRelease(data,space,projectId).release;
 }
 export async function workerRelease(request: Request, ticket: unknown) {
+  const identity=await verifyReleaseIdentity(request.headers.get("authorization")?.replace(/^Bearer /,""),{origin:process.env.JARVIS_APP_ORIGIN,repository:workflowRepository});
   if(typeof ticket!=="string"||ticket.length>12000)throw releaseError("invalid_release_grant");
   const grant=openProvider(ticket,process.env.JARVIS_PREVIEW_SIGNING_KEY,"jarvis-release","worker","grant-v1");
   if(!grant||grant.expiresAt<=Date.now()||!['company','personal'].includes(grant.space)||typeof grant.bearer!=="string")throw releaseError("invalid_release_grant");
@@ -118,7 +120,7 @@ export async function workerRelease(request: Request, ticket: unknown) {
   const space=grant.space as Space,token=randomUUID(),stamp=new Date().toISOString();let claimed=false;
   const data=await releaseEdit(auth,space,d=>{
     claimed=false;const p=projectForRelease(d,space,grant.projectId),r=p.release;
-    if(!r||r.id!==grant.jobId||r.executionId!==grant.executionId||r.ownerDevice!==grant.deviceId)throw releaseError("stale_release");
+    if(!r||r.id!==grant.jobId||r.executionId!==grant.executionId||r.ownerDevice!==grant.deviceId||r.workflowUrl?.includes("/runs/")&&!r.workflowUrl.endsWith("/runs/"+identity.runId))throw releaseError("stale_release");
     if(!releaseBusy(r))return d;
     if(Date.parse(r.leaseUntil??'')>Date.now())return d;
     claimed=true;return releasePatch(d,p,{...r,status:"running",leaseToken:token,leaseUntil:new Date(Date.now()+120000).toISOString(),updatedAt:stamp});

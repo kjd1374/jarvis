@@ -33,6 +33,7 @@ export async function runReleaseLifecycle({base,api,account,sql,users,network,re
   await panel.getByRole('checkbox',{name:/고정 코드·무료 계정/}).check();await panel.getByRole('button',{name:'클라우드에서 배포 시작',exact:true}).click();
   await expect.poll(()=>network.release.state.dispatch?.inputs?.ticket,{timeout:30000}).toBeTruthy();
   const firstTicket=network.release.state.dispatch.inputs.ticket;
+  assert.equal((await api('/api/projects/release/step',undefined,'POST',{ticket:firstTicket})).status,403);
   const snap=await api('/api/workspace?space='+space,account.token),r=snap.body.data.projects.find(p=>p.id===projectId).release;
   assert.equal(r.status,'queued');assert.equal(r.ownerDevice,deviceId);assert(!JSON.stringify(r).includes(firstTicket));
   // A normal stale browser PUT cannot forge completion or overwrite its lease.
@@ -40,16 +41,16 @@ export async function runReleaseLifecycle({base,api,account,sql,users,network,re
   assert.equal((await api('/api/workspace',account.token,'PUT',{space,data:forged,revision:snap.body.revision})).status,200);
   assert.equal((await api('/api/workspace?space='+space,account.token)).body.data.projects.find(p=>p.id===projectId).release.status,'queued');
   assert.equal((await api('/api/projects/release',account.token,'POST',{space,projectId,jobId:r.id,action:'cancel'})).status,200);
-  assert.equal((await api('/api/projects/release/step',undefined,'POST',{ticket:firstTicket})).status,403);
+  assert.equal((await api('/api/projects/release/step',network.release.issueIdentity(base),'POST',{ticket:firstTicket})).status,403);
   const retry=await context.request.post(base+'/api/projects/release',{headers:{Origin:base},data:{space,projectId,jobId:r.id,action:'retry',reviewed:true}});assert.equal(retry.status(),200);
   const retryTicket=network.release.state.dispatch.inputs.ticket;assert.notEqual(retryTicket,firstTicket);
   const restore=await api('/api/workspace?space='+space,account.token);
   Object.assign(restore.body.data.projects.find(p=>p.id===projectId).release,{status:'interrupted',error:'imported_request_review'});
   assert.equal((await api('/api/workspace',account.token,'PUT',{space,data:restore.body.data,revision:restore.body.revision})).status,200);
-  assert.equal((await api('/api/projects/release/step',undefined,'POST',{ticket:retryTicket})).status,403);
+  assert.equal((await api('/api/projects/release/step',network.release.issueIdentity(base),'POST',{ticket:retryTicket})).status,403);
   const resume=await context.request.post(base+'/api/projects/release',{headers:{Origin:base},data:{space,projectId,jobId:r.id,action:'retry',reviewed:true}});assert.equal(resume.status(),200);
   const ticket=network.release.state.dispatch.inputs.ticket;assert.notEqual(ticket,retryTicket);await context.close();context=undefined;
-  await runReleaseWorker({origin:'https://jarvis.invalid',ticket,delay:async()=>{},log:()=>{},transport:(_url,options)=>fetch(base+'/api/projects/release/step',options)});
+  await runReleaseWorker({origin:'https://jarvis.invalid',ticket,getIdentityToken:async()=>network.release.issueIdentity(base),delay:async()=>{},log:()=>{},transport:(_url,options)=>fetch(base+'/api/projects/release/step',options)});
   const finished=(await api('/api/workspace?space='+space,account.token)).body.data.projects.find(p=>p.id===projectId);
   assert.equal(finished.release.status,'deployed');assert.equal(finished.stage,'development');assert.equal(finished.release.healthStatus,200);assert.equal(dbSQL("select relrowsecurity from pg_class where relname='synthetic_records'"),'t');
   dbSQL("insert into synthetic_records values('kept','{\"n\":1}')");dbSQL(schemaQuery);assert.equal(dbSQL('select count(*) from synthetic_records'),'1');
@@ -58,7 +59,7 @@ export async function runReleaseLifecycle({base,api,account,sql,users,network,re
   const noConsent=await api('/api/projects/release',account.token,'POST',{space,projectId,jobId:r.id,action:'complete'});assert.equal(noConsent.status,409);
   const completed=await api('/api/projects/release',account.token,'POST',{space,projectId,jobId:r.id,action:'complete',functionalChecked:true});assert.equal(completed.status,200);
   const live=(await api('/api/workspace?space='+space,account.token)).body.data.projects.find(p=>p.id===projectId);assert.equal(live.stage,'live');assert.equal(live.launchUrl,'https://synthetic-release.vercel.app');
-  sql(`update public.jarvis_devices set revoked_at=now() where user_id='${deviceId}'`);assert.equal((await api('/api/projects/release/step',undefined,'POST',{ticket})).status,403);
+  sql(`update public.jarvis_devices set revoked_at=now() where user_id='${deviceId}'`);assert.equal((await api('/api/projects/release/step',network.release.issueIdentity(base),'POST',{ticket})).status,403);
   recordCheck('cloud release: approved browser plans/pins source -> encrypted scoped connections -> real dispatch contract -> cancellation/old grant fencing -> browser closed -> bounded worker -> actual private DB checkpoints -> new DB SQL transaction/RLS/idempotency -> immutable deployment/alias/HTTP check -> explicit functional confirmation -> live shortcut; no Mac, production or paid API calls');
  }catch(error){
   console.error('Synthetic provider calls',network.release.state.requests.map(r=>({host:r.host,path:r.path,method:r.method})));

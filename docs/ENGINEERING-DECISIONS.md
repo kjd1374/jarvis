@@ -480,3 +480,5 @@ WebKit 브라우저 회귀에서 Blob 원본을 IndexedDB에 직접 쓰면 오�
 설치된 Next 16.4 Route Handler 문서, GitHub 공식 REST OpenAPI의 workflow dispatch(ref/inputs/return_run_details, API 2022-11-28), Vercel 공식 `https://openapi.vercel.sh`의 v11 프로젝트와 v13 배포(gitSource SHA·Express enum·환경변수·alias)를 확인했다. 새 npm 의존성·호스팅 계정·과금 전환 없이 기존 사설 저장소와 provider vault를 확장했다. GitHub 인증은 앱에서 영역별로 한 번 연결하며 클라우드 개발 환경의 인증을 서비스로 복사하지 않는다.
 
 고정 SHA와 GitHub 검사, 무료 계정의 실제 accountId/조직/저장소 바인딩을 확인한다. 기존 운영 환경을 자동 발견하되 DB 정체가 불명확하면 새 빈 DB로 바꾸지 않는다. 새 DB에 한해서 불변 마이그레이션을 트랜잭션/잠금/hash 이력으로 적용하고 기존 DB 자료와 스키마는 보존한다. 관리 키는 코드/워크플로/브라우저에 주입하지 않는다. 생성 의도를 먼저 저장하고 응답이 불명확하면 정체 조회 후 복구하며 중복 생성으로 덮지 않는다. 일반 클라이언트 저장은 배포 상태를 작성할 수 없다. 전체 계약과 검증 경계는 PROJECT-OPERATIONS.md를 따른다.
+
+공개 Actions 입력은 계정 권한으로 취급하지 않는다. GitHub 공식 OIDC discovery 문서에서 RS256, 고정 issuer/JWKS와 workflow_ref/ref/repository/run_id/aud/exp/nbf 계약을 확인하고, 워커 호출에 해당 main workflow 실행의 OIDC 서명을 추가 검증한다. grant는 이벤트 파일에서 읽어 Actions의 env 출력에 노출하지 않으며, 원본 기기 승인과 작업 nonce/임대도 계속 검사한다.

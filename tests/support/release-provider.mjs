@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { generateKeyPairSync,sign,createHash } from 'node:crypto';
 export const releaseSha='a'.repeat(40),databaseRef='b'.repeat(20),releaseRepo='example/release-fixture';
 export function releaseProvider(){
  const files={'package.json':JSON.stringify({private:true,dependencies:{next:'16.4.0'}}),'app/page.tsx':'export default function Page(){return <h1>Fixture</h1>}', 'supabase/migrations/001_fixture.sql':'create table public.synthetic_records(id text primary key,value jsonb); alter table public.synthetic_records enable row level security;'};
  const blob=path=>{const bytes=Buffer.from(files[path]);return{type:'file',encoding:'base64',size:bytes.length,content:bytes.toString('base64'),sha:createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex')};};
+ const oidc=generateKeyPairSync('rsa',{modulusLength:2048}),jwk={...oidc.publicKey.export({format:'jwk'}),kid:'synthetic-release-key',alg:'RS256',use:'sig'};
+ const issueIdentity=(origin,claims={})=>{const now=Math.floor(Date.now()/1000),header=Buffer.from(JSON.stringify({alg:'RS256',kid:jwk.kid})).toString('base64url'),payload=Buffer.from(JSON.stringify({iss:'https://token.actions.githubusercontent.com',aud:origin,repository:'kjd1374/jarvis',workflow_ref:'kjd1374/jarvis/.github/workflows/project-release.yml@refs/heads/main',ref:'refs/heads/main',event_name:'workflow_dispatch',run_id:'123',nbf:now-1,exp:now+300,...claims})).toString('base64url');return header+'.'+payload+'.'+sign('RSA-SHA256',Buffer.from(header+'.'+payload),oidc.privateKey).toString('base64url');};
  const state={files,requests:[],project:null,database:null,deployment:null,dispatch:null,head:releaseSha,health:200,plan:'hobby',orgPlan:'free',rejectCreate:false,onSchema:null,onDispatch:null};
  const handle=async(url,method='GET',body,headers={})=>{
   const u=new URL(url),p=u.pathname;state.requests.push({host:u.host,path:p,method,body});
+  if(u.hostname==='token.actions.githubusercontent.com'&&p==='/.well-known/jwks')return{body:{keys:[jwk]}};
   if(u.hostname==='synthetic-release.vercel.app'){assert.equal(headers.Authorization,undefined);return{status:state.health,body:'<h1>Synthetic released app</h1>',html:true};}
   if(u.hostname==='api.github.com'){
    if(p==='/user')return{body:{login:'fixture-owner'}};
@@ -43,6 +46,6 @@ export function releaseProvider(){
   throw Error('Unexpected synthetic provider call: '+method+' '+u.origin+p);
  };
  const transport=async(url,options={})=>{const r=await handle(url,options.method??'GET',options.body?JSON.parse(options.body):undefined,options.headers);return new Response(r.html?r.body:JSON.stringify(r.body),{status:r.status??200,headers:{'Content-Type':r.html?'text/html':'application/json'}});};
- return{state,handle,transport};
+ return{state,handle,transport,issueIdentity};
 }
 export const releaseCredentials={github:{token:'synthetic-github-token'},vercel:{token:'synthetic-vercel-token'},supabase:{token:'synthetic-supabase-token',organization:'free-org'}};
