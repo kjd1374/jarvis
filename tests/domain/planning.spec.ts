@@ -94,3 +94,15 @@ test("응답 유실 후 서버의 기획 임대는 온전히 복원하고 서로
   const late = reportPlanning(fork, "personal", { projectId: "idea", jobId: j.id, leaseToken: j.leaseToken, phase: "result", answer }, scope.deviceId, later);
   expect(late.projects[0].planning!.document.content).toBe("기기 B"); expect(late.projects[0].planning!.turns.at(-1)!.appliedRevision).toBeUndefined();
 });
+test("휴대폰 기획안을 선택해도 더 진행된 서버 답변과 반영 이력을 삭제하지 않는다", () => {
+  const base = idea(), phone = savePlan(base, "personal", "idea", "휴대폰에서 작성한 기획", 0, later);
+  let remote = base;
+  for (let i = 0; i < 2; i++) {
+    const c = claimPlanning(enqueuePlanning(remote, "personal", "idea", `서버 기획 ${i}`, stamp), scope, later), j = c.job!;
+    remote = reportPlanning(c.data, "personal", { projectId: "idea", jobId: j.id, leaseToken: j.leaseToken, phase: "result", answer }, scope.deviceId, later);
+  }
+  const merged = mergeCloudWorkspace(base, phone, remote, "local");
+  expect(merged.data.projects[0].planning!.document.content).toBe("휴대폰에서 작성한 기획");
+  expect(merged.data.projects[0].planning!.turns.at(-1)!.appliedRevision).toBe(2);
+  expect(merged.data.projects[0].planning!.turns).toHaveLength(2);
+});

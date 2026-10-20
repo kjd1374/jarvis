@@ -34,7 +34,7 @@ export function validatePlanning(project: Project) {
       t.baseRevision !== undefined && !revision(t.baseRevision) || t.baseVersionId !== undefined && !uuid(t.baseVersionId) || t.appliedRevision !== undefined && !revision(t.appliedRevision) ||
       t.leaseOwner !== undefined && !text(t.leaseOwner, 200) || t.leaseToken !== undefined && !uuid(t.leaseToken) || t.leaseUntil !== undefined && !date(t.leaseUntil) ||
       t.error !== undefined && !/^[a-z_]{1,100}$/.test(t.error) || t.status === "completed" && !t.result ||
-      t.appliedRevision !== undefined && (t.status !== "completed" || t.appliedRevision > p.document.revision)) throw new Error("기획 요청 형식을 확인해주세요.");
+      t.appliedRevision !== undefined && t.status !== "completed") throw new Error("기획 요청 형식을 확인해주세요.");
     if (t.result) parsePlanningAnswer(t.result);
   }
 }
