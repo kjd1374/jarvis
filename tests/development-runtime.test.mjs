@@ -81,7 +81,7 @@ test('native npm releases and separate checks reuse the same lock cache without 
   const first=await startDevelopmentPreview(options);assert.equal(first.state,'ready',JSON.stringify(first)+' '+developmentStatus(group).detail);assert.equal(installs,1);
   const persistent=await startDevelopmentPreview({...options,persistent:true});assert.equal(persistent.state,'ready',JSON.stringify(persistent)+' '+developmentStatus(group).detail);assert.equal(persistent.dataPersistence,'project');assert.notEqual(persistent.url,first.url);assert.equal(installs,1);
   const changed=await startDevelopmentPreview({...options,persistent:true,sha:'e'.repeat(40)});assert.equal(changed.state,'ready',JSON.stringify(changed)+' '+developmentStatus(group).detail);assert.equal(installs,1);
-  const checks=await runDevelopmentTests({...options,identity:group+':checks'});assert.equal(checks[0].status,'passed',JSON.stringify(checks)+' synthetic policy '+testPolicy);assert.equal(installs,1);
+  for(let attempt=0;attempt<6;attempt++){const checks=await runDevelopmentTests({...options,identity:group+':checks'});assert.equal(checks[0].status,'passed',JSON.stringify(checks)+' synthetic policy '+testPolicy);assert.equal(installs,1);}
  }finally{developmentStatus(group,'stop');await new Promise(resolve=>setTimeout(resolve,100));await rm(dir,{recursive:true,force:true});}
 });
 
