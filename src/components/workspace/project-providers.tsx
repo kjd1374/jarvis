@@ -19,12 +19,13 @@ export function ProjectProviders({ space }: { space: Space }) {
   }
   return <details className={styles.compactDisclosure}>
     <summary>클라우드 계정 연결 · 선택 사항</summary>
-    <p>계정을 한 번 연결하면 같은 영역의 새 프로젝트에서 재사용합니다. 연결하지 않으면 맥미니로 시작합니다. 토큰은 서버에서 암호화하며 AI 대화와 GitHub에 전달하지 않습니다.</p>
+    <p>계정을 한 번 연결하면 같은 영역의 새 프로젝트에서 재사용합니다. 연결하지 않으면 맥미니로 시작합니다. 토큰은 서버에서 암호화하며 AI 대화와 소스 코드에 전달하지 않습니다. 클라우드 배포에는 GitHub와 Vercel 연결이 필요하며 Supabase는 DB가 필요한 경우 연결합니다.</p>
     {Object.entries(data.providerConnections?.[space] ?? {}).map(([key, value]) => <p key={key}>{value.label}</p>)}
-    <label className={styles.field}>서비스<select value={provider} onChange={e => { setProvider(e.target.value); setToken(""); setOrganization(""); }}><option value="vercel">Vercel · 무료 Hobby</option><option value="supabase">Supabase · 무료 프로젝트</option></select></label>
+    <label className={styles.field}>서비스<select value={provider} onChange={e => { setProvider(e.target.value); setToken(""); setOrganization(""); }}><option value="github">GitHub · 클라우드 배포</option><option value="vercel">Vercel · 무료 Hobby</option><option value="supabase">Supabase · 무료 프로젝트</option></select></label>
     <label className={styles.field}>접근 토큰<input type="password" autoComplete="off" value={token} onChange={e => setToken(e.target.value)} maxLength={2000} /></label>
-    <label className={styles.field}>{provider === "supabase" ? "Supabase 조직 ID" : "Vercel 팀 ID (개인은 비워두기)"}<input autoComplete="off" value={organization} onChange={e => setOrganization(e.target.value)} maxLength={100} /></label>
-    <a href={provider === "vercel" ? "https://vercel.com/account/settings/tokens" : "https://supabase.com/dashboard/account/tokens"} target="_blank" rel="noopener noreferrer">서비스에서 접근 토큰 관리 ↗</a>
+    {provider !== "github" && <label className={styles.field}>{provider === "supabase" ? "Supabase 조직 ID" : "Vercel 팀 ID (개인은 비워두기)"}<input autoComplete="off" value={organization} onChange={e => setOrganization(e.target.value)} maxLength={100} /></label>}
+    <a href={provider === "github" ? "https://github.com/settings/personal-access-tokens" : provider === "vercel" ? "https://vercel.com/account/settings/tokens" : "https://supabase.com/dashboard/account/tokens"} target="_blank" rel="noopener noreferrer">서비스에서 접근 토큰 관리 ↗</a>
+    {provider === "github" && <p>GitHub 토큰에는 대상 저장소의 Contents 읽기와 Checks 읽기, Jarvis 저장소의 Actions 실행 권한이 필요합니다. 배포 워커는 앱 코드를 실행하지 않으며 제공자 토큰을 받지 않습니다. 기존 Vercel GitHub 앱에 대상 저장소 접근이 허용되어 있어야 합니다.</p>}
     <div className={styles.agentTurnActions}><button type="button" className={styles.secondaryButton} disabled={busy || !account?.authenticated || !token} onClick={() => void save("connect")}>계정 연결 저장</button><button type="button" className={styles.textButton} disabled={busy || !account?.authenticated} onClick={() => void save("disconnect")}>계정 연결 해제</button></div>
     {message && <p role="status">{message}</p>}
   </details>;

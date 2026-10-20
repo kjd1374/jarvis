@@ -63,7 +63,7 @@ export function mergeCloudWorkspace(
     const observation = path.length === 4 && path[0] === "services" && path[2] === "monitoring" &&
       ["runnerSeenAt", "runnerVersion", "runnerConnection", "lastSuccessAt", "lastAttemptAt", "error", "nextRetryAt", "inspection", "analysis", "previousAnalyses", "webLinks"].includes(path[3]) ||
       path.length === 3 && path[0] === "sourceRecords" && path[2] !== "taskId";
-    if (path[0] === "providerConnections") return r;
+    if (path[0] === "providerConnections" || path.length === 3 && path[0] === "projects" && path[2] === "release") return r;
     if (path.length === 4 && path[0] === "projects" && path[2] === "planning" && path[3] === "runnerSeenAt") return r;
     if (base && b === undefined && planningTurn && object(l) && object(r) && l.status === "queued" && l.attempt === 0 &&
       l.updatedAt === l.createdAt && ["leaseOwner", "leaseToken", "leaseUntil", "baseRevision", "baseVersionId", "result", "error", "appliedRevision"].every(k => l[k] === undefined) &&

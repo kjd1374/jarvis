@@ -1,4 +1,5 @@
 "use client";
+import { ProjectReleasePanel } from "./project-release";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
@@ -99,7 +100,7 @@ export function ProjectService({ project }: { project: Project }) {
     <section className={styles.document}><h2>서비스 주소 관리</h2><p>등록한 주소로 이동합니다. 서비스 내부 연결 상태는 해당 서비스에서 확인할 수 있습니다.</p><form onSubmit={event => {
       event.preventDefault(); if (saving || lock.current) return; lock.current = true; setError("");
       void mutate(d => { const launchUrl = projectUrl(url); if (!launchUrl) throw new Error("서비스 주소를 입력해주세요."); return { ...d, projects: d.projects.map(p => p.id === project.id && p.space === project.space ? { ...p, launchUrl } : p) }; }).catch(e => setError(e.message)).finally(() => { lock.current = false; });
-    }}><label>서비스 주소<input type="url" required maxLength={2000} value={url} onChange={e => setUrl(e.target.value)} /></label><button disabled={saving}>주소 저장</button></form></section><ProjectBasics project={project} />{error && <p role="alert">{error}</p>}</div>;
+    }}><label>서비스 주소<input type="url" required maxLength={2000} value={url} onChange={e => setUrl(e.target.value)} /></label><button disabled={saving}>주소 저장</button></form></section><ProjectReleasePanel project={project} live /><ProjectBasics project={project} />{error && <p role="alert">{error}</p>}</div>;
 }
 
 function ProjectBasics({ project }: { project: Project }) {
@@ -115,11 +116,11 @@ function ProjectBasics({ project }: { project: Project }) {
 export function ProjectStageControl({ project }: { project: Project }) {
   const { mutate, saving } = useWorkspace();
   const [error, setError] = useState("");
-  const busy = project.setup && project.setup.status !== "ready" || project.automation?.turns.some(t => ["queued", "running", "interrupted"].includes(t.status));
+  const busy = project.release && ["queued", "running"].includes(project.release.status) || project.setup && project.setup.status !== "ready" || project.automation?.turns.some(t => ["queued", "running", "interrupted"].includes(t.status));
   return <div className={styles.stageControl}><span>프로젝트 단계 · {stageLabels[projectStage(project)]}</span><button disabled={saving || !!busy} onClick={() => {
     setError(""); void mutate(d => {
       const p = d.projects.find(p => p.id === project.id && p.space === project.space);
-      if (!p || p.setup && p.setup.status !== "ready" || p.automation?.turns.some(t => ["queued", "running", "interrupted"].includes(t.status))) throw new Error("진행 중인 개발 작업을 먼저 마쳐주세요.");
+      if (!p || p.release && ["queued", "running"].includes(p.release.status) || p.setup && p.setup.status !== "ready" || p.automation?.turns.some(t => ["queued", "running", "interrupted"].includes(t.status))) throw new Error("진행 중인 개발 작업을 먼저 마쳐주세요.");
       return { ...d, projects: d.projects.map(row => row.id === p.id ? { ...row, stage: "idea", planning: row.planning ?? newPlanning(now()) } : row) };
     }).catch(e => setError(e.message));
   }}>기획으로 전환</button>{error && <p role="alert">{error}</p>}</div>;

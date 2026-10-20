@@ -21,6 +21,7 @@ jobs:
       - run: npm run test:deploy
       - run: npm run test:devices
       - run: npm run test:automation
+      - run: npm run test:release
       - run: npm run test:domain
       - run: npm run check
         env:

@@ -13,6 +13,7 @@ import { createClient } from "@supabase/supabase-js";
 import { chromium } from "playwright";
 import { emptyWorkspace } from "../src/lib/workspace/types.ts";
 import { createLifecycleNetwork } from "../tests/support/lifecycle-network.mjs";
+import { runReleaseLifecycle } from "../tests/support/release-lifecycle.mjs";
 import { runProjectLifecycle } from "../tests/support/project-lifecycle.mjs";
 
 try {
@@ -175,6 +176,7 @@ try {
   sql(
     `update public.jarvis_devices set approved_at=now() where user_id in ('${a.id}','${a.secondId}')`,
   );
+  if (!process.argv.includes("--release-only")) {
   assert.equal((await api("/api/workspace?space=company")).status, 401);
   assert.equal((await api("/api/workspace", a.token)).status, 400);
   assert.equal(
@@ -1115,6 +1117,8 @@ try {
   assert.equal((await api("/api/workspace?space=personal", a.token)).body.revision, personalBeforeDiscovery.body.revision);
   recordCheck("installed 2.5.0 discovers new/25+ projects despite removed legacy IDs; work/document/inspection heartbeats refresh new connections; selected scopes, device leases, concurrent claims and other spaces remain isolated");
   await runProjectLifecycle({ base, api, account: a, sql, users, network: lifecycleNetwork, recordCheck });
+  }
+  await runReleaseLifecycle({ base, api, account: a, sql, users, network: lifecycleNetwork, recordCheck });
   console.log(
     JSON.stringify(
       {

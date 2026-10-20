@@ -19,6 +19,7 @@
     "test:storage": "playwright test --project=storage",
     "test:all": "playwright test",
     "test:report": "playwright show-report",
+    "test:release": "node --test tests/release.test.mjs",
     "test:domain": "playwright test -c playwright.domain.config.ts",
     "test:server": "node scripts/test-server-storage.mjs",
     "deploy:preview:plan": "node scripts/deploy-preview.mjs --dry-run",

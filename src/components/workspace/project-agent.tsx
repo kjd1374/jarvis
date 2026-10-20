@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { enqueueWork, changeWorkState, latestWorkSource, preferredWorkRevision } from "@/lib/automation/work";
 import { prepareProjectImage, type ProjectImage } from "@/lib/projects/images";
 import { repositoryFor } from "@/lib/automation/state";
@@ -74,6 +74,15 @@ export function ProjectAgent({ project }: { project: Project }) {
   const [serviceId, setServiceId] = useState(services[0]?.id ?? "");
   const service = services.find(s => s.id === serviceId) ?? services[0];
   const [message, setMessage] = useState("");
+  useEffect(() => {
+    const fill = (event: Event) => {
+      const detail = (event as CustomEvent<{ projectId: string; space: string; request: string }>).detail;
+      if (detail?.projectId !== project.id || detail.space !== project.space || typeof detail.request !== "string") return;
+      setMessage(previous => (previous ? previous + "\n\n" + detail.request : detail.request).slice(0, 8000));
+    };
+    window.addEventListener("jarvis-release-help", fill);
+    return () => window.removeEventListener("jarvis-release-help", fill);
+  }, [project.id, project.space]);
   const [images, setImages] = useState<ProjectImage[]>([]);
   const [preparingImages, setPreparingImages] = useState(false);
   const [mode, setMode] = useState<"change" | "ask">("change");

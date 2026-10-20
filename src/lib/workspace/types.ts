@@ -4,6 +4,7 @@ export type TaskStatus = "todo" | "in_progress" | "decision" | "done";
 export type Project = {
   stage?: "idea" | "development" | "live";
   launchUrl?: string;
+  release?: import("../releases/state").ProjectRelease;
   planning?: import("../projects/planning").ProjectPlanning;
   setup?: import("../automation/provision").ProjectSetup;
   automation?: import("../automation/work-types").ProjectAutomation;
