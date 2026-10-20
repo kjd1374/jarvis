@@ -498,3 +498,12 @@ WebKit 브라우저 회귀에서 Blob 원본을 IndexedDB에 직접 쓰면 오�
 - Compared existing development-workspace approaches: microsoft/vscode and coder/code-server (MIT, maintained) offer mature editor/terminal infrastructure but adding either creates a separate hosted editor and authentication/process surface; stackblitz/bolt.new (MIT, older published repository) assumes WebContainers rather than the existing Mac runner. Reuse the useful preview/conversation split with existing React 19.3.0, Next 16.4.0 and CSS Modules. No package, agent SDK or third-party editor service adopted; no project data sent to those candidates.
 - Collapse secondary preview/request configuration while keeping selected revision/publish scope visible in the summary. Preserve the explicit publish setting, photo upload, retry/cancel actions, original history and IndexedDB schema. Show native failures once in the main preview; execution records remain available on expansion. Count only actual test requests in the test pane; reading a log is not application-startup or test success. Remove duplicated page instructions/actions, keep desktop preview wider than chat, retain mobile tabs/drafts, and use 16px mobile form controls to avoid iOS focus zoom.
 - Validation: required CI includes actual macOS startup/reuse/restart, external and symlinked dylibs, npm build/test cache, sibling-file/arbitrary-port isolation, model bridge fencing and 12 consecutive starts per Node distribution. UI regressions cover failure/log presentation, narrow screens, draft/scope preservation, photos and embedded-preview fallback. Production availability and actual user Mac success are recorded separately in PR #80 / Issue #79.
+
+
+## 2026-10-20: 실행된 통역 화면과 앱 AI 연결 구분 (Issue #81)
+
+대상 korean-friend 6782c4b5의 실제 시작 경로는 /api/config → /api/warmup이며, 기본 local 프로필이 localhost:11434로 직접 접속한다. AI 없이 준비한 격리 화면에서도 앱에는 로컬 젬마가 표시된다. 반면 Jarvis가 명시적으로 연결한 프로필은 jarvis로 고정되고 warmup:false이며 할당된 중계 포트를 사용한다. 따라서 앱의 연결 버튼만으로 중계 연결 성공을 판단할 수 없다.
+
+준비 결과에 AI 검증이 없는 임시 화면은 연결 안 함을 펼침 없이 표시하고, 명시적인 한 번의 버튼으로 ollama 화면 준비 요청을 저장한다. 자동 AI 호출·공급자 변경·과금 전환은 없다. 실행기 권한이나 버전은 바꾸지 않으며 2.9.2를 사용한다. 작은 오류 수정으로 새 도구/외부 후보 비교는 생략하고 기존 React/Next 16.4 클라이언트 상태·요청 저장 경로를 재사용한다.
+
+대상 비공개 앱의 코드는 공개 저장소에 복사하지 않는다. macOS CI는 관찰한 config/warmup/스트리밍 요청 계약을 합성 앱으로 재현한다. AI 미연결 시 직접 접속 차단, 중계 연결 시 warmup 생략·번역 완료, 승인 취소 시 차단을 공식/Homebrew Node에서 확인한다. 개인 학습 자료·설정·실제 모델 자격 증명은 사용하지 않는다. 실제 사용자 설정 확인과 맥 모델 동작은 이 합성 검사와 별개다.

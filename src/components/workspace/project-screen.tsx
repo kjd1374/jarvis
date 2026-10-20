@@ -109,6 +109,10 @@ export function ProjectScreen({ project }: { project: Project }) {
     {sourceChanged && <div role="status"><p>저장된 PR의 코드나 상태가 달라졌습니다. 이미 반영한 화면을 확인하려면 기본 브랜치로 준비해주세요.</p>
       <button className={styles.secondaryButton} disabled={saving || !!waiting} onClick={() => { setRevision({ serviceId: service!.id, value: "main" }); void prepare("preview", previewAI, "main"); }}>반영된 코드로 화면 준비</button>
     </div>}
+    {embedPreview?.state === "ready" && embedPreview.kind !== "deployment" && !embedPreview.ai && <div role="status">
+      <p>이 화면은 앱 AI를 연결하지 않고 실행했습니다. 앱에 ‘로컬 젬마’가 보여도 통역 연결은 꺼져 있습니다.</p>
+      <button className={styles.secondaryButton} disabled={saving || !!waiting} onClick={() => { setPreviewAI("ollama"); void prepare("preview", "ollama"); }}>로컬 LLM 연결하고 화면 준비</button>
+    </div>}
     <div className={workbench.canvas} data-ready={canEmbed && embedded} data-failed={latest?.result?.preview?.state === "failed"}>
     {!canEmbed && <div className={workbench.canvasIcon}><Icon name="grid" size={28} /></div>}
     {stopped ? <p role="status">로컬 서버를 종료했습니다. 화면 준비로 다시 시작할 수 있습니다.</p> : latest?.result?.preview ? <PreviewResult preview={latest.result.preview} project={project} turnId={latest.id} /> : <p>{!service ? project.setup ? "저장소와 실행 환경을 자동으로 준비하고 있습니다. 준비가 끝나면 개발 요청과 화면 확인이 이어집니다." : "화면 준비와 자동 테스트에 사용할 GitHub 저장소를 먼저 등록해주세요." : previewAI !== "none"

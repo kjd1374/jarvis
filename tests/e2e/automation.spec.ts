@@ -554,6 +554,28 @@ test("개발 화면은 기존 서버를 새 요청 없이 열고 제한된 ifram
   await screen.getByRole("button", { name: "서버 로그", exact: true }).click(); expect((await state(page))!.projects[0].automation!.turns.at(-1)).toMatchObject({ runtimeAction: "logs", mode: "preview", status: "queued" });
 });
 
+test("AI 없는 화면은 연결 상태를 알리고 한 번의 명시적 요청으로 로컬 LLM을 연결한다", async ({ page, isMobile }) => {
+  const { enqueueWork, claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
+  const stamp = new Date().toISOString(), first = claimProjectWork(enqueueWork(automationWorkspace(stamp), "company", "auto-project", "auto-service", "화면 준비", "preview", "pr", stamp), { space: "company", projectIds: ["auto-project"], deviceId: "runner", previews: true }, stamp), job = first.job!;
+  const data = reportProjectWork(first.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: { reply: "화면 준비", summary: "준비", currentStatus: "", nextAction: "", changes: [], checks: [], followUps: [], outcome: "answered", branch: null, baseSha: "a".repeat(40), headSha: null, prUrl: null, deployment: { state: "not_configured", url: null, sha: null }, preview: { state: "ready", kind: "remote", execution: "native", remoteId: job.id, url: "https://synthetic-ai-off.trycloudflare.com/", sha: "a".repeat(40), checkedAt: stamp, expiresAt: new Date(Date.now()+3600000).toISOString(), message: "화면 준비" } } }, "runner", stamp);
+  await page.context().route("**/api/preview/open?**", route => route.fulfill({ contentType: "text/html", body: "<h1>Synthetic AI-off app</h1>" }));
+  await seed(page, data);
+  if (page.context().browser()?.browserType().name() === "webkit") await page.waitForLoadState("networkidle");
+  await page.goto("/projects/auto-project"); await ready(page);
+  if (isMobile) await page.getByRole("navigation", { name: "개발 작업 보기" }).getByRole("button", { name: "화면", exact: true }).click();
+  const screen = page.getByRole("region", { name: "수정된 화면 확인", exact: true });
+  await expect(screen).toContainText("앱에 ‘로컬 젬마’가 보여도 통역 연결은 꺼져 있습니다.");
+  expect((await state(page))!.projects[0].automation!.turns).toHaveLength(1);
+  await screen.getByRole("button", { name: "로컬 LLM 연결하고 화면 준비", exact: true }).click();
+  const turns = (await state(page))!.projects[0].automation!.turns;
+  expect(turns).toHaveLength(2); expect(turns[0].previewAI).toBeUndefined();
+  expect(turns[1]).toMatchObject({ mode: "preview", previewAI: "ollama", status: "queued", publish: "pr" });
+  if (page.context().browser()?.browserType().name() === "webkit") await page.waitForLoadState("networkidle");
+  await page.reload(); await ready(page);
+  await expect(screen.getByLabel("미리보기 AI", { exact: true })).toHaveValue("ollama");
+  expect((await state(page))!.projects[0].automation!.turns).toHaveLength(2);
+});
+
 test("첫 개발 프로젝트는 다른 서비스가 없어도 준비 결과를 자동으로 받는다", async ({ page }) => {
   const { emptyWorkspace } = await import("../../src/lib/workspace/types"), { newProjectSetup, claimSetup, reportSetup } = await import("../../src/lib/automation/provision");
   const stamp = new Date().toISOString(), data = emptyWorkspace();
