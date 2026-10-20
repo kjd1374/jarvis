@@ -7,7 +7,7 @@ import { executeProjectWork } from '../../public/jarvis-runner.mjs';
 export async function runDevelopmentLifecycle({ base, browser, runner, approve, snapshot, projectId, options, recordCheck }) {
   const context = await browser.newContext();
   try {
-    await context.route('**/*',route=>{assert.equal(new URL(route.request().url()).origin,base);return route.continue();});
+    await context.route('**/*',route=>{assert([base,'http://127.0.0.1:54321'].includes(new URL(route.request().url()).origin));return route.continue();});
     const page = await context.newPage(); await page.goto(base+'/settings'); await page.getByText(/기기 확인 번호:/).waitFor();
     await approve(await (await context.request.get(base+'/api/account')).json());
     await page.getByRole('button',{name:'기기 연결 다시 확인',exact:true}).click(); await page.getByRole('button',{name:'개인',exact:true}).click();

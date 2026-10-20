@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, rm, realpath } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { startDevelopmentPreview, developmentStatus, developmentEnvironment, developmentSandbox, runDevelopmentTests } from '../public/jarvis-development.mjs';
@@ -53,15 +53,32 @@ test('macOS native lifecycle reuses a live server, preserves DATA_DIR across ver
     await writeFile(join(cwd, 'fixture.test.mjs'), `import{test}from'node:test';import assert from'node:assert/strict';test('actual synthetic check',()=>assert.equal(2+2,4));`);
     const checks = await runDevelopmentTests({ ...options, identity:group, files:['server.mjs','fixture.test.mjs'] });
     assert.equal(checks[0].status, 'passed', JSON.stringify(checks)); assert.match(checks[0].detail, /tests 1|tests\s+1/);
-  } finally { developmentStatus(group, 'stop'); await new Promise(resolve=>setTimeout(resolve,1700)); await rm(dir,{recursive:true,force:true}); }
+  } finally { developmentStatus(group, 'stop'); await new Promise(resolve=>setTimeout(resolve,100)); await rm(dir,{recursive:true,force:true}); }
 });
 
-test('synthetic macOS sandbox compatibility diagnostics', { skip: process.platform !== 'darwin' }, async () => {
- const root=await realpath(await mkdtemp(join(tmpdir(),'jarvis-native-policy-'))), node=await realpath(process.execPath);
- try { const base=developmentSandbox(root,root,[],node);
- for(const [name,addition] of [['strict',''],['devices','(allow file-read* (subpath "/dev"))'],['etc','(allow file-read* (subpath "/private/etc"))'],['system-cache','(allow file-read* (subpath "/private/var/db"))'],['homebrew','(allow file-read* (subpath "/opt/homebrew"))'],['library','(allow file-read* (subpath "/Library"))'],['root','(allow file-read* (literal "/"))'],['system-read','(allow file-read*)']]) {
- const result=await runCommand('/usr/bin/sandbox-exec',['-p',base+'\n'+addition,node,'-e','process.stdout.write("compatibility")'],{cwd:root,env:developmentEnvironment(root,0),timeout:10000});
- console.log('synthetic policy probe',name,result.code,result.terminationSignal,result.out,result.err.slice(-1500));
- }
- } finally {await rm(root,{recursive:true,force:true});}
+test('native AI bridge verifies once, reuses its worker and fences app inference by browser approval', { skip: process.platform !== 'darwin' }, async()=>{
+ const dir=await realpath(await mkdtemp(join(tmpdir(),"jarvis-native-ai-'"))),cwd=join(dir,'source'),stateDir=join(dir,'state'),group='personal:ai:example/fixture';await mkdir(cwd);await mkdir(stateDir);
+ await writeFile(join(cwd,'server.mjs'),`import http from'node:http';import{readFile}from'node:fs/promises';const config=JSON.parse(await readFile(new URL('config.json',import.meta.url)));http.createServer(async(req,res)=>{if(req.url==='/translate'){const r=await fetch(config.profiles.jarvis.baseUrl+'/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:'안녕하세요'}]})});res.writeHead(r.status,{'Content-Type':'application/json'});res.end(await r.text());return;}res.setHeader('Content-Type','text/html');res.end('<h1>AI fixture</h1>')}).listen(Number(process.env.PORT),'127.0.0.1');`);
+ await writeFile(join(cwd,'config.example.json'),JSON.stringify({profiles:{},teacher:{}}));let calls=0;
+ const options={cwd,files:['server.mjs','config.example.json'],sha:'c'.repeat(40),stateDir,group,run:runCommand,aiProvider:'ollama',cliInference:async()=>{calls++;return'Xin chào'},authorizeCliPreparation:async()=>true};
+ try{
+  const first=await startDevelopmentPreview(options);assert.equal(first.state,'ready',JSON.stringify(first)+' '+developmentStatus(group).detail);assert.equal(first.ai.provider,'ollama');assert.equal(calls,1);
+  const same=await startDevelopmentPreview(options);assert.equal(same.url,first.url);assert.equal(same.reused,true);assert.equal(calls,1);
+  assert.equal((await fetch(first.url+'translate')).status,503);assert.equal(calls,1);
+  const {attachPreviewCliAuthorization}=await import('../public/jarvis-preview.mjs');assert(attachPreviewCliAuthorization(first.url,async()=>true));assert.equal((await(await fetch(first.url+'translate')).json()).choices[0].message.content,'Xin chào');assert.equal(calls,2);
+  assert(attachPreviewCliAuthorization(first.url,async()=>false));assert.equal((await fetch(first.url+'translate')).status,503);assert.equal(calls,2);
+ }finally{developmentStatus(group,'stop');await new Promise(resolve=>setTimeout(resolve,100));await rm(dir,{recursive:true,force:true});}
+});
+test('native npm releases and separate checks reuse the same lock cache without install hooks', {skip:process.platform!=='darwin'},async()=>{
+ const dir=await realpath(await mkdtemp(join(tmpdir(),'jarvis-native-npm-'))),cwd=join(dir,'source'),stateDir=join(dir,'state'),group='personal:npm:example/fixture';await mkdir(cwd);await mkdir(stateDir);let installs=0;
+ const pkg={name:'synthetic-native',version:'1.0.0',private:true,scripts:{start:'node server.mjs',build:'node -e "process.stdout.write(\'built\')"',test:'node --test fixture.test.mjs',preinstall:'node -e "process.exit(91)"'}};
+ await writeFile(join(cwd,'package.json'),JSON.stringify(pkg));await writeFile(join(cwd,'package-lock.json'),JSON.stringify({name:pkg.name,version:pkg.version,lockfileVersion:3,packages:{'':{name:pkg.name,version:pkg.version,hasInstallScript:true}}}));
+ await writeFile(join(cwd,'server.mjs'),`import http from'node:http';http.createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end('<h1>Npm fixture</h1>')}).listen(Number(process.env.PORT),'127.0.0.1');`);
+ await writeFile(join(cwd,'fixture.test.mjs'),`import{test}from'node:test';import assert from'node:assert/strict';test('native cached fixture',()=>assert.equal(3*3,9))`);
+ const options={cwd,files:['server.mjs','package.json','package-lock.json','fixture.test.mjs'],sha:'d'.repeat(40),stateDir,group,run:async(bin,args,opts)=>{if(bin==='npm'&&args[0]==='ci')installs++;return runCommand(bin,args,opts);}};
+ try{
+  const first=await startDevelopmentPreview(options);assert.equal(first.state,'ready',JSON.stringify(first)+' '+developmentStatus(group).detail);assert.equal(installs,1);
+  const changed=await startDevelopmentPreview({...options,sha:'e'.repeat(40)});assert.equal(changed.state,'ready',JSON.stringify(changed)+' '+developmentStatus(group).detail);assert.equal(installs,1);
+  const checks=await runDevelopmentTests({...options,identity:group+':checks'});assert.equal(checks[0].status,'passed',JSON.stringify(checks));assert.equal(installs,1);
+ }finally{developmentStatus(group,'stop');await new Promise(resolve=>setTimeout(resolve,100));await rm(dir,{recursive:true,force:true});}
 });

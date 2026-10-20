@@ -93,7 +93,7 @@ export async function startDevelopmentPreview(options, { platform = process.plat
       .replace("if(plan.entry) await cp('/app',cwd,{recursive:true});", '')
       .replaceAll("'/persistent'", quote(data)).replaceAll("'/tmp/app-data'", quote(join(directory, 'tmp', 'app-data')))
       .replaceAll("HOME:'/tmp',TMPDIR:'/tmp'", `HOME:${quote(env.HOME)},TMPDIR:${quote(env.TMPDIR)}`)
-      .replaceAll('3000', String(ports[0])).replaceAll('3001', String(ports[1])).replaceAll("'0.0.0.0'", "'127.0.0.1'").replace("stdio:'ignore'", "stdio:'inherit'");
+      .replaceAll('3000', String(ports[0])).replaceAll('3001', String(ports[1])).replaceAll("'0.0.0.0'", "'127.0.0.1'").replace("stdio:'ignore'", "stdio:'inherit'").replace("NEXT_TELEMETRY_DISABLED:'1'", `NEXT_TELEMETRY_DISABLED:'1',npm_config_userconfig:${quote(env.npm_config_userconfig)},npm_config_globalconfig:${quote(env.npm_config_globalconfig)},npm_config_cache:${quote(env.npm_config_cache)}`);
     const token = randomUUID(), cliToken = randomUUID();
     await writeFile(join(directory, 'server.mjs'), source, { mode: 0o600 });
     await writeFile(join(directory, 'plan.json'), JSON.stringify(plan), { mode: 0o600 });
