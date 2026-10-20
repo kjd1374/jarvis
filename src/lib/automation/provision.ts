@@ -60,7 +60,7 @@ export function newProjectSetup(stamp: string, target: ProjectSetup["target"] = 
 export function queueSetupRequest(data: WorkspaceData, space: Space, projectId: string, request: string, mode: "ask" | "change", publish: "pr" | "merge", stamp: string, requestId = id()) {
   const p = data.projects.find(p => p.space === space && p.id === projectId);
   if (!p || !request.trim() || request.length > 8000) throw new Error("프로젝트와 요청을 확인해주세요.");
-  const setup = p.setup ?? newProjectSetup(stamp, p.stage === "development" ? "mac" : "auto");
+  const setup = p.setup ?? newProjectSetup(stamp, "mac");
   if (setup.requests.some(r => r.id === requestId)) return data;
   if (setup.requests.length >= 100 || setup.status === "cancelled") throw new Error("자동 준비 상태를 확인해주세요.");
   return { ...data, projects: data.projects.map(row => row.id === p.id ? { ...row, setup: { ...setup, requests: [...setup.requests, { id: requestId, request: request.trim(), mode, publish, createdAt: stamp }] } } : row) };
@@ -73,10 +73,10 @@ export function changeSetup(data: WorkspaceData, space: Space, projectId: string
   if (!p || !s || action === "retry" && !["failed", "interrupted", "cancelled"].includes(s.status) || action === "cancel" && !["queued", "running", "failed", "interrupted"].includes(s.status)) throw new Error("자동 준비 상태를 확인해주세요.");
   return replace(data, p, { ...s, status: action === "retry" ? "queued" : "cancelled", updatedAt: stamp, leaseOwner: undefined, leaseUntil: undefined, leaseToken: undefined, error: undefined });
 }
-export function claimSetup(data: WorkspaceData, scope: { space: Space; projectIds: (string | null)[]; deviceId: string }, stamp: string) {
+export function claimSetup(data: WorkspaceData, scope: { space: Space; projectIds: (string | null)[]; deviceId: string; development?: boolean }, stamp: string) {
   for (const p of data.projects.filter(p => p.space === scope.space && scope.projectIds.includes(p.id))) {
     let s = p.setup;
-    if (!s) continue;
+    if (!s || s.target === "mac" && !scope.development) continue;
     if (s.status === "running" && Date.parse(s.leaseUntil ?? "") <= Date.parse(stamp)) {
       // A journal + deterministic resource identity makes recovery idempotent on the same device.
       s = { ...s, status: "queued", leaseToken: undefined, leaseUntil: undefined };

@@ -22,7 +22,7 @@ export async function runAutopilotLifecycle({base,browser,runner,network,approve
   await form.getByLabel('프로젝트 설명').fill('카운터 값을 저장하는 웹 앱');await expect(form.getByRole('checkbox')).toBeChecked();await form.getByRole('button',{name:'프로젝트 저장',exact:true}).click();await expect(form).not.toBeVisible();
   await expect.poll(async()=> (await snapshot()).data.projects.find(p=>p.name==='합성 자동 개발')?.id).toBeTruthy();
   project=(await snapshot()).data.projects.find(p=>p.name==='합성 자동 개발');await page.goto(base+'/projects/'+project.id);
-  const scope={space:'personal',projectIds:['old-removed-project'],provider:'codex',runnerVersion:VERSION,workVersion:1,remoteWorkVersion:1,previewVersion:1,provisionVersion:1};
+  const scope={space:'personal',projectIds:['old-removed-project'],provider:'codex',runnerVersion:VERSION,workVersion:1,remoteWorkVersion:1,previewVersion:1,provisionVersion:1,developmentVersion:1};
   const setup=(await runner.request('/api/automation/claim',scope)).job;assert.equal(setup.kind,'provision');assert.equal(setup.projectId,project.id);
   const repository='example/'+setupName(setup);
   const setupRun=async(bin,args,options)=>{

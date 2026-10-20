@@ -210,15 +210,16 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
 
   const documentPending = data.documents.some(d => d.sheet?.questions.some(q => q.status === "queued" || q.status === "running"));
   const planningPending = data.projects.some(p => p.planning?.turns.some(t => t.status === "queued" || t.status === "running"));
+  const setupPending = data.projects.some(project => project.setup && ["queued", "running"].includes(project.setup.status));
   const workPending = data.projects.some(project => project.automation?.turns.some(turn => ["queued", "running"].includes(turn.status)));
-  const monitoringActive = planningPending || documentPending || data.documents.some(d => d.sheet) || data.services.some(s => s.monitoring?.enabled) || data.projects.some(p => p.automation?.turns.some(t => t.status === "queued" || t.status === "running"));
+  const monitoringActive = setupPending || planningPending || documentPending || data.documents.some(d => d.sheet) || data.services.some(s => s.monitoring?.enabled) || data.projects.some(p => p.automation?.turns.some(t => t.status === "queued" || t.status === "running"));
   useEffect(() => {
     if (!account?.authenticated || !monitoringActive) return;
     const timer = setInterval(() => {
       if (document.visibilityState === "visible" && !conflictRef.current) setLoadAttempt(n => n + 1);
-    }, documentPending || planningPending || workPending ? 5_000 : 30_000);
+    }, documentPending || planningPending || workPending || setupPending ? 5_000 : 30_000);
     return () => clearInterval(timer);
-  }, [account?.authenticated, monitoringActive, documentPending, planningPending, workPending]);
+  }, [account?.authenticated, monitoringActive, documentPending, planningPending, workPending, setupPending]);
 
   function retryLoad() {
     if (!conflictRef.current) setError(null);

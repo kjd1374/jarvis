@@ -535,3 +535,19 @@ test("개발 화면은 기존 서버를 새 요청 없이 열고 제한된 ifram
   expect((await state(page))!.projects[0].automation!.turns).toHaveLength(1);
   await screen.getByRole("button", { name: "서버 로그", exact: true }).click(); expect((await state(page))!.projects[0].automation!.turns.at(-1)).toMatchObject({ runtimeAction: "logs", mode: "preview", status: "queued" });
 });
+
+test("첫 개발 프로젝트는 다른 서비스가 없어도 준비 결과를 자동으로 받는다", async ({ page }) => {
+  const { emptyWorkspace } = await import("../../src/lib/workspace/types"), { newProjectSetup, claimSetup, reportSetup } = await import("../../src/lib/automation/provision");
+  const stamp = new Date().toISOString(), data = emptyWorkspace();
+  data.projects.push({ id: "first-native", name: "첫 로컬 개발", description: "합성 프로젝트", space: "company", stage: "development", createdAt: stamp, setup: newProjectSetup(stamp, "mac") });
+  const remote = { company: { data, revision: 1 }, personal: { data: emptyWorkspace(), revision: 1 } };
+  await page.clock.install();
+  await page.route("**/api/account", route => route.fulfill({ json: { enabled: true, configured: true, authenticated: true, accountId: "11111111-1111-4111-8111-111111111111", deviceId: "synthetic-device" } }));
+  await page.route("**/api/workspace?*", route => route.fulfill({ json: remote[new URL(route.request().url()).searchParams.get("space") as "company" | "personal"] }));
+  await page.goto("/projects/first-native"); await ready(page);
+  const setup = page.getByRole("region", { name: "프로젝트 자동 준비" }); await expect(setup).toContainText("2.9.0");
+  const scope = { space: "company" as const, projectIds: ["first-native"], deviceId: "runner", development: true }, claim = claimSetup(data, scope, stamp), job = claim.job!;
+  remote.company = { revision: 2, data: reportSetup(claim.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: { repository: "example/first-native", target: "mac", database: "none", reason: "로컬 개발", checks: [{ name: "저장소", status: "passed", detail: "합성 준비" }] } }, "runner", stamp) };
+  await page.clock.fastForward(6000);
+  await expect(setup).toContainText("개발 환경 준비 완료"); await expect(page.getByRole("button", { name: "화면 준비", exact: true })).toBeEnabled();
+});

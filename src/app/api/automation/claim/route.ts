@@ -39,7 +39,7 @@ export async function POST(request: Request) {
         if (document.job) return { data, result: { job: document.job } };
       }
       if (supportsWork && body.provisionVersion === 1) {
-        const setup = claimSetup(data, { space, projectIds: projects, deviceId }, stamp);
+        const setup = claimSetup(data, { space, projectIds: projects, deviceId, development: body.developmentVersion === 1 }, stamp);
         data = setup.data;
         if (setup.job) return { data, result: { job: { ...setup.job, credentials: credentialsFor(data, ownerId, space) } } };
       }
