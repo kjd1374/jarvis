@@ -142,3 +142,14 @@ test('native startup retries one observed port collision without rerunning infer
  try{const result=await startDevelopmentPreview({cwd,files:['server.mjs'],sha:'b'.repeat(40),stateDir,group,persistent:true,run:runCommand},{launch:(bin,args,opts)=>{starts++;const profile=readFileSync(args[1],'utf8'),source=readFileSync(args[3],'utf8');diagnostic.push({attempt:starts,port:opts.env.PORT,allowed:[...profile.matchAll(/localhost:(\d+)/g)].map(m=>m[1]),appPort:source.match(/PORT:'(\d+)'/)?.[1],proxyPort:source.match(/\.listen\((\d+)/)?.[1]});return starts===1?spawn(bin,[...args.slice(0,3),'-e',"console.error('EADDRINUSE');process.exit(1)"],opts):spawn(bin,args,opts);}});if(result.state!=='ready')console.error('synthetic native bind diagnostic',JSON.stringify({result,diagnostic,detail:developmentStatus(group).detail}));assert.equal(result.state,'ready',JSON.stringify(result)+' '+developmentStatus(group).detail);assert.equal(starts,2);assert.equal(result.dataPersistence,'project');}
  finally{developmentStatus(group,'stop');await new Promise(resolve=>setTimeout(resolve,100));await rm(dir,{recursive:true,force:true});}
 });
+
+test('macOS repeated app startups bind only their assigned TCP ports', {skip:process.platform!=='darwin'},async()=>{
+ const dir=await realpath(await mkdtemp(join(tmpdir(),'jarvis-repeat-start-'))),cwd=join(dir,'source'),stateDir=join(dir,'state'),group='personal:repeated:example/fixture';await mkdir(cwd);await mkdir(stateDir);await writeFile(join(cwd,'index.html'),'<h1>Repeated native fixture</h1>');
+ try{
+  for(let attempt=0;attempt<12;attempt++){
+   const result=await startDevelopmentPreview({cwd,files:['index.html'],sha:attempt.toString(16).padStart(40,'0'),stateDir,group,persistent:true,run:runCommand});
+   assert.equal(result.state,'ready',`attempt ${attempt}: ${JSON.stringify(result)} ${developmentStatus(group).detail}`);
+   assert.match(await(await fetch(result.url)).text(),/Repeated native fixture/);
+  }
+ }finally{developmentStatus(group,'stop');await new Promise(resolve=>setTimeout(resolve,100));await rm(dir,{recursive:true,force:true});}
+});
