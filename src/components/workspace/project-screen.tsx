@@ -53,7 +53,7 @@ export function ProjectScreen({ project }: { project: Project }) {
   const [error, setError] = useState("");
   const [revisionChoice, setRevision] = useState<{ serviceId: string; value: string } | null>(null);
   const revision = revisionChoice && revisionChoice.serviceId === service?.id ? revisionChoice.value : service ? preferredWorkRevision(project, service.id, repositoryFor(service)!) : "main";
-  const [previewAI, setPreviewAI] = useState<"none" | "codex" | "ollama">([...project.automation?.turns ?? []].reverse().find(t => t.mode === "preview")?.previewAI ?? "none");
+  const [previewAI, setPreviewAI] = useState<"none" | "codex" | "ollama">([...project.automation?.turns ?? []].reverse().find(t => t.mode === "preview" && !["logs", "stop"].includes(t.runtimeAction ?? ""))?.previewAI ?? "none");
   const recent = service && latestWorkSource(project, service.id, repositoryFor(service)!);
   const source = revision === "latest" ? recent : undefined;
   const nativeReady = turnsNative(project, service?.id);

@@ -574,21 +574,22 @@ test("첫 개발 프로젝트는 다른 서비스가 없어도 준비 결과를 
 test("개발 작업 공간은 실패를 한 곳에 표시하고 로그 조회를 테스트 통과로 세지 않는다", async ({ page, isMobile }, info) => {
   const { enqueueWork, claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
   const { observeWorkRunner } = await import("../../src/lib/automation/runner-status");
-  const stamp = new Date().toISOString(), scope = { space: "company" as const, projectIds: ["auto-project"], deviceId: "runner", previews: true, development: true };
+  const stamp = new Date().toISOString(), scope = { space: "company" as const, projectIds: ["auto-project"], deviceId: "runner", previews: true, previewLocal: true, development: true };
   const initial = automationWorkspace(stamp); initial.projects[0].stage = "development";
-  const first = claimProjectWork(enqueueWork(initial, "company", "auto-project", "auto-service", "합성 화면 준비", "preview", "pr", stamp), scope, stamp), job = first.job!;
+  const first = claimProjectWork(enqueueWork(initial, "company", "auto-project", "auto-service", "합성 화면 준비", "preview", "pr", stamp, undefined, undefined, "ollama"), scope, stamp), job = first.job!;
   const base = { currentStatus: "", nextAction: "", changes: [], followUps: [], branch: null, baseSha: null, headSha: null, prUrl: null, deployment: { state: "not_configured" as const, url: null, sha: null } };
   let data = reportProjectWork(first.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: {
     ...base, baseSha: "a".repeat(40), reply: "합성 격리 실패", summary: "화면 준비 필요", checks: [], outcome: "blocked", preview: { state: "failed", kind: "remote", execution: "native", url: null, sha: "a".repeat(40), checkedAt: stamp, expiresAt: null, message: "macOS 격리 실행을 시작하지 못했습니다.", diagnostic: { stage: "build", code: "development_sandbox_unavailable", exitCode: 134 } },
   } }, "runner", stamp);
   const logs = claimProjectWork(enqueueWork(data, "company", "auto-project", "auto-service", "서버 로그 확인", "preview", "pr", stamp, undefined, undefined, undefined, false, { runtimeAction: "logs" }), scope, stamp), logJob = logs.job!;
   data = reportProjectWork(logs.data, "company", { projectId: logJob.projectId, jobId: logJob.id, leaseToken: logJob.leaseToken, phase: "result", result: { ...base, reply: "Synthetic runtime log: library denied", summary: "서버 로그 확인", checks: [{ name: "서버 로그", status: "passed", detail: "Synthetic runtime log: library denied" }], outcome: "answered" } }, "runner", stamp);
-  data = observeWorkRunner(data, scope, { runnerVersion: "2.9.2", remoteWorkVersion: 1, previewVersion: 1, developmentVersion: 1 }, stamp);
+  data = observeWorkRunner(data, scope, { runnerVersion: "2.9.2", remoteWorkVersion: 1, previewVersion: 1, previewLocalVersion: 1, developmentVersion: 1 }, stamp);
   if (!isMobile) await page.setViewportSize({ width: 1920, height: 1080 });
   await seed(page, data); await page.goto("/projects/auto-project"); await ready(page);
   const screen = page.getByRole("region", { name: "수정된 화면 확인", exact: true }), agent = page.getByRole("region", { name: "프로젝트 AI 작업실", exact: true });
   const nav = page.getByRole("navigation", { name: "개발 작업 보기" }); if (isMobile) await nav.getByRole("button", { name: "화면", exact: true }).click();
   await expect(screen.getByLabel("미리보기 AI", { exact: true })).not.toBeVisible();
+  await expect(screen.getByLabel("미리보기 AI", { exact: true })).toHaveValue("ollama");
   await expect(screen.getByText("맥미니의 서버 실행 환경 접근이 차단됐습니다. 서버 로그에서 상세 원인을 확인할 수 있습니다.", { exact: true })).toBeVisible();
   await expect(screen.getByText("Synthetic runtime log: library denied", { exact: true })).toBeVisible();
   await expect(screen.getByRole("button", { name: "화면 준비", exact: true })).toBeEnabled();
