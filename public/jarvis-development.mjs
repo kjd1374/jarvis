@@ -1,5 +1,6 @@
 // Managed macOS processes. App code never inherits the runner's home, credentials or network.
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, rm, cp, realpath, open } from 'node:fs/promises';
 import { dirname, join, isAbsolute } from 'node:path';
@@ -22,11 +23,21 @@ export function developmentEnvironment(root, port) {
     OPENSSL_CONF: '/dev/null',
     npm_config_userconfig: join(root, 'npmrc'), npm_config_globalconfig: join(root, 'global-npmrc'), npm_config_cache: join(root, 'npm-cache') };
 }
-export async function developmentRuntimeLibraries(objects = process.report.getReport().sharedObjects) {
+export async function developmentRuntimeLibraries(objects) {
   // Only binaries already loaded by the trusted runner, never project-provided paths.
   // Homebrew may keep Node's dylibs outside the Node installation directory.
+  if (objects === undefined) {
+    objects = process.report.getReport().sharedObjects;
+    if (process.platform === 'darwin') {
+      // Also inspect the trusted executable's direct load commands. dyld image
+      // reports vary across Node/macOS versions; a required dylib must not be lost.
+      const { stdout } = await promisify(execFile)('/usr/bin/otool', ['-L', await realpath(process.execPath)], { timeout: 10_000, maxBuffer: 256_000 });
+      const linked = stdout.split('\n').slice(1).map(line => line.trim().split(' (')[0]).filter(isAbsolute);
+      objects = [...objects, ...linked];
+    }
+  }
   const libraries = new Set();
-  for (const value of Array.isArray(objects) ? objects.slice(0,256) : []) {
+  for (const value of Array.isArray(objects) ? objects.slice(0,4096) : []) {
     if (typeof value !== 'string' || !isAbsolute(value) || value.includes('\0')) continue;
     let file;
     try {
@@ -40,7 +51,7 @@ export async function developmentRuntimeLibraries(objects = process.report.getRe
 export function developmentSandbox(root, data, ports, executable = process.execPath, libraries = []) {
   // No blanket home, /private/var, /Library or outbound-network permission.
   const runtime = dirname(dirname(executable));
-  return `(version 1)\n(deny default)\n(allow process-fork process-exec sysctl-read mach-lookup)\n(allow file-read-metadata)\n(allow file-map-executable)\n(allow signal (target self))\n(allow file-read* (literal "/") (subpath "/System") (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/Library/Apple") (subpath ${quote(runtime)}) (subpath ${quote(root)}) (subpath ${quote(data)}) ${libraries.filter(p=>typeof p==='string'&&isAbsolute(p)&&!p.includes('\0')).map(p=>`(literal ${quote(p)})`).join(' ')} (literal "/dev/null") (literal "/dev/random") (literal "/dev/urandom") (literal "/private/etc/localtime") (literal "/private/etc/hosts"))\n(allow file-write* (subpath ${quote(root)}) (subpath ${quote(data)}) (literal "/dev/null"))\n${ports.map(p => `(allow network-bind network-inbound (local ip "localhost:${p}"))\n(allow network-outbound (remote ip "localhost:${p}"))`).join('\n')}\n`;
+  return `(version 1)\n(deny default)\n(allow process-fork process-exec sysctl-read mach-lookup)\n(allow file-read-metadata)\n(allow file-map-executable)\n(allow signal (target self))\n(allow file-read* (literal "/") (subpath "/System") (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/Library/Apple") (subpath ${quote(runtime)}) (subpath ${quote(root)}) (subpath ${quote(data)}) ${libraries.filter(p=>typeof p==='string'&&isAbsolute(p)&&!p.includes('\0')).map(p=>`(literal ${quote(p)})`).join(' ')} (literal "/dev/null") (literal "/dev/random") (literal "/dev/urandom") (literal "/private/etc/localtime") (literal "/private/etc/hosts"))\n(allow file-write* (subpath ${quote(root)}) (subpath ${quote(data)}) (literal "/dev/null"))\n${ports.map(p => `(allow network-bind network-inbound (local ip "127.0.0.1:${p}"))\n(allow network-outbound (remote ip "127.0.0.1:${p}"))`).join('\n')}\n`;
 }
 async function freePort() {
   const socket = net.createServer();
@@ -100,7 +111,9 @@ export async function startDevelopmentPreview(options, { platform = process.plat
     const env = developmentEnvironment(directory, ports[0]);
     const executable = await realpath(process.execPath);
     const profile = join(directory, 'sandbox.sb');
-    await writeFile(profile, developmentSandbox(directory, persistent ? data : join(directory, 'tmp', 'app-data'), ports, executable, await developmentRuntimeLibraries()), { mode: 0o600 });
+    const libraries = await developmentRuntimeLibraries();
+    appLog = `Runtime preflight ${new Date().toISOString()} · Node ${process.version} · ${libraries.length} runtime libraries\n`;
+    await writeFile(profile, developmentSandbox(directory, persistent ? data : join(directory, 'tmp', 'app-data'), ports, executable, libraries), { mode: 0o600 });
     // Fail closed if the installed macOS sandbox cannot run. Never silently execute on the host.
     const supported = await command('/usr/bin/sandbox-exec', ['-f', profile, executable, '-e', 'process.stdout.write("sandbox-ready")'], { cwd: app, env, signal, timeout: 10_000 });
     if (supported.code !== 0 || supported.out !== 'sandbox-ready') {
@@ -118,7 +131,7 @@ export async function startDevelopmentPreview(options, { platform = process.plat
       .replace("if(plan.entry) await cp('/app',cwd,{recursive:true});", '')
       .replaceAll("'/persistent'", quote(data)).replaceAll("'/tmp/app-data'", quote(join(directory, 'tmp', 'app-data')))
       .replaceAll("HOME:'/tmp',TMPDIR:'/tmp'", `HOME:${quote(env.HOME)},TMPDIR:${quote(env.TMPDIR)}`)
-      .replaceAll('3000', String(ports[0])).replaceAll('3001', String(ports[1])).replaceAll("'0.0.0.0'", "'127.0.0.1'").replace("stdio:'ignore'", "stdio:'inherit'").replace("NEXT_TELEMETRY_DISABLED:'1'", `NEXT_TELEMETRY_DISABLED:'1',npm_config_userconfig:${quote(env.npm_config_userconfig)},npm_config_globalconfig:${quote(env.npm_config_globalconfig)},npm_config_cache:${quote(env.npm_config_cache)}`);
+      .replaceAll('3000', String(ports[0])).replaceAll('3001', String(ports[1])).replaceAll("'0.0.0.0'", "'127.0.0.1'").replace("stdio:'ignore'", "stdio:'inherit'").replace("NEXT_TELEMETRY_DISABLED:'1'", `NEXT_TELEMETRY_DISABLED:'1',OPENSSL_CONF:'/dev/null',npm_config_userconfig:${quote(env.npm_config_userconfig)},npm_config_globalconfig:${quote(env.npm_config_globalconfig)},npm_config_cache:${quote(env.npm_config_cache)}`);
     const token = randomUUID(), cliToken = randomUUID();
     await writeFile(join(directory, 'server.mjs'), source, { mode: 0o600 });
     await writeFile(join(directory, 'plan.json'), JSON.stringify(plan), { mode: 0o600 });

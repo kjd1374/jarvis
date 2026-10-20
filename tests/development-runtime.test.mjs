@@ -14,7 +14,7 @@ test('native app environment drops all inherited credentials and sandbox does no
   assert.equal(env.HOME, '/private/release/home');
   assert.equal(env.OPENSSL_CONF, '/dev/null');
   const policy = developmentSandbox('/private/release', '/private/project-data', [4567,4568,4569], '/opt/runtime/bin/node');
-  assert(policy.includes('(deny default)')); assert(policy.includes('localhost:4567'));
+  assert(policy.includes('(deny default)')); assert(policy.includes('127.0.0.1:4567'));
   assert(!policy.includes('(allow network*)') && !policy.includes('(subpath "/Users")') && !policy.includes('11434'));
 });
 test('unsupported hosts do not run untrusted native code', async () => {
@@ -139,6 +139,6 @@ test('native npm releases and separate checks reuse the same lock cache without 
 test('native startup retries one observed port collision without rerunning inference or discarding data', {skip:process.platform!=='darwin'},async()=>{
  const dir=await realpath(await mkdtemp(join(tmpdir(),'jarvis-native-bind-'))),cwd=join(dir,'source'),stateDir=join(dir,'state'),group='personal:bind:example/fixture';await mkdir(cwd);await mkdir(stateDir);let starts=0;const diagnostic=[];
  await writeFile(join(cwd,'server.mjs'),`import http from'node:http';http.createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end('<h1>Bind fixture</h1>')}).listen(Number(process.env.PORT),'127.0.0.1');`);
- try{const result=await startDevelopmentPreview({cwd,files:['server.mjs'],sha:'b'.repeat(40),stateDir,group,persistent:true,run:runCommand},{launch:(bin,args,opts)=>{starts++;const profile=readFileSync(args[1],'utf8'),source=readFileSync(args[3],'utf8');diagnostic.push({attempt:starts,port:opts.env.PORT,allowed:[...profile.matchAll(/localhost:(\d+)/g)].map(m=>m[1]),appPort:source.match(/PORT:'(\d+)'/)?.[1],proxyPort:source.match(/\.listen\((\d+)/)?.[1]});return starts===1?spawn(bin,[...args.slice(0,3),'-e',"console.error('EADDRINUSE');process.exit(1)"],opts):spawn(bin,args,opts);}});if(result.state!=='ready')console.error('synthetic native bind diagnostic',JSON.stringify({result,diagnostic,detail:developmentStatus(group).detail}));assert.equal(result.state,'ready',JSON.stringify(result)+' '+developmentStatus(group).detail);assert.equal(starts,2);assert.equal(result.dataPersistence,'project');}
+ try{const result=await startDevelopmentPreview({cwd,files:['server.mjs'],sha:'b'.repeat(40),stateDir,group,persistent:true,run:runCommand},{launch:(bin,args,opts)=>{starts++;const profile=readFileSync(args[1],'utf8'),source=readFileSync(args[3],'utf8');diagnostic.push({attempt:starts,port:opts.env.PORT,allowed:[...profile.matchAll(/127\.0\.0\.1:(\d+)/g)].map(m=>m[1]),appPort:source.match(/PORT:'(\d+)'/)?.[1],proxyPort:source.match(/\.listen\((\d+)/)?.[1]});return starts===1?spawn(bin,[...args.slice(0,3),'-e',"console.error('EADDRINUSE');process.exit(1)"],opts):spawn(bin,args,opts);}});if(result.state!=='ready')console.error('synthetic native bind diagnostic',JSON.stringify({result,diagnostic,detail:developmentStatus(group).detail}));assert.equal(result.state,'ready',JSON.stringify(result)+' '+developmentStatus(group).detail);assert.equal(starts,2);assert.equal(result.dataPersistence,'project');}
  finally{developmentStatus(group,'stop');await new Promise(resolve=>setTimeout(resolve,100));await rm(dir,{recursive:true,force:true});}
 });
