@@ -54,6 +54,7 @@ test("구독 CLI 미리보기 선택과 요청을 보존하고 구버전에는 �
   await seed(page, observeWorkRunner(automationWorkspace(stamp), { space: "company", projectIds: ["auto-project"] }, { runnerVersion: "2.4.3", remoteWorkVersion: 1, previewVersion: 1 }, stamp));
   await page.goto("/projects/auto-project"); await ready(page);
   const screen = page.getByRole("region", { name: "수정된 화면 확인", exact: true });
+  await openDetails(page, "화면 설정");
   await screen.getByLabel("미리보기 AI", { exact: true }).selectOption("codex");
   await expect(screen).toContainText("구독 사용량");
   await expect(screen).not.toContainText("AI 사용량은 소모하지 않습니다");
@@ -199,6 +200,7 @@ test("프로젝트 상단의 자동 웹 주소·대화 요청·후속 업무는 
   const agent = page.getByRole("region", { name: "프로젝트 AI 작업실", exact: true });
   await expect(agent).toContainText("CLI 연결됨");
   await agent.getByLabel("AI에게 요청", { exact: true }).fill("합성 모바일 버튼 개선");
+  await openDetails(page, "요청 설정");
   await agent.getByLabel("반영 범위", { exact: true }).selectOption("pr");
   await agent.getByRole("button", { name: "요청 보내기", exact: true }).click();
   await expect(agent).toContainText("실행 대기");
@@ -208,6 +210,7 @@ test("프로젝트 상단의 자동 웹 주소·대화 요청·후속 업무는 
   expect(saved.projects[0].automation!.turns[0]).toMatchObject({ mode: "change", publish: "pr", repository: "example/synthetic" });
   await agent.getByRole("button", { name: "요청 취소", exact: true }).click();
   await expect(agent).toContainText("요청 취소됨");
+  await openDetails(page, "요청 설정");
   await agent.getByLabel("요청 방식", { exact: true }).selectOption("ask");
   await expect(agent.getByLabel("반영 범위", { exact: true })).toHaveCount(0);
   await agent.getByLabel("AI에게 요청", { exact: true }).fill("합성 프로젝트 구조를 설명해줘");
@@ -268,7 +271,8 @@ test("장문·많은 기록은 기본 화면을 늘리지 않고 전문·이력�
   await expect(agent.getByText("이전 합성 요청 33", { exact: true })).not.toBeVisible();
   await expect(latest.getByText(reply, { exact: true })).not.toBeVisible();
   await expect(agent.getByRole("status").first()).toHaveText("Jarvis CLI 연결됨");
-  await expect(agent.getByLabel("반영 범위", { exact: true })).toBeVisible();
+  await expect(agent.getByLabel("반영 범위", { exact: true })).not.toBeVisible();
+  await expect(agent.getByRole("button", { name: "요청 보내기", exact: true })).toBeVisible();
   expect((await agent.getByLabel("AI에게 요청", { exact: true }).boundingBox())!.y).toBeLessThan((await latest.boundingBox())!.y);
   await expect(page.locator("summary").filter({ hasText: "수정·검증" })).toContainText("실패 있음");
   expect(await page.evaluate(() => document.documentElement.scrollHeight) - heightBefore).toBeLessThan(100);
@@ -440,8 +444,10 @@ test("기본 브랜치의 최신 준비 화면은 예전 PR에 가려지지 않�
     await expect(screen).not.toContainText("최근 수정본 bbbbbbbb");
     await page.reload(); await ready(page);
   }
+  await openDetails(page, "화면 설정");
   await screen.getByLabel("미리보기 AI").selectOption("ollama");
   await expect(screen.getByRole("link", { name: "이 PC에서 화면 열기" })).toHaveCount(0);
+  await openDetails(page, "화면 설정");
   await screen.getByLabel("미리보기 AI").selectOption("none");
   await screen.getByRole("button", { name: "화면 준비", exact: true }).click();
   expect((await state(page))!.projects[0].automation!.turns.at(-1)?.sourceTurnId).toBeUndefined();
@@ -452,6 +458,7 @@ test("기본 브랜치의 최신 준비 화면은 예전 PR에 가려지지 않�
   expect(saved.projects[0].automation!.turns.at(-1)?.sourceTurnId).toBeUndefined();
   expect(saved.projects[0].automation!.turns.at(-1)?.followLatest).toBeUndefined();
   expect(saved.projects[0].automation!.turns[0].result).toMatchObject(prResult);
+  await openDetails(page, "화면 설정");
   await screen.getByLabel("확인할 코드").selectOption("latest");
   await expect(screen).toContainText("최근 수정본 bbbbbbbb");
 });
@@ -483,6 +490,7 @@ test("로컬 LLM 선택은 구독 CLI와 구분해 저장하고 구버전 실행
   const data=observeWorkRunner(automationWorkspace(stamp),{space:"company",projectIds:["auto-project"]},{runnerVersion:"2.6.0",previewVersion:1,remoteWorkVersion:1,previewCliVersion:1},stamp);
   await seed(page,data);await page.goto('/projects/auto-project');await ready(page);
   const screen=page.getByRole('region',{name:'수정된 화면 확인',exact:true});
+  await openDetails(page, '화면 설정');
   await screen.getByLabel('미리보기 AI').selectOption('ollama');
   await expect(screen).toContainText('맥미니에 설치된 TranslateGemma');
   await screen.getByRole('button',{name:'화면 준비',exact:true}).click();
@@ -534,7 +542,7 @@ test("개발 화면은 기존 서버를 새 요청 없이 열고 제한된 ifram
   await page.goto("/projects/auto-project"); await ready(page);
   const screen = page.getByRole("region", { name: "수정된 화면 확인", exact: true });
   if (isMobile) await page.getByRole("navigation", { name: "개발 작업 보기" }).getByRole("button", { name: "화면", exact: true }).click();
-  await expect(screen).toContainText("실행 중인 서버 재사용"); await screen.getByRole("button", { name: "작업실에서 화면 보기", exact: true }).click();
+  await expect(screen).toContainText("실행 중인 서버 재사용");
   await expect(screen).toContainText("브라우저가 작업실 안의 연결을 제한했습니다").catch(async error => {
     const frames = await Promise.all(page.frames().map(async frame => ({ url: frame.url(), text: await frame.locator("body").innerText().catch(() => "unavailable") })));
     await test.info().attach("frame-debug", { body: JSON.stringify(frames), contentType: "application/json" }); throw error;
@@ -561,4 +569,43 @@ test("첫 개발 프로젝트는 다른 서비스가 없어도 준비 결과를 
   const nav = page.getByRole("navigation", { name: "개발 작업 보기" }); if (await nav.isVisible()) await nav.getByRole("button", { name: "화면", exact: true }).click();
   await expect(page.getByRole("button", { name: "화면 준비 대기·진행 중", exact: true })).toBeDisabled();
   expect(remote.company.data.projects[0].automation!.turns.at(-1)).toMatchObject({ mode: "preview", status: "queued" });
+});
+
+test("개발 작업 공간은 실패를 한 곳에 표시하고 로그 조회를 테스트 통과로 세지 않는다", async ({ page, isMobile }, info) => {
+  const { enqueueWork, claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
+  const { observeWorkRunner } = await import("../../src/lib/automation/runner-status");
+  const stamp = new Date().toISOString(), scope = { space: "company" as const, projectIds: ["auto-project"], deviceId: "runner", previews: true, development: true };
+  const initial = automationWorkspace(stamp); initial.projects[0].stage = "development";
+  const first = claimProjectWork(enqueueWork(initial, "company", "auto-project", "auto-service", "합성 화면 준비", "preview", "pr", stamp), scope, stamp), job = first.job!;
+  const base = { currentStatus: "", nextAction: "", changes: [], followUps: [], branch: null, baseSha: null, headSha: null, prUrl: null, deployment: { state: "not_configured" as const, url: null, sha: null } };
+  let data = reportProjectWork(first.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: {
+    ...base, baseSha: "a".repeat(40), reply: "합성 격리 실패", summary: "화면 준비 필요", checks: [], outcome: "blocked", preview: { state: "failed", kind: "remote", execution: "native", url: null, sha: "a".repeat(40), checkedAt: stamp, expiresAt: null, message: "macOS 격리 실행을 시작하지 못했습니다.", diagnostic: { stage: "build", code: "development_sandbox_unavailable", exitCode: 134 } },
+  } }, "runner", stamp);
+  const logs = claimProjectWork(enqueueWork(data, "company", "auto-project", "auto-service", "서버 로그 확인", "preview", "pr", stamp, undefined, undefined, undefined, false, { runtimeAction: "logs" }), scope, stamp), logJob = logs.job!;
+  data = reportProjectWork(logs.data, "company", { projectId: logJob.projectId, jobId: logJob.id, leaseToken: logJob.leaseToken, phase: "result", result: { ...base, reply: "Synthetic runtime log: library denied", summary: "서버 로그 확인", checks: [{ name: "서버 로그", status: "passed", detail: "Synthetic runtime log: library denied" }], outcome: "answered" } }, "runner", stamp);
+  data = observeWorkRunner(data, scope, { runnerVersion: "2.9.2", remoteWorkVersion: 1, previewVersion: 1, developmentVersion: 1 }, stamp);
+  if (!isMobile) await page.setViewportSize({ width: 1920, height: 1080 });
+  await seed(page, data); await page.goto("/projects/auto-project"); await ready(page);
+  const screen = page.getByRole("region", { name: "수정된 화면 확인", exact: true }), agent = page.getByRole("region", { name: "프로젝트 AI 작업실", exact: true });
+  const nav = page.getByRole("navigation", { name: "개발 작업 보기" }); if (isMobile) await nav.getByRole("button", { name: "화면", exact: true }).click();
+  await expect(screen.getByLabel("미리보기 AI", { exact: true })).not.toBeVisible();
+  await expect(screen.getByText("맥미니의 서버 실행 환경 접근이 차단됐습니다. 서버 로그에서 상세 원인을 확인할 수 있습니다.", { exact: true })).toBeVisible();
+  await expect(screen.getByText("Synthetic runtime log: library denied", { exact: true })).toBeVisible();
+  await expect(screen.getByRole("button", { name: "화면 준비", exact: true })).toBeEnabled();
+  if (!isMobile) {
+    const left = (await screen.boundingBox())!, right = (await agent.boundingBox())!; expect(left.width).toBeGreaterThan(right.width * 1.5);
+    await expect(agent.getByText("Synthetic runtime log: library denied", { exact: true }).first()).not.toBeVisible();
+  }
+  await page.screenshot({ path: info.outputPath("development-repaired.png"), fullPage: true });
+  await openDetails(page, "화면 설정"); await expect(screen.getByLabel("미리보기 AI", { exact: true })).toBeVisible();
+  if (isMobile) await nav.getByRole("button", { name: "개발 대화", exact: true }).click();
+  await agent.getByLabel("AI에게 요청", { exact: true }).fill("아직 보내지 않은 수정 요청");
+  await openDetails(page, "요청 설정"); await agent.getByLabel("반영 범위", { exact: true }).selectOption("pr");
+  if (isMobile) { await nav.getByRole("button", { name: "화면", exact: true }).click(); await nav.getByRole("button", { name: "개발 대화", exact: true }).click(); }
+  await expect(agent.getByLabel("AI에게 요청", { exact: true })).toHaveValue("아직 보내지 않은 수정 요청");
+  await expect(agent.getByLabel("반영 범위", { exact: true })).toHaveValue("pr");
+  if (isMobile) await nav.getByRole("button", { name: "검사 결과", exact: true }).click();
+  await expect(page.getByRole("region", { name: "개발 검사 결과" })).toContainText("검사 기록 · 0건");
+  expect((await state(page))!.projects[0].automation!.turns).toHaveLength(2);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

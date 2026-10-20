@@ -634,9 +634,10 @@ test("상단 바로가기는 현재 프로젝트만 열고 웹 등록·설정 �
   await expect(web).toHaveAttribute("href", "http://127.0.0.1:4317/synthetic-live-screen");
   const webPopup = page.waitForEvent("popup"); await web.click(); const live = await webPopup;
   await expect(live.getByRole("heading", { name: "합성 실제 웹 화면" })).toBeVisible(); await live.close();
-  await links.getByRole("link", { name: "AI에 수정 요청" }).click();
+  await page.getByRole("button", { name: "AI에게 작업 요청", exact: true }).click();
   const agent = page.getByRole("region", { name: "프로젝트 AI 작업실", exact: true });
   await agent.getByLabel("AI에게 요청", { exact: true }).fill("합성 화면 버튼 개선");
+  await openDetails(page, "요청 설정");
   await agent.getByLabel("반영 범위", { exact: true }).selectOption("pr");
   await agent.getByRole("button", { name: "요청 보내기", exact: true }).click();
   await expect(agent).toContainText("실행 대기");

@@ -1,6 +1,7 @@
 "use client";
 import { ProjectReleasePanel } from "./project-release";
 import { ProjectDevelopment } from "./project-development";
+import workbench from "./project-workbench.module.css";
 import { ProjectPlanning, ProjectService, ProjectStageControl } from "./project-planning";
 import { projectStage, stageLabels } from "@/lib/projects/lifecycle";
 
@@ -151,7 +152,7 @@ function ProjectView({ project }: { project: Project }) {
       <Link className={styles.projectBack} href="/projects">
         <Icon name="arrow" size={15} /> 프로젝트 목록
       </Link>
-      <header className={styles.projectDetailHeader}>
+      <header className={`${styles.projectDetailHeader} ${workbench.header}`}>
         <div className={styles.projectIdentity}>
           <span className={styles.projectDetailIcon}>
             <Icon name="folder" size={28} />
@@ -161,7 +162,6 @@ function ProjectView({ project }: { project: Project }) {
               {spaceLabels[project.space]} 프로젝트 · {stageLabels[projectStage(project)]}
             </p>
             <h1>{project.name}</h1>
-            <p>화면을 확인하고 요청하세요. AI가 작업하고 결과를 정리합니다.</p>
           </div>
         </div>
         <div className={styles.projectActions}>
@@ -181,7 +181,7 @@ function ProjectView({ project }: { project: Project }) {
           </button>
         </div>
       </header>
-      <section className={styles.projectQuickLinks} aria-label="프로젝트 바로가기">
+      <section className={`${styles.projectQuickLinks} ${workbench.quickLinks}`} aria-label="프로젝트 바로가기">
         <div className={styles.projectActions}>
           {links.web.map(link => <a key={link.href} className={styles.primaryButton} href={link.href} target="_blank" rel="noopener noreferrer" title={link.href}>
             <Icon name="arrow" size={16} />{links.web.length === 1 ? "웹 화면 열기" : `${link.name} 화면 열기`}
@@ -191,9 +191,7 @@ function ProjectView({ project }: { project: Project }) {
           </a>)}
           <ServiceRegistrationButton preset="custom" projectId={project.id}><Icon name="plus" size={15} />{links.web.length ? "웹 주소 추가" : "웹 주소 직접 보완"}</ServiceRegistrationButton>
           {!links.github.length && <ServiceRegistrationButton preset="github" projectId={project.id}>GitHub 연결</ServiceRegistrationButton>}
-          <a className={styles.textButton} href="#project-ai" onClick={() => window.dispatchEvent(new Event("jarvis-project-chat"))}>AI에 수정 요청 →</a>
         </div>
-        <p>{links.web.length ? "실제 화면을 새 탭에서 확인하고 바로 아래 AI에게 요청하세요. GitHub에서 발견한 웹 주소도 자동으로 표시됩니다." : links.github.length ? "아래 화면 준비를 누르면 현재 코드의 배포 또는 맥미니 미리보기를 확인할 수 있습니다." : "GitHub를 연결하면 실행기가 웹 주소와 프로젝트 내용을 확인합니다."}</p>
         {data.services.some(s => s.space === project.space && s.projectId === project.id && s.monitoring?.webLinks?.length) &&
           <details className={styles.revisionDetails}><summary>자동으로 찾은 웹 주소의 출처</summary>
             {data.services.filter(s => s.space === project.space && s.projectId === project.id && s.monitoring?.repository === repositoryKey(githubConnectionUrl(s) ?? "")).flatMap(s => s.monitoring?.webLinks ?? []).map((link, index) =>

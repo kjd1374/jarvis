@@ -9,8 +9,12 @@ import type { WorkPreview, RuntimeAction } from "@/lib/automation/work-types";
 import { useWorkspace } from "./workspace-provider";
 import { useWorkspaceClock } from "./use-workspace-clock";
 import styles from "./studio.module.css";
+import workbench from "./project-workbench.module.css";
+import { Icon } from "./icon";
 const previewStages = { docker: "실행 서버 연결", build: "실행 환경 준비", application: "앱 응답", configuration: "Jarvis 연결 설정", provisioning: "임시 주소 발급", connection: "외부 연결", health: "외부 주소 응답", module: "실행 모듈", ai: "번역 AI 응답" };
 export function previewMessage(preview: WorkPreview) {
+  if (preview.state === "failed" && preview.diagnostic?.code === "development_sandbox_unavailable")
+    return "맥미니의 서버 실행 환경 접근이 차단됐습니다. 서버 로그에서 상세 원인을 확인할 수 있습니다.";
   if (preview.state === "failed" && preview.diagnostic?.code === "preview_cli_config_unavailable")
     return "이 앱은 구독 CLI 미리보기 연결을 지원하지 않습니다. CLI를 호출하기 전에 준비를 중단했습니다. 화면만 확인하려면 미리보기 AI를 ‘연결 안 함’으로 선택해주세요.";
   return preview.state === "failed" && !preview.diagnostic && /실행기.*(?:업데이트|설치)/.test(preview.message)
@@ -33,6 +37,7 @@ export function PreviewResult({ preview, project, turnId }: { preview: WorkPrevi
     {preview.ai && <p>{preview.ai.provider === "ollama" ? "로컬 LLM 실제 응답 확인 · TranslateGemma" : "구독 CLI 실제 응답 확인"} · 안녕하세요 → {preview.ai.sample} · {dateLabel(preview.ai.verifiedAt)}</p>}
     {preview.diagnostic && <details className={styles.compactDisclosure}><summary>연결 진단</summary>
       <p>{previewStages[preview.diagnostic.stage]} · {preview.diagnostic.code}{preview.diagnostic.statusCode ? ` · HTTP ${preview.diagnostic.statusCode}` : ""}{preview.diagnostic.exitCode !== undefined ? ` · 종료 코드 ${preview.diagnostic.exitCode}` : ""}</p>
+      {preview.diagnostic.code === "development_sandbox_unavailable" && <p>{preview.message}</p>}
     </details>}
     {preview.kind === "mac" && !preview.execution && preview.state === "ready" && preview.url && !expired && <p>이전 실행기가 만든 주소입니다. <Link href="/settings#cli-runner">맥미니 실행기를 업데이트</Link>한 뒤 화면 준비를 다시 누르면 다른 PC에서도 열 수 있습니다.</p>}
     <small>코드 {preview.sha.slice(0, 8)} · 확인 {dateLabel(preview.checkedAt)}{preview.expiresAt ? ` · 종료 ${dateLabel(preview.expiresAt)}` : ""}</small>
@@ -52,7 +57,7 @@ export function ProjectScreen({ project }: { project: Project }) {
   const recent = service && latestWorkSource(project, service.id, repositoryFor(service)!);
   const source = revision === "latest" ? recent : undefined;
   const nativeReady = turnsNative(project, service?.id);
-  const [embedded, setEmbedded] = useState(false);
+  const [embedded, setEmbedded] = useState(true);
   const [embedBlocked, setEmbedBlocked] = useState(false);
   const frame = useRef<HTMLIFrameElement>(null);
   const pending = useRef(false), requestId = useRef(id());
@@ -82,31 +87,30 @@ export function ProjectScreen({ project }: { project: Project }) {
     };
     window.addEventListener("message", message); return () => window.removeEventListener("message", message);
   }, [embedPreview?.url]);
-  return <section className={`${styles.detailSection} ${styles.projectScreen}`} aria-label="수정된 화면 확인">
-    <div className={styles.detailHeading}><h2>수정된 화면 확인</h2>
+  return <section className={`${styles.detailSection} ${styles.projectScreen} ${workbench.preview}`} aria-label="수정된 화면 확인">
+    <div className={`${styles.detailHeading} ${workbench.toolbar}`}><h2><Icon name="grid" size={18} /> 앱 미리보기</h2>
       <div className={styles.agentTurnActions}>
         <button className={styles.secondaryButton} onClick={() => prepare("test")} disabled={saving || !service || !!testing}>{testing ? "테스트 대기·진행 중" : "테스트 실행"}</button>
-        <button className={styles.secondaryButton} onClick={() => prepare("preview")} disabled={saving || !service || !!waiting}>{waiting ? "화면 준비 대기·진행 중" : "화면 준비"}</button>
+        <button className={styles.primaryButton} onClick={() => prepare("preview")} disabled={saving || !service || !!waiting}>{waiting ? "화면 준비 대기·진행 중" : "화면 준비"}</button>
       </div>
     </div>
+    <details className={workbench.settings}><summary>화면 설정 <span>{source ? `PR ${source.result!.headSha!.slice(0, 8)}` : "기본 브랜치"} · {previewAI === "none" ? "앱 AI 끔" : previewAI === "ollama" ? "로컬 LLM" : "구독 CLI"}</span></summary>
+    <div className={workbench.fields}>
     {services.length > 1 && <label>화면을 볼 저장소<select aria-label="화면을 볼 저장소" value={service?.id ?? ""} onChange={e => setSelected(e.target.value)}>{services.map(s => <option key={s.id} value={s.id}>{repositoryFor(s)}</option>)}</select></label>}
     {recent && <label>확인할 코드<select aria-label="확인할 코드" value={revision} onChange={e => setRevision({ serviceId: service!.id, value: e.target.value })}><option value="latest">저장된 PR 수정본</option><option value="main">기본 브랜치 · 반영된 코드</option></select></label>}
     {source && <p>최근 수정본 {source.result!.headSha!.slice(0, 8)}을 확인합니다. 기록상 반영 대기이며 실행할 때 GitHub 상태를 다시 확인합니다.</p>}
     {!source && recent && <p>기본 브랜치의 반영된 코드를 확인합니다. 이전 PR 기록은 작업 내역에 보관됩니다.</p>}
-    {sourceChanged && <div role="status"><p>저장된 PR의 코드나 상태가 달라졌습니다. 이미 반영한 화면을 확인하려면 기본 브랜치로 준비해주세요.</p>
-      <button className={styles.secondaryButton} disabled={saving || !!waiting} onClick={() => { setRevision({ serviceId: service!.id, value: "main" }); void prepare("preview", previewAI, "main"); }}>반영된 코드로 화면 준비</button>
-    </div>}
     <label>미리보기 AI<select aria-label="미리보기 AI" value={previewAI} onChange={e => setPreviewAI(e.target.value === "ollama" ? "ollama" : e.target.value === "codex" ? "codex" : "none")}>
       <option value="ollama">맥미니 로컬 LLM · TranslateGemma</option><option value="none">연결 안 함 · 화면·저장 확인</option><option value="codex">현재 구독 CLI · 사용량 소모</option>
     </select></label>
     {previewAI === "ollama" && <p>맥미니에 설치된 TranslateGemma로 통역합니다. 모델과 실제 번역 응답을 확인한 뒤 화면을 준비하며, 구독 CLI나 유료 API로 전환하지 않습니다.</p>}
     {previewAI === "codex" && <p>지원 앱 안의 AI 기능을 구독 CLI에 연결하는 선택입니다. Jarvis의 코드 수정용 CLI 연결과는 별개입니다. 짧은 번역 응답을 실제 확인하며 요청마다 구독 사용량이 소모됩니다. API 키 과금으로 전환하지 않으며 임시 화면 한 개에서 최대 20회 요청할 수 있습니다.</p>}
-    {nativeReady && <div className={styles.agentTurnActions} aria-label="로컬 서버 관리">
-      <button className={styles.textButton} disabled={saving || !!waiting} onClick={() => prepare("preview", previewAI, revision, "restart")}>서버 재시작</button>
-      <button className={styles.textButton} disabled={saving || !!waiting} onClick={() => prepare("preview", "none", revision, "stop")}>서버 종료</button>
-      <button className={styles.textButton} disabled={saving || !!waiting} onClick={() => prepare("preview", "none", revision, "logs")}>서버 로그</button>
+    </div></details>
+    {sourceChanged && <div role="status"><p>저장된 PR의 코드나 상태가 달라졌습니다. 이미 반영한 화면을 확인하려면 기본 브랜치로 준비해주세요.</p>
+      <button className={styles.secondaryButton} disabled={saving || !!waiting} onClick={() => { setRevision({ serviceId: service!.id, value: "main" }); void prepare("preview", previewAI, "main"); }}>반영된 코드로 화면 준비</button>
     </div>}
-    {control?.result && <details className={styles.compactDisclosure}><summary>{control.result.summary}</summary><pre className={styles.runtimeLog}>{control.result.reply}</pre></details>}
+    <div className={workbench.canvas} data-ready={canEmbed && embedded} data-failed={latest?.result?.preview?.state === "failed"}>
+    {!canEmbed && <div className={workbench.canvasIcon}><Icon name="grid" size={28} /></div>}
     {stopped ? <p role="status">로컬 서버를 종료했습니다. 화면 준비로 다시 시작할 수 있습니다.</p> : latest?.result?.preview ? <PreviewResult preview={latest.result.preview} project={project} turnId={latest.id} /> : <p>{!service ? project.setup ? "저장소와 실행 환경을 자동으로 준비하고 있습니다. 준비가 끝나면 개발 요청과 화면 확인이 이어집니다." : "화면 준비와 자동 테스트에 사용할 GitHub 저장소를 먼저 등록해주세요." : previewAI !== "none"
       ? "현재 코드의 임시 앱을 실행하고 선택한 AI의 번역 응답을 확인합니다. 준비가 끝나면 이 PC에서 열 수 있습니다."
       : "로컬 서버를 준비한 뒤 이 기기에서 앱을 열 수 있습니다."}</p>}
@@ -116,6 +120,13 @@ export function ProjectScreen({ project }: { project: Project }) {
       {embedded && <><iframe ref={frame} key={latest!.id} title="개발 중인 앱" src={`/api/preview/open?${new URLSearchParams({ space: project.space, projectId: project.id, turnId: latest!.id, embed: "1" })}`} sandbox="allow-scripts allow-forms allow-same-origin allow-downloads" allow="microphone; camera; autoplay; clipboard-write" referrerPolicy="strict-origin" />
         <small>기기에서 화면을 제한하면 위의 새 탭으로 열기를 사용해주세요. 마이크 권한도 열린 앱에서 허용할 수 있습니다.</small></>}
     </div>}
+    </div>
+    {nativeReady && <div className={workbench.serverActions} aria-label="로컬 서버 관리">
+      <button className={styles.textButton} disabled={saving || !!waiting} onClick={() => prepare("preview", previewAI, revision, "restart")}>서버 재시작</button>
+      <button className={styles.textButton} disabled={saving || !!waiting} onClick={() => prepare("preview", "none", revision, "stop")}>서버 종료</button>
+      <button className={styles.textButton} disabled={saving || !!waiting} onClick={() => prepare("preview", "none", revision, "logs")}>서버 로그</button>
+    </div>}
+    {control?.result && <details key={control.id} className={styles.compactDisclosure} open={control.runtimeAction === "logs"}><summary>{control.result.summary}</summary><pre className={styles.runtimeLog}>{control.result.reply}</pre></details>}
     {latest?.result?.preview?.state === "failed" && latest.result.preview.diagnostic?.code === "preview_cli_config_unavailable" && <button className={styles.secondaryButton} disabled={saving || !service || !!waiting} onClick={() => { setPreviewAI("none"); void prepare("preview", "none"); }}>AI 연결 없이 화면 준비</button>}
     {waiting && <p role="status">화면 준비: {waiting.status === "queued" ? queuedWorkMessage(waiting, service?.monitoring, clock, project.stage === "development") : "실행기가 화면을 준비하고 있습니다. 완료되면 화면 열기 버튼이 표시됩니다."}</p>}
     {testing && <p role="status">자동 테스트: {testing.status === "queued" ? queuedWorkMessage(testing, service?.monitoring, clock, project.stage === "development") : "실행 중입니다. 결과는 아래 프로젝트 작업에 표시됩니다."}</p>}
