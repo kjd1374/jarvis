@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, rm, realpath } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, realpath, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { startDevelopmentPreview, developmentStatus, developmentEnvironment, developmentSandbox, runDevelopmentTests } from '../public/jarvis-development.mjs';
@@ -71,17 +71,17 @@ test('native AI bridge verifies once, reuses its worker and fences app inference
  }finally{developmentStatus(group,'stop');await new Promise(resolve=>setTimeout(resolve,100));await rm(dir,{recursive:true,force:true});}
 });
 test('native npm releases and separate checks reuse the same lock cache without install hooks', {skip:process.platform!=='darwin'},async()=>{
- const dir=await realpath(await mkdtemp(join(tmpdir(),'jarvis-native-npm-'))),cwd=join(dir,'source'),stateDir=join(dir,'state'),group='personal:npm:example/fixture';await mkdir(cwd);await mkdir(stateDir);let installs=0;
+ const dir=await realpath(await mkdtemp(join(tmpdir(),'jarvis-native-npm-'))),cwd=join(dir,'source'),stateDir=join(dir,'state'),group='personal:npm:example/fixture';await mkdir(cwd);await mkdir(stateDir);let installs=0, testPolicy='';
  const pkg={name:'synthetic-native',version:'1.0.0',private:true,scripts:{start:'node server.mjs',build:'node -e "process.stdout.write(\'built\')"',test:'node --test fixture.test.mjs',preinstall:'node -e "process.exit(91)"'}};
  await writeFile(join(cwd,'package.json'),JSON.stringify(pkg));await writeFile(join(cwd,'package-lock.json'),JSON.stringify({name:pkg.name,version:pkg.version,lockfileVersion:3,packages:{'':{name:pkg.name,version:pkg.version,hasInstallScript:true}}}));
  await writeFile(join(cwd,'server.mjs'),`import http from'node:http';http.createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end('<h1>Npm fixture</h1>')}).listen(Number(process.env.PORT),'127.0.0.1');`);
  await writeFile(join(cwd,'fixture.test.mjs'),`import{test}from'node:test';import assert from'node:assert/strict';import http from'node:http';test('native cached HTTP behavior',async()=>{const server=http.createServer((req,res)=>res.end('fixture response'));await new Promise(r=>server.listen(0,'127.0.0.1',r));try{assert.equal(await(await fetch('http://127.0.0.1:'+server.address().port)).text(),'fixture response')}finally{await new Promise(r=>server.close(r))}})`);
- const options={cwd,files:['server.mjs','package.json','package-lock.json','fixture.test.mjs'],sha:'d'.repeat(40),stateDir,group,run:async(bin,args,opts)=>{if(bin==='npm'&&args[0]==='ci')installs++;return runCommand(bin,args,opts);}};
+ const options={cwd,files:['server.mjs','package.json','package-lock.json','fixture.test.mjs'],sha:'d'.repeat(40),stateDir,group,run:async(bin,args,opts)=>{if(bin==='npm'&&args[0]==='ci')installs++;if(bin==='/usr/bin/sandbox-exec'){testPolicy=await readFile(args[1],'utf8');}return runCommand(bin,args,opts);}};
  try{
   const first=await startDevelopmentPreview(options);assert.equal(first.state,'ready',JSON.stringify(first)+' '+developmentStatus(group).detail);assert.equal(installs,1);
   const persistent=await startDevelopmentPreview({...options,persistent:true});assert.equal(persistent.state,'ready',JSON.stringify(persistent)+' '+developmentStatus(group).detail);assert.equal(persistent.dataPersistence,'project');assert.notEqual(persistent.url,first.url);assert.equal(installs,1);
   const changed=await startDevelopmentPreview({...options,persistent:true,sha:'e'.repeat(40)});assert.equal(changed.state,'ready',JSON.stringify(changed)+' '+developmentStatus(group).detail);assert.equal(installs,1);
-  const checks=await runDevelopmentTests({...options,identity:group+':checks'});assert.equal(checks[0].status,'passed',JSON.stringify(checks));assert.equal(installs,1);
+  const checks=await runDevelopmentTests({...options,identity:group+':checks'});assert.equal(checks[0].status,'passed',JSON.stringify(checks)+' synthetic policy '+testPolicy);assert.equal(installs,1);
  }finally{developmentStatus(group,'stop');await new Promise(resolve=>setTimeout(resolve,100));await rm(dir,{recursive:true,force:true});}
 });
 
