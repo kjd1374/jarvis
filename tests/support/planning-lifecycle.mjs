@@ -35,14 +35,17 @@ export async function runPlanningLifecycle({ base, browser, runner, approve, sna
     assert.equal((await runner.request('/api/automation/claim',scope)).job,null,'old runner cannot claim planning');
     const first=(await runner.request('/api/automation/claim',{...scope,planningVersion:1})).job;assert.equal(first.kind,'planning');assert.equal(first.projectId,project.id);
     await executePlanning(runner,first,{stateDir:dir,model:async()=>{models++;return{reply:'첫 범위를 정리했습니다.',document:'# 첫 기획안\n사용자와 완료 기준'};},log(){}});
-    await expect(doc).toContainText('사용자와 완료 기준');await expect(doc).toContainText('버전 1');
+    assert.equal((await current()).planning.document.content,'# 첫 기획안\n사용자와 완료 기준','planning result must actually persist before observing the browser');
+    // Browser status refresh is every 5 seconds; allow a full interval plus CI transport/render time.
+    await expect(doc).toContainText('사용자와 완료 기준',{timeout:12000});await expect(doc).toContainText('버전 1');
     await chat.getByLabel('기획 AI에게 요청').fill('두 번째 제안');await chat.getByRole('button',{name:'기획 요청 보내기',exact:true}).click();
     await expect.poll(async()=> (await current()).planning.turns.at(-1)?.status).toBe('queued');
     const second=(await runner.request('/api/automation/claim',{...scope,planningVersion:1})).job;
     await doc.getByRole('button',{name:'직접 편집',exact:true}).click();await doc.getByLabel('기획안 내용').fill('# 직접 수정한 기획\n반드시 유지할 결정');
     await doc.getByRole('button',{name:'기획안 저장',exact:true}).click();await expect.poll(async()=> (await current()).planning.document.revision).toBe(2);
     await executePlanning(runner,second,{stateDir:dir,model:async()=>{models++;return{reply:'변경 제안입니다.',document:'# 갱신 제안\n새 완료 기준'};},log(){}});
-    await expect(chat).toContainText('직접 편집된 기획안을 보존했습니다');await expect(doc).toContainText('반드시 유지할 결정');
+    assert.equal((await current()).planning.turns.at(-1).status,'completed');
+    await expect(chat).toContainText('직접 편집된 기획안을 보존했습니다',{timeout:12000});await expect(doc).toContainText('반드시 유지할 결정');
     await chat.getByText('AI 기획안 제안 보기',{exact:true}).click();await chat.getByRole('button',{name:'현재 기획안에 제안 적용',exact:true}).click();
     await expect.poll(async()=> (await current()).planning.document.revision).toBe(3);assert.equal(models,2);
     await chat.getByLabel('기획 AI에게 요청').fill('취소할 기획');await chat.getByRole('button',{name:'기획 요청 보내기',exact:true}).click();

@@ -44,7 +44,7 @@ test("AI 제안을 비교 적용하고 기획안을 보존한 채 개발로 전�
   await page.getByRole("button", { name: "개발 시작", exact: true }).click();
   await expect(page.getByRole("region", { name: "프로젝트 AI 작업실", exact: true })).toBeVisible();
   const p = (await state(page))!.projects[0]; expect(p.stage).toBe("development"); expect(p.setup!.target).toBe("mac"); expect(p.planning!.document.content).toContain("핵심 기능과 완료 기준");
-  await page.reload(); await ready(page); await expect(page.getByText("프로젝트 단계 · 개발", { exact: true })).toBeVisible();
+  await page.reload(); await ready(page); await expect(page.getByText("회사 프로젝트 · 개발", { exact: true })).toBeVisible();
 });
 test("완성 서비스 카드는 서비스로 연결하고 관리는 내부 화면에서 한다", async ({ page }) => {
   await seed(page, emptyWorkspace()); await page.goto("/projects"); await ready(page);
