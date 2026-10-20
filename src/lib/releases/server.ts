@@ -79,6 +79,8 @@ export async function releaseAction(request: Request, auth: Auth, space: Space, 
   idle(data, space, projectId);
   if (body.action === "plan") {
     if (releaseBusy(project.release)) throw releaseError("release_busy");
+    const previous = project.release;
+    if (previous && (previous.databaseIntent && !previous.databaseId && body.database !== "existing" || previous.vercelIntent && !previous.vercelId && !body.vercelId || previous.deploymentIntent && !previous.deploymentId)) throw releaseError("resource_creation_uncertain");
     const repository = repoFor(data,space,projectId,body.repository);
     const plan = await inspectRelease({ project, repository, ownerId: auth.ownerId, database: typeof body.database === "string" ? body.database : "auto", databaseId: body.databaseId, vercelId: body.vercelId },api,c);
     const r: ProjectRelease = {id:randomUUID(),status:"planned",phase:"database",createdAt:stamp,updatedAt:stamp,ownerDevice:auth.deviceId,plan:plan as ReleasePlan,
@@ -94,7 +96,7 @@ export async function releaseAction(request: Request, auth: Auth, space: Space, 
   if(head?.sha!==current.plan.sha)throw releaseError("release_source_changed");
   const workerRepo=await api("github",`/repos/${workflowRepository}`);
   if(!workerRepo || workerRepo.private!==false)throw releaseError("public_worker_required");
-  const executionId=randomUUID(), r={...current,status:"queued" as const,executionId,ownerDevice:auth.deviceId,error:undefined,leaseUntil:undefined,leaseToken:undefined,updatedAt:stamp};
+  const executionId=randomUUID(), r={...current,phase:current.phase==="done"?"health" as const:current.phase,confirmedAt:undefined,status:"queued" as const,executionId,ownerDevice:auth.deviceId,error:undefined,leaseUntil:undefined,leaseToken:undefined,updatedAt:stamp};
   const grant=await grantFor(request,auth,space,projectId,r);
   data=await releaseEdit(auth,space,d=>{const p=idle(d,space,projectId);if(p.release?.id!==current.id||p.release.status!==current.status)throw releaseError("release_changed");return releasePatch(d,p,{...r,runUntil:grant.runUntil});});
   try {

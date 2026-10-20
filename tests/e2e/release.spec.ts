@@ -15,7 +15,7 @@ async function cloud(page:import('@playwright/test').Page){
  await page.route('**/api/projects/release',async route=>{
   const b=route.request().postDataJSON();requests.push(b);let r=remote.company.data.projects[0].release;
   if(b.action==='plan')r=release();
-  if(b.action==='start'){expect(b.reviewed).toBe(true);r={...r!,status:'queued',executionId:randomUUID(),runUntil:'2099-01-01T00:00:00.000Z',workflowUrl:'https://github.com/kjd1374/jarvis/actions/runs/123'};}
+  if(b.action==='start'||b.action==='retry'){expect(b.reviewed).toBe(true);r={...r!,status:'queued',executionId:randomUUID(),runUntil:'2099-01-01T00:00:00.000Z',workflowUrl:'https://github.com/kjd1374/jarvis/actions/runs/123'};}
   if(b.action==='complete'){expect(b.functionalChecked).toBe(true);remote.company.data.projects[0].stage='live';remote.company.data.projects[0].launchUrl=r!.url;r={...r!,confirmedAt:stamp};}
   remote.company.data.projects[0].release=r;remote.company.revision++;
   await route.fulfill({json:{release:r??null}});
@@ -36,4 +36,14 @@ test('운영 구성 검토·클라우드 실행·기능 확인을 거쳐 사용 
 });
 test('운영 구성은 로컬 자료를 유지하고 기존 DB 선택 시 ID를 요구한다',async({page})=>{
  await cloud(page);await page.goto('/projects/auto-project');const panel=page.locator('details').filter({has:page.locator('summary').filter({hasText:/^개발 완료·운영 전환/})}).first();await panel.locator(':scope > summary').click();await panel.getByLabel('운영 데이터베이스',{exact:true}).selectOption('existing');await expect(panel.getByLabel('Supabase 프로젝트 ID',{exact:true})).toHaveAttribute('required','');await expect(panel).toContainText('맥미니가 꺼져 있어도 배포가 이어집니다.');
+});
+
+test('복원한 운영 요청은 검토 후에만 기존 자원으로 재개한다',async({page})=>{
+ const f=await cloud(page);f.remote.company.data.projects[0].release={...release(),status:'interrupted',error:'imported_request_review'};
+ await page.goto('/projects/auto-project');const panel=page.getByRole('group',{name:'프로젝트 운영 전환',exact:true});
+ const retry=panel.getByRole('button',{name:'기존 자원으로 이어서 확인',exact:true});await expect(retry).toBeDisabled();await panel.getByRole('checkbox',{name:/고정 코드·무료 계정/}).check();await retry.click();await expect(panel).toContainText('클라우드 실행 대기');expect(f.requests.filter(b=>b.action==='retry')).toHaveLength(1);
+});
+test('운영 호환성 오류는 수정 요청 초안으로 전달하고 자동 실행하지 않는다',async({page})=>{
+ const f=await cloud(page);await page.route('**/api/projects/release',r=>r.fulfill({status:409,json:{error:'runtime_conversion_required',code:'release_rejected'}}));
+ await page.goto('/projects/auto-project');const panel=page.getByRole('group',{name:'프로젝트 운영 전환',exact:true});await panel.locator(':scope > summary').click();await panel.getByRole('button',{name:'운영 구성 검사',exact:true}).click();await panel.getByRole('button',{name:'필요한 수정을 개발 대화에 작성',exact:true}).click();await expect(page.getByLabel('AI에게 요청',{exact:true})).toHaveValue(/상시 서버/);expect(f.remote.company.data.projects[0].automation?.turns??[]).toHaveLength(0);
 });

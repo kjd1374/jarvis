@@ -59,7 +59,7 @@ export function releasePatch(data: WorkspaceData, project: Project, release: Pro
 }
 export function finishRelease(data: WorkspaceData, space: Space, projectId: string, jobId: unknown, stamp: string) {
   const project = projectForRelease(data, space, projectId), r = project.release;
-  if (!r || r.id !== jobId || r.status !== "deployed" || r.phase !== "done" || r.healthStatus !== 200 || !releaseUrl(r.url)) throw new Error("release_not_verified");
+  if (!r || r.id !== jobId || r.status !== "deployed" || r.phase !== "done" || ![200,301,302,303,307,308,401,403].includes(r.healthStatus ?? 0) || !releaseUrl(r.url)) throw new Error("release_not_verified");
   if (project.automation?.turns.some(t => ["queued", "running"].includes(t.status)) || releaseBusy(project.release)) throw new Error("development_busy");
   return { ...data, projects: data.projects.map(p => p.id === project.id ? { ...p, stage: "live" as const, launchUrl: r.url, release: { ...r, confirmedAt: stamp, updatedAt: stamp } } : p) };
 }

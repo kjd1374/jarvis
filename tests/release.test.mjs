@@ -42,7 +42,7 @@ test('uncertain resource creation persists intent and recovery cannot blindly du
  assert.equal(f.state.requests.filter(r=>r.path==='/v11/projects'&&r.method==='POST').length,1);
  f.state.project={id:'prj_fixture',accountId:'fixture-account',link:{repoId:77}};assert.equal((await f.advance()).phase,'deployment');
 });
-test('wrong repo, moving alias, wrong commit and protected deployment cannot be called ready',async()=>{
+test('wrong repo, moving alias and wrong commit block readiness; access protection requires manual functional review',async()=>{
  for(const kind of ['repo','alias','sha','protected']){const f=await setup();await f.advance();await f.advance();await f.advance();
  if(kind==='repo'){f.state.project.link.repoId=99;await f.advance();await assert.rejects(f.advance(),/deployment_source_mismatch|deployment_repository_mismatch/);continue;}
  if(kind==='sha'){f.state.deployment.meta.githubCommitSha='b'.repeat(40);await assert.rejects(f.advance(),/deployment_source_mismatch/);continue;}
@@ -69,4 +69,11 @@ test('unfinished GitHub checks block deployment, while transient worker errors r
  const f=releaseProvider();const transport=async(url,opts)=>new URL(url).pathname.endsWith('/check-runs')?Response.json({total_count:1,check_runs:[{status:'in_progress'}]}):f.transport(url,opts);
  await assert.rejects(inspectRelease({project,repository:releaseRepo,ownerId:'owner',database:'none'},cloudApi(releaseCredentials,transport),releaseCredentials),/source_checks_pending/);
  let attempts=0;await runReleaseWorker({origin:'https://jarvis.invalid',ticket:'synthetic_ticket',delay:async()=>{},log:()=>{},transport:async()=>++attempts===1?new Response('',{status:503}):Response.json({status:'deployed',phase:'done'})});assert.equal(attempts,2);
+});
+test('a definite provider denial clears only its intent so fixing the connection can safely retry',async()=>{
+ const f=await setup();await f.advance();let first=true,current=f.current();
+ const api=async(provider,path,method,body)=>{if(path==='/v11/projects'&&method==='POST'&&first){first=false;throw Object.assign(Error('vercel_connection_required'),{status:403});}return f.api(provider,path,method,body);};
+ const checkpoint=async r=>{current=structuredClone(r);};
+ await assert.rejects(advanceRelease(current,api,releaseCredentials,checkpoint,f.transport),/vercel_connection_required/);assert.equal(current.vercelIntent,false);
+ current=await advanceRelease(current,api,releaseCredentials,checkpoint,f.transport);assert.equal(current.phase,'deployment');assert.equal(current.vercelId,'prj_fixture');
 });

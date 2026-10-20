@@ -9,8 +9,8 @@ export function cloudApi(credentials, transport = fetch) {
     const url = new URL(roots[provider] + path);
     if (provider === 'vercel' && c.organization) url.searchParams.set('teamId', c.organization);
     const r = await transport(url, { method, cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(20_000), headers: { Authorization: `Bearer ${c.token}`, Accept: 'application/json', 'Content-Type': 'application/json', ...(provider === 'github' ? { 'X-GitHub-Api-Version': '2022-11-28' } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-    if (r.status === 404) return null;
-    if (!r.ok) throw releaseError(r.status === 401 || r.status === 403 ? `${provider}_connection_required` : r.status === 429 ? 'provider_rate_limited' : `${provider}_request_failed`);
+    if (r.status === 404 && method === 'GET') return null;
+    if (!r.ok) throw Object.assign(releaseError(r.status === 401 || r.status === 403 ? `${provider}_connection_required` : r.status === 429 ? 'provider_rate_limited' : `${provider}_request_failed`), {status:r.status});
     const bytes = await r.arrayBuffer(); if (bytes.byteLength > 4_000_000) throw releaseError('provider_response_large');
     return bytes.byteLength ? JSON.parse(Buffer.from(bytes).toString()) : {};
   };
@@ -123,6 +123,16 @@ export async function advanceRelease(release, api, credentials, checkpoint, tran
   if (await freeAccounts(api, credentials, p.database) !== p.vercelAccount) throw releaseError('provider_scope_changed');
   if (p.team !== credentials.vercel?.organization || p.database !== 'none' && p.organization !== credentials.supabase?.organization) throw releaseError('provider_scope_changed');
   const save = async patch => { Object.assign(r, patch); await checkpoint(r); };
+  const create = async (intent, provider, path, body) => {
+    await save({[intent]:true});
+    try { return await api(provider,path,'POST',body); }
+    catch (error) {
+      // A definite validation/authorization refusal can be retried after fixing
+      // the prerequisite. Timeouts and server errors retain uncertain intent.
+      if ([400,401,403,404,409,422,429].includes(error.status)) await save({[intent]:false});
+      throw error;
+    }
+  };
   if (r.phase === 'database') {
     if (p.database === 'none') return { ...r, phase: 'environment', databaseStatus: 'not_required' };
     if (p.database === 'existing') { const db = await verifyDatabase(api, p.databaseId, p.organization); if (db.status !== 'ACTIVE_HEALTHY') throw releaseError('database_not_ready'); return { ...r, databaseId: p.databaseId, databaseStatus: db.status, phase: 'environment' }; }
@@ -132,8 +142,7 @@ export async function advanceRelease(release, api, credentials, checkpoint, tran
     if (db && !r.databaseIntent && !r.databaseId) throw releaseError('resource_identity_conflict');
     if (!db) {
       if (r.databaseIntent) throw releaseError('resource_creation_uncertain');
-      await save({ databaseIntent: true });
-      db = await api('supabase', '/v1/projects', 'POST', { name: p.name, organization_slug: p.organization, region: 'ap-northeast-2', db_pass: randomBytes(32).toString('base64url') });
+      db = await create('databaseIntent', 'supabase', '/v1/projects', { name: p.name, organization_slug: p.organization, region: 'ap-northeast-2', db_pass: randomBytes(32).toString('base64url') });
     }
     const id = db.ref ?? db.id; if (!/^[a-z]{20}$/.test(id ?? '')) throw releaseError('database_not_ready');
     return { ...r, databaseId: id, phase: 'database_wait', databaseStatus: db.status ?? 'COMING_UP' };
@@ -151,8 +160,7 @@ export async function advanceRelease(release, api, credentials, checkpoint, tran
     if (project && !r.vercelId && !p.vercelId && !r.vercelIntent) throw releaseError('resource_identity_conflict');
     if (!project) {
       if (r.vercelIntent) throw releaseError('resource_creation_uncertain');
-      await save({ vercelIntent: true });
-      project = await api('vercel', '/v11/projects', 'POST', { name: p.name, framework: p.framework === 'static' ? null : p.framework, gitRepository: { type: 'github', repo: p.repository }, ...(p.framework === 'static' ? { outputDirectory: p.outputDirectory ?? null } : {}) });
+      project = await create('vercelIntent', 'vercel', '/v11/projects', { name: p.name, framework: p.framework === 'static' ? null : p.framework, gitRepository: { type: 'github', repo: p.repository }, ...(p.framework === 'static' ? { outputDirectory: p.outputDirectory ?? null } : {}) });
     }
     if (!/^prj_[a-zA-Z0-9]+$/.test(project?.id ?? '') || project.accountId !== p.vercelAccount || String(project.link?.repoId) !== String(p.repoId)) throw releaseError('deployment_repository_mismatch');
     await save({ vercelId: project.id });
@@ -180,8 +188,7 @@ export async function advanceRelease(release, api, credentials, checkpoint, tran
     let d = list?.deployments?.find(d => d.meta?.jarvisRelease === r.id && d.meta?.jarvisReleaseSha === p.sha);
     if (!d) {
       if (r.deploymentIntent) throw releaseError('deployment_creation_uncertain');
-      await save({ deploymentIntent: true });
-      d = await api('vercel', '/v13/deployments', 'POST', { name: p.name, project: r.vercelId, target: 'production', gitSource: { type: 'github', repoId: p.repoId, ref: p.sha, sha: p.sha }, meta: { jarvisRelease: r.id, jarvisReleaseSha: p.sha } });
+      d = await create('deploymentIntent', 'vercel', '/v13/deployments', { name: p.name, project: r.vercelId, target: 'production', gitSource: { type: 'github', repoId: p.repoId, ref: p.sha, sha: p.sha }, meta: { jarvisRelease: r.id, jarvisReleaseSha: p.sha } });
     }
     const id = d.id ?? d.uid; if (!/^dpl_[a-zA-Z0-9]+$/.test(id ?? '')) throw releaseError('deployment_not_ready');
     return { ...r, phase: 'deployment_wait', deploymentId: id, deploymentStatus: d.readyState ?? d.state ?? 'QUEUED' };
@@ -204,7 +211,8 @@ export async function advanceRelease(release, api, credentials, checkpoint, tran
     if (alias?.deployment?.id !== r.deploymentId) throw releaseError('deployment_alias_changed');
     const response = await transport(r.url, { method: 'GET', cache: 'no-store', redirect: 'manual', signal: AbortSignal.timeout(15_000), headers: { 'User-Agent': 'Jarvis-Release-Check/1' } });
     await response.body?.cancel();
-    if (response.status !== 200) return { ...r, healthStatus: response.status, status: 'failed', error: response.status === 401 || response.status === 403 ? 'deployment_access_review' : 'deployment_health_failed' };
+    if ([301,302,303,307,308,401,403].includes(response.status)) return { ...r, phase: 'done', healthStatus: response.status, status: 'deployed', error: 'deployment_access_review' };
+    if (response.status !== 200) return { ...r, healthStatus: response.status, status: 'failed', error: 'deployment_health_failed' };
     return { ...r, phase: 'done', healthStatus: 200, status: 'deployed' };
   }
   return r;

@@ -27,7 +27,7 @@ const errors:Record<string,string>={
   database_schema_required:"새 DB에 적용할 supabase/migrations의 SQL이 없습니다. 개발 대화에서 저장 구조와 RLS를 준비해주세요.",
   development_busy:"진행 중인 개발·환경 준비가 끝난 뒤 운영 전환을 시작해주세요.",
   release_source_changed:"검토한 뒤 기본 브랜치 코드가 바뀌었습니다. 운영 구성을 다시 검사해주세요.",
-  deployment_access_review:"배포는 준비됐지만 접근 보호 때문에 화면을 자동 확인하지 못했습니다. 기존 접근 정책을 유지합니다. Vercel에서 확인 후 다시 상태를 확인해주세요.",
+  deployment_access_review:"배포를 확인했지만 접근 보호 또는 이동 응답으로 앱 기능을 자동 확인하지 못했습니다. 접근 정책은 유지합니다. 운영 화면을 열어 주요 기능을 직접 확인해주세요.",
   deployment_health_failed:"운영 주소가 정상 응답하지 않았습니다. 배포 로그와 앱 설정을 확인해주세요.",
   deployment_build_failed:"Vercel 빌드가 실패했습니다. 배포 로그를 확인하고 개발 대화에서 수정해주세요.",
   resource_creation_uncertain:"생성 응답을 확인하지 못했습니다. 외부 자원을 중복 생성하지 않고 기존 자원을 다시 조회합니다.",
@@ -42,7 +42,7 @@ const errors:Record<string,string>={
   self_release_unsupported:"Jarvis 자체는 기존 보호된 배포 경로에서 관리합니다.",
   deployment_alias_changed:"운영 주소가 다른 배포를 가리킵니다. 다시 검사해 현재 배포를 확인해주세요.",
 };
-const statusLabels={planned:"운영 구성 검토",queued:"클라우드 실행 대기",running:"클라우드에서 배포 중",deployed:"배포·화면 응답 확인 완료",failed:"운영 전환 확인 필요",cancelled:"배포 작업 취소됨",interrupted:"배포 기록 재검토 필요"};
+const statusLabels={planned:"운영 구성 검토",queued:"클라우드 실행 대기",running:"클라우드에서 배포 중",deployed:"배포 확인 완료 · 기능 확인 대기",failed:"운영 전환 확인 필요",cancelled:"배포 작업 취소됨",interrupted:"배포 기록 재검토 필요"};
 const phases={database:"DB 준비",database_wait:"새 DB·스키마 확인",environment:"운영 환경 연결",deployment:"고정 커밋 배포",deployment_wait:"빌드·배포 확인",health:"운영 주소 응답 확인",done:"서비스 기능 확인 대기"};
 export function ProjectReleasePanel({project,live=false}:{project:Project;live?:boolean}) {
   const {data,account,saving,syncStatus,retryCloud,mutate}=useWorkspace();
@@ -53,6 +53,7 @@ export function ProjectReleasePanel({project,live=false}:{project:Project;live?:
   const lock=useRef(false);
   const release=localRelease&&(!project.release||localRelease.updatedAt>=project.release.updatedAt)?localRelease:project.release;
   const polling=releaseBusy(release);
+  const releaseLabel=release?.status==="deployed"&&release.confirmedAt?"운영 중 · 기능 직접 확인 완료":release?statusLabels[release.status]:"";
   useEffect(()=>{
     if(!account?.authenticated||!polling)return;let disposed=false;
     const poll=async()=>{try{const response=await fetch('/api/projects/release',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({space:project.space,projectId:project.id,action:'status'})});const result=await response.json();if(!disposed&&response.ok)setRelease(result.release??undefined);}catch{}};
@@ -71,7 +72,7 @@ export function ProjectReleasePanel({project,live=false}:{project:Project;live?:
   }
   const disabled=busy||saving||!account?.authenticated||syncStatus==='conflict',running=releaseBusy(release);
   return <details className={`${styles.detailSection} ${css.panel}`} aria-label="프로젝트 운영 전환" open={!!release}>
-    <summary>개발 완료·운영 전환 {release&&<span> · {statusLabels[release.status]}</span>}</summary>
+    <summary>개발 완료·운영 전환 {release&&<span> · {releaseLabel}</span>}</summary>
     <p>GitHub의 코드를 클라우드에서 배포합니다. 맥미니가 꺼져 있어도 배포가 이어집니다.</p>
     {!account?.authenticated&&<p role="status">이 기기의 서버 연결이 필요합니다. 로컬 개발 기록은 그대로 유지합니다.</p>}
     <ProjectProviders space={project.space}/>
@@ -83,7 +84,7 @@ export function ProjectReleasePanel({project,live=false}:{project:Project;live?:
       <button className={styles.secondaryButton} disabled={disabled||!repository}>운영 구성 검사</button>
     </form>}
     {release&&<div className={css.result}>
-      <strong role="status">{statusLabels[release.status]}</strong><p>{phases[release.phase]} · {dateLabel(release.updatedAt)}</p>
+      <strong role="status">{releaseLabel}</strong><p>{release.phase==="done"&&release.confirmedAt?"운영 확인 완료":phases[release.phase]} · {dateLabel(release.updatedAt)}</p>
       <p>{release.plan.repository} · 코드 {release.plan.sha.slice(0,8)} · {release.plan.framework}</p>
       <p>DB: {release.databaseId??release.plan.databaseId??(release.plan.database==='none'?'별도 DB 없음':'새 프로젝트 준비')} · {release.databaseStatus??'확인 대기'}</p>
       {release.vercelId&&<p><a href="https://vercel.com/dashboard" target="_blank" rel="noopener noreferrer">Vercel 배포·로그 관리 ↗</a></p>}
@@ -92,10 +93,11 @@ export function ProjectReleasePanel({project,live=false}:{project:Project;live?:
       {release.environmentKeys?.length ? <p>연결한 환경: {release.environmentKeys.join(', ')}</p>:null}
       {release.plan.migrations.length>0&&<details><summary>새 DB에 적용할 스키마 {release.plan.migrations.length}개</summary><ul>{release.plan.migrations.map(m=><li key={m.path}>{m.path} · {m.sha.slice(0,8)}</li>)}</ul></details>}
       {release.plan.notes.map(note=><p key={note}>{note}</p>)}
-      {release.error&&<p role="alert">{errors[release.error]??`진행을 멈췄습니다. ${release.error}`}</p>}
+      {release.healthStatus&&<p>자동 응답: HTTP {release.healthStatus}{release.confirmedAt?` · 기능 직접 확인 ${dateLabel(release.confirmedAt)}`:""}</p>}
+      {release.error&&!(release.error==="deployment_access_review"&&release.confirmedAt)&&<p role="alert">{errors[release.error]??`진행을 멈췄습니다. ${release.error}`}</p>}
       {release.url&&<p><a className={styles.primaryButton} href={release.url} target="_blank" rel="noopener noreferrer">운영 화면 확인 ↗</a></p>}
       {release.workflowUrl&&<p><a href={release.workflowUrl} target="_blank" rel="noopener noreferrer">클라우드 배포 진행 기록 ↗</a></p>}
-      {['planned','failed','cancelled'].includes(release.status)&&<><label className={css.check}><input type="checkbox" checked={reviewed} onChange={e=>setReviewed(e.target.checked)}/>고정 코드·무료 계정·DB 적용 범위를 확인했습니다. 기존 로컬 자료는 보존하고 별도 운영환경을 시작합니다.</label><button className={styles.primaryButton} disabled={disabled||!reviewed} onClick={()=>void act(release.status==='planned'?'start':'retry')}>{release.status==='planned'?'클라우드에서 배포 시작':'기존 자원으로 이어서 확인'}</button></>}
+      {['planned','failed','cancelled','interrupted'].includes(release.status)&&<><label className={css.check}><input type="checkbox" checked={reviewed} onChange={e=>setReviewed(e.target.checked)}/>고정 코드·무료 계정·DB 적용 범위를 확인했습니다. 기존 로컬 자료는 보존하고 별도 운영환경을 시작합니다.</label><button className={styles.primaryButton} disabled={disabled||!reviewed} onClick={()=>void act(release.status==='planned'?'start':'retry')}>{release.status==='planned'?'클라우드에서 배포 시작':'기존 자원으로 이어서 확인'}</button></>}
       {running&&<><p>브라우저를 닫아도 GitHub에서 계속 처리합니다. 취소 시 이미 만든 외부 자원은 유지됩니다.</p><button disabled={disabled} className={styles.secondaryButton} onClick={()=>void act('cancel')}>배포 작업 취소</button></>}
       {release.status==='deployed'&&(!live||!release.confirmedAt)&&<><label className={css.check}><input type="checkbox" checked={functional} onChange={e=>setFunctional(e.target.checked)}/>운영 화면에서 주요 기능과 필요한 데이터 저장을 직접 확인했습니다.</label><button className={styles.primaryButton} disabled={disabled||!functional} onClick={()=>void act('complete')}>개발 완료 · 사용 중으로 전환</button></>}
       {release.history.length>0&&<details><summary>이전 운영 전환 {release.history.length}건</summary>{release.history.slice().reverse().map(h=><p key={h.id}>{h.sha.slice(0,8)} · {h.status} · {dateLabel(h.at)} {h.url&&<a href={h.url} target="_blank" rel="noopener noreferrer">기록된 운영 주소 ↗</a>}</p>)}</details>}
