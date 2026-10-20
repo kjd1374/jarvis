@@ -503,7 +503,7 @@ test("개발 작업 공간은 사진과 설명을 같은 요청에 저장하고 
     const screen = (await page.getByRole("region", { name: "수정된 화면 확인", exact: true }).boundingBox())!, chat = (await agent.boundingBox())!;
     expect(screen.x + screen.width).toBeLessThan(chat.x + 1);
   }
-  await agent.getByLabel("프로젝트 사진 첨부").setInputFiles({ name: "synthetic-screen.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jP1kAAAAASUVORK5CYII=", "base64") });
+  await agent.getByLabel("프로젝트 사진 첨부").setInputFiles({ name: "synthetic-screen.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=", "base64") });
   await expect(agent).toContainText("synthetic-screen.jpg"); await agent.getByLabel("AI에게 요청", { exact: true }).fill("사진의 버튼 간격을 수정해주세요.");
   await agent.getByRole("button", { name: "요청 보내기", exact: true }).click();
   const saved = (await state(page))!, turn = saved.projects[0].automation!.turns.at(-1)!;
@@ -549,5 +549,8 @@ test("첫 개발 프로젝트는 다른 서비스가 없어도 준비 결과를 
   const scope = { space: "company" as const, projectIds: ["first-native"], deviceId: "runner", development: true }, claim = claimSetup(data, scope, stamp), job = claim.job!;
   remote.company = { revision: 2, data: reportSetup(claim.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: { repository: "example/first-native", target: "mac", database: "none", reason: "로컬 개발", checks: [{ name: "저장소", status: "passed", detail: "합성 준비" }] } }, "runner", stamp) };
   await page.clock.fastForward(6000);
-  await expect(setup).toContainText("개발 환경 준비 완료"); await expect(page.getByRole("button", { name: "화면 준비", exact: true })).toBeEnabled();
+  await expect(setup).toContainText("개발 환경 준비 완료");
+  const nav = page.getByRole("navigation", { name: "개발 작업 보기" }); if (await nav.isVisible()) await nav.getByRole("button", { name: "화면", exact: true }).click();
+  await expect(page.getByRole("button", { name: "화면 준비 대기·진행 중", exact: true })).toBeDisabled();
+  expect(remote.company.data.projects[0].automation!.turns.at(-1)).toMatchObject({ mode: "preview", status: "queued" });
 });

@@ -14,7 +14,7 @@ export async function runDevelopmentLifecycle({ base, browser, runner, approve, 
     await expect(page.getByRole('button',{name:'개인',exact:true})).toHaveAttribute('aria-pressed','true');
     await page.goto(base+'/projects/'+projectId); await expect(page.locator('h1')).toContainText('합성 연결 전체 흐름');
     const agent = page.getByRole('region',{name:'프로젝트 AI 작업실',exact:true});
-    const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jP1kAAAAASUVORK5CYII=','base64');
+    const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=','base64');
     await agent.getByLabel('프로젝트 사진 첨부').setInputFiles({name:'synthetic-screen.png',mimeType:'image/png',buffer:png});
     await expect(agent).toContainText('synthetic-screen.jpg');
     await agent.getByLabel('요청 방식',{exact:true}).selectOption('ask'); await agent.getByLabel('AI에게 요청',{exact:true}).fill('첨부 사진의 화면을 확인해주세요.');
