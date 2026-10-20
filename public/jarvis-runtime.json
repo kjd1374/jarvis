@@ -3,8 +3,8 @@
   "files": {
     "jarvis-runner.mjs": "61a36b0eeadaa4f9719eb14944611cde351c0cad51883f9570576898969d3c34",
     "jarvis-preview.mjs": "e1ed38380f2fa377dc81617bc09550841dcd23f15f08364e48aace41be256752",
-    "jarvis-development.mjs": "e89afe942e331b127e785f4cc2fb6b82c6851ae5e231d2e969977cfc9c2ce8ca",
-    "jarvis-remote-preview.mjs": "37d832e629d42b2f52120dc7d3c5e12e47382f87df78dc39997305c0a4331364",
+    "jarvis-development.mjs": "eec7ca6d81a47e3188bae9136e14c6cea796cc21c748686a379d77fe265465c4",
+    "jarvis-remote-preview.mjs": "ba3054e338488d669b1f5d9c7a129c2545a8e9bb38248df286ef4321354e0b2f",
     "jarvis-preview-auth.mjs": "5fe9b1442b41e860e053c58a45592aabd65c406c20a5f655c4e18da18baa4572",
     "jarvis-preview-cli.mjs": "47f66922e970626695b59a14682835d5a5bfb213947500c97c6b7e0452f5bfb0",
     "jarvis-provision.mjs": "8a9cae18045b305a7df6099c5fe6faa46d4874c30817d015d189def800f9ed5d",

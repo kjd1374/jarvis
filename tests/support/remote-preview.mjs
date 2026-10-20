@@ -22,6 +22,7 @@ export function requestGate(url, path = "/", { method = "GET", headers = {}, bod
 }
 export async function fixture(run) {
   let clock = Date.now(), approved = true, checkCount = 0, reached = 0, writes = 0, forwarded;
+  const peers = new Set();
   const upstream = http.createServer((req, res) => {
     reached++; forwarded = req.headers;
     if (req.url === "/stream") { res.writeHead(200,{"Content-Type":"text/event-stream"}); res.write("data: first\n\n"); setTimeout(()=>res.end("data: last\n\n"),200); return; }
@@ -30,7 +31,7 @@ export async function fixture(run) {
     res.end('<h1>Synthetic remote preview</h1><button>Save</button><output></output><script>document.querySelector("button").onclick=async()=>{const r=await fetch("/api",{method:"POST"});document.querySelector("output").textContent=(await r.json()).writes}</script>');
   });
   upstream.on("upgrade",(req,socket,head)=>{
-    reached++;forwarded=req.headers;
+    reached++;forwarded=req.headers;peers.add(socket);socket.on("close",()=>peers.delete(socket));socket.on("end",()=>socket.destroy());
     const accept=createHash("sha1").update(req.headers["sec-websocket-key"]+"258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64");
     socket.write(`HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
     if(head.length)socket.write(head);socket.on("data",bytes=>socket.write(bytes));socket.on("error",()=>{});
@@ -43,7 +44,7 @@ export async function fixture(run) {
   try {
     await run({ gate, ticket: claims => ticket(claims, clock), request: (...args) => requestGate(gate.localUrl, ...args),
       advance: ms => { clock += ms; }, revoke: () => { approved = false; }, reached: () => reached, forwarded: () => forwarded, checks: () => checkCount });
-  } finally { gate.close(); upstream.closeAllConnections(); await new Promise(resolve => upstream.close(resolve)); }
+  } finally { gate.close(); for (const peer of peers) peer.destroy(); upstream.closeAllConnections(); await new Promise(resolve => upstream.close(resolve)); }
 }
 export const enter = (f, value = f.ticket()) => f.request("/_jarvis/open", { method: "POST", headers: { origin: appOrigin, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ ticket: value }).toString() });
 export const cookieOf = r => r.headers["set-cookie"][0].split(";")[0];

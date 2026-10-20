@@ -58,7 +58,7 @@ export async function createRemoteGate({ localUrl, appOrigin, publicKey, remoteI
   };
   const server = http.createServer({ maxHeaderSize: 16_384, requestTimeout: 30_000 }, async (req, res) => {
     protectedHeaders(res, appOrigin);
-    const deny = (status = 403) => { res.statusCode = status; res.setHeader("Content-Type", "text/html; charset=utf-8"); res.end(errorPage); };
+    const deny = (status = 403) => { res.statusCode = status; res.setHeader("Content-Type", "text/html; charset=utf-8"); res.end(errorPage + `<script>if(parent!==window)parent.postMessage({type:"jarvis-preview-open-tab"},${JSON.stringify(appOrigin)})</script>`); };
     if (closed || clock() >= Date.parse(expiresAt)) { deny(410); return; }
     if (!origin || req.headers.host !== new URL(origin).host || !req.url?.startsWith("/") || req.url.startsWith("//")) { deny(); return; }
     if (req.method === "GET" && req.url === "/_jarvis/health") { res.setHeader("Content-Type", "text/plain"); res.end(remoteId); return; }

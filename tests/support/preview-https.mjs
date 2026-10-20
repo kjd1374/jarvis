@@ -18,8 +18,8 @@ export async function withPreviewHttps(f, run, { embed = false, engine = "chromi
     web = https.createServer({ key: await readFile(join(directory, "key")), cert: await readFile(join(directory, "cert")) }, async (req, res) => {
       if (req.headers.host === new URL(appOrigin).host) {
         res.setHeader("Content-Type", "text/html"); res.setHeader("Referrer-Policy", "strict-origin");
-        if (embed && req.url === "/") { res.end(`<h1>Jarvis fixture</h1><iframe title="Development app" src="/embed-open" allow="microphone; camera"></iframe>`); return; }
-        res.end(`<form method="post" action="${remoteUrl}_jarvis/open"><input type="hidden" name="ticket" value="${f.ticket(embed ? {embed:true} : {})}"><button>Open screen</button></form><script>document.forms[0].submit()</script>`); return;
+        if (embed && req.url === "/") { res.end(`<h1>Jarvis fixture</h1><a href="/open-top" target="_blank">Open top level</a><iframe title="Development app" src="/embed-open" allow="microphone; camera"></iframe>`); return; }
+        res.end(`<form method="post" action="${remoteUrl}_jarvis/open"><input type="hidden" name="ticket" value="${f.ticket(embed && req.url !== "/open-top" ? {embed:true} : {})}"><button>Open screen</button></form><script>document.forms[0].submit()</script>`); return;
       }
       if (req.headers.host !== new URL(remoteUrl).host) { res.writeHead(403); res.end(); return; }
       const target = new URL(f.gate.localUrl);
