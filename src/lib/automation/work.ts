@@ -116,6 +116,7 @@ function updateTurn(data: WorkspaceData, project: Project, turn: ProjectTurn) {
 export function currentPreviewTurn(project: Project, serviceId: string, repository: string) {
   const turns = project.automation?.turns ?? [];
   const latest = [...turns].reverse().find(turn => turn.serviceId === serviceId && turn.repository === repository && turn.result?.preview?.state === "ready");
+  if (latest?.result?.preview?.kind === "deployment") return latest;
   if (!latest || turns.some((turn, index) => index > turns.indexOf(latest) && turn.serviceId === serviceId && turn.repository === repository && turn.runtimeAction === "stop" && turn.status === "completed")) return undefined;
   return latest;
 }

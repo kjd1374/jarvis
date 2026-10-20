@@ -72,7 +72,7 @@ export function ProjectScreen({ project }: { project: Project }) {
   }
   const control = [...turns].reverse().find(t => t.runtimeAction && t.status === "completed");
   const lastStop = [...turns].reverse().find(turn => turn.runtimeAction === "stop" && turn.status === "completed");
-  const stopped = !!lastStop && (!latest || turns.indexOf(lastStop) >= turns.indexOf(latest));
+  const stopped = !!lastStop && latest?.result?.preview?.kind !== "deployment" && (!latest || turns.indexOf(lastStop) >= turns.indexOf(latest));
   const embedPreview = stopped ? undefined : latest?.result?.preview;
   const canEmbed = embedPreview?.state === "ready" && embedPreview.kind === "remote" && currentPreviewTurn(project, service!.id, repositoryFor(service!)!)?.id === latest?.id && !!embedPreview.execution && Date.parse(embedPreview.expiresAt ?? "") > clock;
   useEffect(() => {
