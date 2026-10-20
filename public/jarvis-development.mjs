@@ -36,7 +36,7 @@ export function developmentStatus(group, action = 'logs', redact = value => valu
   if (action === 'stop' || action === 'restart') item.close();
   return { running: action === 'logs', detail: action === 'stop' ? '프로젝트 서버와 원격 연결을 종료했습니다. 프로젝트 데이터는 보존됩니다.' : detail };
 }
-export async function startDevelopmentPreview(options, { platform = process.platform, launch = spawn } = {}) {
+export async function startDevelopmentPreview(options, { platform = process.platform, launch = spawn, bindAttempt = 0 } = {}) {
   const { cwd, files, sha, stateDir, group, persistent, run, signal, publish, cliInference, aiProvider = 'codex', authorizeCliPreparation } = options;
   if (platform !== 'darwin') return null; // The existing isolated Docker path remains the explicit compatibility path.
   const key = keyOf(group), provider = cliInference ? aiProvider : 'none';
@@ -76,7 +76,8 @@ export async function startDevelopmentPreview(options, { platform = process.plat
     const json = async name => JSON.parse(await readFile(join(app, name), 'utf8').catch(() => 'null'));
     const plan = previewPlan(copied, await json('package.json'), await json('package-lock.json'));
     if (!plan) throw new Error('development_start_unsupported');
-    const ports = [await freePort(), await freePort(), await freePort()];
+    const ports = [];
+    while (ports.length < 3) { const port = await freePort(); if (!ports.includes(port)) ports.push(port); }
     const env = developmentEnvironment(directory, ports[0]);
     const executable = await realpath(process.execPath);
     const profile = join(directory, 'sandbox.sb');
@@ -135,7 +136,9 @@ export async function startDevelopmentPreview(options, { platform = process.plat
     item.ready = ready; servers.set(key, item); failures.delete(key); previous?.close();
     if (!handlers) { handlers = true; process.once('exit', () => { for (const item of servers.values()) item.close(); }); }
     return published;
-  } catch (error) { if (failures.size >= 20) failures.delete(failures.keys().next().value); failures.set(key, (String(error.code ?? error.message) + '\n' + appLog).slice(-16_000)); close(); return { ...previewFailure(sha, error, stage, !!publish), execution: 'native' }; }
+  } catch (error) { if (failures.size >= 20) failures.delete(failures.keys().next().value); failures.set(key, (String(error.code ?? error.message) + '\n' + appLog).slice(-16_000)); close();
+    if (bindAttempt === 0 && !signal?.aborted && error.message === 'development_not_ready' && /EADDRINUSE|address already in use/i.test(appLog)) return startDevelopmentPreview(options, { platform, launch, bindAttempt: 1 });
+    return { ...previewFailure(sha, error, stage, !!publish), execution: 'native' }; }
 }
 
 export async function runDevelopmentTests({ cwd, files, stateDir, identity, run, signal, redact = value => value }) {

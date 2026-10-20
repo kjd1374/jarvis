@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -82,4 +83,11 @@ test('native npm releases and separate checks reuse the same lock cache without 
   const changed=await startDevelopmentPreview({...options,persistent:true,sha:'e'.repeat(40)});assert.equal(changed.state,'ready',JSON.stringify(changed)+' '+developmentStatus(group).detail);assert.equal(installs,1);
   const checks=await runDevelopmentTests({...options,identity:group+':checks'});assert.equal(checks[0].status,'passed',JSON.stringify(checks));assert.equal(installs,1);
  }finally{developmentStatus(group,'stop');await new Promise(resolve=>setTimeout(resolve,100));await rm(dir,{recursive:true,force:true});}
+});
+
+test('native startup retries one observed port collision without rerunning inference or discarding data', {skip:process.platform!=='darwin'},async()=>{
+ const dir=await realpath(await mkdtemp(join(tmpdir(),'jarvis-native-bind-'))),cwd=join(dir,'source'),stateDir=join(dir,'state'),group='personal:bind:example/fixture';await mkdir(cwd);await mkdir(stateDir);let starts=0;
+ await writeFile(join(cwd,'server.mjs'),`import http from'node:http';http.createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end('<h1>Bind fixture</h1>')}).listen(Number(process.env.PORT),'127.0.0.1');`);
+ try{const result=await startDevelopmentPreview({cwd,files:['server.mjs'],sha:'b'.repeat(40),stateDir,group,persistent:true,run:runCommand},{launch:(bin,args,opts)=>{starts++;return starts===1?spawn(bin,[...args.slice(0,3),'-e',"console.error('EADDRINUSE');process.exit(1)"],opts):spawn(bin,args,opts);}});assert.equal(result.state,'ready',JSON.stringify(result)+' '+developmentStatus(group).detail);assert.equal(starts,2);assert.equal(result.dataPersistence,'project');}
+ finally{developmentStatus(group,'stop');await new Promise(resolve=>setTimeout(resolve,100));await rm(dir,{recursive:true,force:true});}
 });
