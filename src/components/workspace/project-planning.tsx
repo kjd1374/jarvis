@@ -21,7 +21,7 @@ function ProjectControls({ project }: { project: Project }) {
   return <WorkspaceControls selectedProjectId={project.id} onScopeChange={projectId => router.push(projectId ? `/projects/${projectId}` : "/projects")} />;
 }
 export function ProjectPlanning({ project }: { project: Project }) {
-  const { mutate, saving, account } = useWorkspace(), clock = useWorkspaceClock();
+  const { mutate, saving, account, retryCloud, retryLoad } = useWorkspace(), clock = useWorkspaceClock();
   const plan = project.planning ?? newPlanning(project.createdAt), doc = plan.document;
   const [message, setMessage] = useState(""), [error, setError] = useState("");
   const [edit, setEdit] = useState<{ content: string; revision: number; versionId: string } | null>(null);
@@ -40,6 +40,20 @@ export function ProjectPlanning({ project }: { project: Project }) {
     if (await act(d => enqueuePlanning(d, project.space, project.id, message, now(), requestId.current))) {
       requestId.current = id(); setMessage("");
     }
+  }
+  async function changeRequest(turnId: string, action: "cancel" | "retry") {
+    if (!account?.authenticated) { await act(d => changePlanning(d, project.space, project.id, turnId, action, now())); return; }
+    if (lock.current || saving) return;
+    lock.current = true; setError("");
+    try {
+      await retryCloud();
+      const response = await fetch("/api/automation/planning", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ space: project.space, projectId: project.id, jobId: turnId, action }) });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "기획 요청 상태를 변경하지 못했습니다.");
+      retryLoad();
+    } catch (e) { retryLoad(); setError(e instanceof Error ? e.message : "기획 요청 상태를 변경하지 못했습니다."); }
+    finally { lock.current = false; }
   }
   return <div className={styles.page}>
     <ProjectControls project={project} /><Link href="/projects">← 프로젝트 목록</Link>
@@ -65,8 +79,8 @@ export function ProjectPlanning({ project }: { project: Project }) {
           {t.result ? <><p>{t.result.reply}</p><small>{t.appliedRevision !== undefined ? `기획안 버전 ${t.appliedRevision}에 반영` : "직접 편집된 기획안을 보존했습니다. AI 제안을 비교해 적용할 수 있습니다."}</small>
             {t.appliedRevision === undefined && <details><summary>AI 기획안 제안 보기</summary><PlanText content={t.result.document} /><button disabled={saving || !!edit} onClick={() => void act(d => applyPlanningProposal(d, project.space, project.id, t.id, doc.revision, now(), doc.versionId))}>현재 기획안에 제안 적용</button></details>}</>
             : <p role="status">{t.status === "queued" ? !account?.authenticated ? "이 기기에 저장됐습니다. 서버 연결 후 기획 실행기가 처리합니다." : !online ? "기획을 지원하는 실행기 2.8.0 연결을 기다립니다. 업데이트가 적용되면 저장된 요청을 처리합니다." : "기획 요청 대기 중입니다." : t.status === "running" ? "기획안을 작성하고 있습니다." : t.status === "cancelled" ? "요청을 취소했습니다." : t.error === "cli_limit" ? "구독 사용 한도에 도달했습니다." : t.error === "cli_login_required" ? "맥미니의 구독 CLI 로그인을 확인해주세요." : "기획 요청을 완료하지 못했습니다. 기존 기획안은 보존됩니다."}</p>}
-          <div className={styles.actions}>{["queued", "running"].includes(t.status) && <button disabled={saving} onClick={() => void act(d => changePlanning(d, project.space, project.id, t.id, "cancel", now()))}>기획 요청 취소</button>}
-            {["failed", "interrupted"].includes(t.status) && <button disabled={saving || busy} onClick={() => void act(d => changePlanning(d, project.space, project.id, t.id, "retry", now()))}>기획 요청 재시도</button>}</div>
+          <div className={styles.actions}>{["queued", "running"].includes(t.status) && <button disabled={saving} onClick={() => void changeRequest(t.id, "cancel")}>기획 요청 취소</button>}
+            {["failed", "interrupted"].includes(t.status) && <button disabled={saving || busy} onClick={() => void changeRequest(t.id, "retry")}>기획 요청 재시도</button>}</div>
         </article>) : <p>무엇을 만들고 싶은지, 누구에게 필요한지 자유롭게 이야기해주세요.</p>}</div>
         <form onSubmit={send} className={styles.composer}><label htmlFor="planning-message">기획 AI에게 요청</label><textarea id="planning-message" value={message} onChange={e => setMessage(e.target.value)} rows={3} maxLength={4000} placeholder="아이디어나 기획안에서 바꿀 내용을 적어주세요." /><button disabled={saving || busy || !message.trim()}>기획 요청 보내기</button></form>
         <details><summary>기획 AI 연결 안내</summary><p>맥미니의 구독 CLI를 사용합니다. GitHub 저장소 없이 기획하며 구독 사용량이 적용됩니다.</p><Link href="/settings#cli-runner">실행기 설정</Link></details>

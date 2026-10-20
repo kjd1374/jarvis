@@ -45,6 +45,13 @@ export async function runPlanningLifecycle({ base, browser, runner, approve, sna
     await expect(chat).toContainText('직접 편집된 기획안을 보존했습니다');await expect(doc).toContainText('반드시 유지할 결정');
     await chat.getByText('AI 기획안 제안 보기',{exact:true}).click();await chat.getByRole('button',{name:'현재 기획안에 제안 적용',exact:true}).click();
     await expect.poll(async()=> (await current()).planning.document.revision).toBe(3);assert.equal(models,2);
+    await chat.getByLabel('기획 AI에게 요청').fill('취소할 기획');await chat.getByRole('button',{name:'기획 요청 보내기',exact:true}).click();
+    await expect.poll(async()=> (await current()).planning.turns.at(-1)?.status).toBe('queued');
+    const cancelled=(await runner.request('/api/automation/claim',{...scope,planningVersion:1})).job;
+    await runner.request('/api/automation/planning',{space:'personal',projectId:project.id,jobId:cancelled.id,leaseToken:cancelled.leaseToken,phase:'heartbeat'});
+    await chat.getByRole('button',{name:'기획 요청 취소',exact:true}).click();
+    await expect.poll(async()=> (await current()).planning.turns.at(-1)?.status).toBe('cancelled');
+    await executePlanning(runner,cancelled,{stateDir:dir,model:async()=>{models++;return{reply:'잘못된 결과',document:'늦은 응답'};},log(){}});assert.equal(models,2);
     const saved=(await snapshot()).data;assert.equal(saved.services.length,before.services.length);assert.equal((await current()).setup,undefined);
     await page.reload();await expect(doc).toContainText('새 완료 기준');
     await page.screenshot({path:'test-results/project-lifecycle-planning.png',fullPage:true});
