@@ -14,7 +14,7 @@ test('native app environment drops all inherited credentials and sandbox does no
   assert.equal(env.HOME, '/private/release/home');
   assert.equal(env.OPENSSL_CONF, '/dev/null');
   const policy = developmentSandbox('/private/release', '/private/project-data', [4567,4568,4569], '/opt/runtime/bin/node');
-  assert(policy.includes('(deny default)')); assert(policy.includes('localhost:*') && policy.includes('*:4567'));
+  assert(policy.includes('(deny default)')); assert(policy.includes('(allow network-bind (local ip "localhost:*"))') && policy.includes('(remote tcp "localhost:4567")'));
   assert(!policy.includes('(allow network*)') && !policy.includes('(subpath "/Users")') && !policy.includes('11434'));
 });
 test('unsupported hosts do not run untrusted native code', async () => {
