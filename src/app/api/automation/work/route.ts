@@ -11,7 +11,8 @@ export async function POST(request: Request) {
     const body = await readJson(request), space = spaceParam(body.space), stamp = new Date().toISOString();
     if (body.phase === "images") {
       const auth = await authorize(request), { data } = await loadSpace(auth, space);
-      const { turn, project } = requireWorkLease(data, space, body, auth.deviceId, stamp);
+      const lease = (() => { try { return requireWorkLease(data, space, body, auth.deviceId, stamp); } catch { throw new CloudError(409, "stale_job", "사진 요청의 실행 임대가 취소·만료됐거나 다른 기기에 속합니다."); } })();
+      const { turn, project } = lease;
       validateWorkImages(data, space, project.id, turn.images ?? []);
       const images = [];
       for (const image of turn.images ?? []) {

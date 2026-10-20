@@ -5,9 +5,9 @@ import { join } from 'node:path';
 import { executeProjectWork } from '../../public/jarvis-runner.mjs';
 // Real private bucket, scoped lease, runner image bytes and actual CLI --image contract; synthetic inference.
 export async function runDevelopmentLifecycle({ base, browser, runner, approve, snapshot, projectId, options, recordCheck }) {
-  const context = await browser.newContext();
+  const context = await browser.newContext(), unexpected = [];
   try {
-    await context.route('**/*',route=>{assert([base,'http://127.0.0.1:54321'].includes(new URL(route.request().url()).origin));return route.continue();});
+    await context.route('**/*',route=>{const origin=new URL(route.request().url()).origin;if(![base,'http://127.0.0.1:54321'].includes(origin)){unexpected.push(origin);return route.abort();}return route.continue();});
     const page = await context.newPage(); await page.goto(base+'/settings'); await page.getByText(/기기 확인 번호:/).waitFor();
     await approve(await (await context.request.get(base+'/api/account')).json());
     await page.getByRole('button',{name:'기기 연결 다시 확인',exact:true}).click(); await page.getByRole('button',{name:'개인',exact:true}).click();
@@ -39,6 +39,7 @@ export async function runDevelopmentLifecycle({ base, browser, runner, approve, 
     assert(imageSeen);assert.equal((await current()).automation.turns.at(-1).status,'completed');
     await expect(agent).toContainText('첨부 사진 1장',{timeout:12000});await page.reload();await expect(agent).toContainText('첨부 사진 1장');
     for(const name of await readdir(options.stateDir))if(name.startsWith('work-'))assert(!(await readdir(join(options.stateDir,name))).includes('attachments'));
+    assert.deepEqual(unexpected,[]);
     recordCheck('development image lifecycle: browser re-encoding + atomic file/turn save -> real private bucket -> old runner gate -> leased byte/hash retrieval -> actual codex --image -> private temporary cleanup -> reload; wrong lease rejected');
   } finally {await context.close();}
 }

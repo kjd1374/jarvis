@@ -76,9 +76,9 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npx playwright install --with-deps chromium
       # Disposable local Docker Supabase; no production variables or secrets.
+      - run: npx playwright install --with-deps webkit
       - run: npm run test:preview
       - run: npm run test:remote-preview
-      - run: npx playwright install --with-deps webkit
       - run: npm run db:start
       - run: npm run test:server
       - run: npm run db:stop

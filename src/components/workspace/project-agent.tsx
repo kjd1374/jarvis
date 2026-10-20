@@ -125,17 +125,19 @@ export function ProjectAgent({ project }: { project: Project }) {
       {turns.slice(-historyLimit).map(turn => <WorkTurn key={turn.id} turn={turn} project={project} saving={saving} onAction={act} monitoring={turnMonitoring(turn)} clock={clock} />)}
     </div>}
     <form onSubmit={submit} className={styles.agentComposer}>
-      <label htmlFor="project-agent-message">AI에게 요청</label>
-      <textarea id="project-agent-message" value={message} onChange={e => setMessage(e.target.value)} maxLength={8000} rows={2} placeholder="원하는 변경이나 질문을 적어주세요." disabled={project.setup?.status === "cancelled"} />
-      <div className={styles.projectAttachments}>
+      <div className={styles.agentAttachHeading}><label htmlFor="project-agent-message">AI에게 요청</label>
         <label className={styles.textButton}>사진 첨부<input aria-label="프로젝트 사진 첨부" type="file" accept="image/*" multiple disabled={saving || preparingImages || !service || images.length >= 3} onChange={async event => {
           const files = Array.from(event.target.files ?? []); event.target.value = ""; setError(""); setPreparingImages(true);
           try { if (files.length + images.length > 3) throw new Error("사진은 요청당 3장까지 첨부할 수 있습니다."); const next: ProjectImage[] = []; for (const file of files) next.push(await prepareProjectImage(file, project)); setImages(current => [...current, ...next]); }
           catch (e) { setError(e instanceof Error ? e.message : "사진을 준비하지 못했습니다."); } finally { setPreparingImages(false); }
         }} /></label>
+      </div>
+      <textarea id="project-agent-message" value={message} onChange={e => setMessage(e.target.value)} maxLength={8000} rows={2} placeholder="원하는 변경이나 질문을 적어주세요." disabled={project.setup?.status === "cancelled"} />
+      {(preparingImages || images.length > 0) && <div className={styles.projectAttachments}>
+
         {preparingImages && <span role="status">사진 준비 중…</span>}
         {images.map(image => <span key={image.document.id}>{image.document.name} <button type="button" className={styles.textButton} aria-label={`${image.document.name} 첨부 제거`} onClick={() => setImages(current => current.filter(item => item !== image))}>×</button></span>)}
-      </div>
+      </div>}
       <div className={styles.agentComposerActions}>
         {services.length > 1 && <label>대상 저장소<select aria-label="대상 저장소" value={service?.id ?? ""} onChange={e => setServiceId(e.target.value)}>{services.map(s => <option key={s.id} value={s.id}>{repositoryFor(s)}</option>)}</select></label>}
         {recent && <label>작업할 코드<select aria-label="작업할 코드" value={revision} onChange={e => setRevision({ serviceId: service!.id, value: e.target.value })}><option value="latest">저장된 PR 수정본 · 이어가기</option><option value="main">기본 브랜치 · 반영된 코드</option></select></label>}

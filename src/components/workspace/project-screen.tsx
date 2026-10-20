@@ -69,7 +69,8 @@ export function ProjectScreen({ project }: { project: Project }) {
     finally { pending.current = false; }
   }
   const control = [...turns].reverse().find(t => t.runtimeAction && t.status === "completed");
-  const stopped = control?.runtimeAction === "stop" && (!latest || Date.parse(control.createdAt) >= Date.parse(latest.createdAt));
+  const lastStop = [...turns].reverse().find(turn => turn.runtimeAction === "stop" && turn.status === "completed");
+  const stopped = !!lastStop && (!latest || turns.indexOf(lastStop) >= turns.indexOf(latest));
   const embedPreview = stopped ? undefined : latest?.result?.preview;
   const canEmbed = embedPreview?.state === "ready" && embedPreview.kind === "remote" && Date.parse(embedPreview.expiresAt ?? "") > clock;
   useEffect(() => {

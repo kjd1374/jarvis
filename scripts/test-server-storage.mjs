@@ -15,6 +15,10 @@ import { emptyWorkspace } from "../src/lib/workspace/types.ts";
 import { createLifecycleNetwork } from "../tests/support/lifecycle-network.mjs";
 import { runProjectLifecycle } from "../tests/support/project-lifecycle.mjs";
 
+try {
+  await fetch("http://127.0.0.1:4317/api/health", { signal: AbortSignal.timeout(500) });
+  throw new Error("The disposable test port 4317 is occupied. Stop the earlier test server before running storage checks.");
+} catch (error) { if (error.message.startsWith("The disposable")) throw error; }
 const root = new URL("../", import.meta.url);
 const info = JSON.parse(
   execFileSync(

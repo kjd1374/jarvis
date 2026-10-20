@@ -527,7 +527,10 @@ test("개발 화면은 기존 서버를 새 요청 없이 열고 제한된 ifram
   const screen = page.getByRole("region", { name: "수정된 화면 확인", exact: true });
   if (isMobile) await page.getByRole("navigation", { name: "개발 작업 보기" }).getByRole("button", { name: "화면", exact: true }).click();
   await expect(screen).toContainText("실행 중인 서버 재사용"); await screen.getByRole("button", { name: "작업실에서 화면 보기", exact: true }).click();
-  await expect(screen).toContainText("브라우저가 작업실 안의 연결을 제한했습니다");
+  await expect(screen).toContainText("브라우저가 작업실 안의 연결을 제한했습니다").catch(async error => {
+    const frames = await Promise.all(page.frames().map(async frame => ({ url: frame.url(), text: await frame.locator("body").innerText().catch(() => "unavailable") })));
+    await test.info().attach("frame-debug", { body: JSON.stringify(frames), contentType: "application/json" }); throw error;
+  });
   const popup = page.waitForEvent("popup"); await screen.getByRole("link", { name: "이 PC에서 화면 열기 ↗", exact: true }).click(); const app = await popup; await expect(app.locator("h1")).toHaveText("Private fixture"); await app.close();
   expect((await state(page))!.projects[0].automation!.turns).toHaveLength(1);
   await screen.getByRole("button", { name: "서버 로그", exact: true }).click(); expect((await state(page))!.projects[0].automation!.turns.at(-1)).toMatchObject({ runtimeAction: "logs", mode: "preview", status: "queued" });
