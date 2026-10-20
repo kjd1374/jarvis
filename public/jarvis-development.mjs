@@ -17,6 +17,9 @@ let handlers = false;
 export function developmentEnvironment(root, port) {
   return { PATH: `${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`, HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'),
     PORT: String(port), HOST: '127.0.0.1', HOSTNAME: '127.0.0.1', NODE_ENV: 'production', NEXT_TELEMETRY_DISABLED: '1', CI: 'true',
+    // Homebrew OpenSSL otherwise reads its host configuration outside the sandbox.
+    // Use OpenSSL's defaults without importing host paths, engines or credentials.
+    OPENSSL_CONF: '/dev/null',
     npm_config_userconfig: join(root, 'npmrc'), npm_config_globalconfig: join(root, 'global-npmrc'), npm_config_cache: join(root, 'npm-cache') };
 }
 export async function developmentRuntimeLibraries(objects = process.report.getReport().sharedObjects) {
