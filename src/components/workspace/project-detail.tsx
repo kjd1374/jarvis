@@ -174,7 +174,7 @@ function ProjectView({ project }: { project: Project }) {
           <button
             className={styles.primaryButton}
             disabled={saving}
-            onClick={() => document.getElementById("project-agent-message")?.focus()}
+            onClick={() => { window.dispatchEvent(new Event("jarvis-project-chat")); }}
           >
             <Icon name="message" size={16} /> AI에게 작업 요청
           </button>

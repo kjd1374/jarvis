@@ -377,7 +377,7 @@ test("최근 수정본으로 원격 테스트·화면 준비·후속 요청을 �
     reply: "합성 검증 결과", summary: "실패", currentStatus: "", nextAction: "", changes: [], checks: [{ name: "npm run test", status: "failed", detail: "격리 실행 · 종료 코드 1" }], followUps: [], outcome: "blocked", branch: null, baseSha: "b".repeat(40), headSha: null, prUrl: null, deployment: { state: "not_configured", url: null, sha: null },
   } }, "runner", stamp);
   await seed(page, complete); await page.goto("/projects/auto-project"); await ready(page);
-  await expect(page.getByText("npm run test · 실패", { exact: true })).toBeVisible();
+  await expect(page.getByRole("article", { name: "작업 요청" }).getByText("npm run test · 실패", { exact: true })).toBeVisible();
   await screen.getByRole("button", { name: "화면 준비", exact: true }).click();
   saved = (await state(page))!;
   expect(saved.projects[0].automation!.turns.at(-1)).toMatchObject({ mode: "preview", sourceTurnId: job.id });
