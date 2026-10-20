@@ -113,15 +113,20 @@ function ProjectBasics({ project }: { project: Project }) {
   }}><label>프로젝트 이름<input required maxLength={160} value={name} onChange={e => setName(e.target.value)} /></label><label>프로젝트 설명<textarea rows={3} maxLength={10000} value={description} onChange={e => setDescription(e.target.value)} /></label><button disabled={saving || !name.trim()}>프로젝트 정보 저장</button>{error && <p role="alert">{error}</p>}</form></details>;
 }
 
-export function ProjectStageControl({ project }: { project: Project }) {
+export function ProjectStageControl({ project, planning = true }: { project: Project; planning?: boolean }) {
   const { mutate, saving } = useWorkspace();
   const [error, setError] = useState("");
   const busy = project.release && ["queued", "running"].includes(project.release.status) || project.setup && project.setup.status !== "ready" || project.automation?.turns.some(t => ["queued", "running", "interrupted"].includes(t.status));
-  return <div className={styles.stageControl}><span>프로젝트 단계 · {stageLabels[projectStage(project)]}</span><button disabled={saving || !!busy} onClick={() => {
+  function change(stage: "idea" | "development") {
     setError(""); void mutate(d => {
       const p = d.projects.find(p => p.id === project.id && p.space === project.space);
       if (!p || p.release && ["queued", "running"].includes(p.release.status) || p.setup && p.setup.status !== "ready" || p.automation?.turns.some(t => ["queued", "running", "interrupted"].includes(t.status))) throw new Error("진행 중인 개발 작업을 먼저 마쳐주세요.");
-      return { ...d, projects: d.projects.map(row => row.id === p.id ? { ...row, stage: "idea", planning: row.planning ?? newPlanning(now()) } : row) };
+      if (stage === "development" && p.stage !== undefined) throw new Error("프로젝트 단계가 변경됐습니다. 현재 단계를 다시 확인해주세요.");
+      return { ...d, projects: d.projects.map(row => row.id === p.id && row.space === p.space ? { ...row, stage, ...(stage === "idea" ? { planning: row.planning ?? newPlanning(now()) } : {}) } : row) };
     }).catch(e => setError(e.message));
-  }}>기획으로 전환</button>{error && <p role="alert">{error}</p>}</div>;
+  }
+  return <div className={styles.stageControl} role="group" aria-label="프로젝트 단계"><span>프로젝트 단계 · {stageLabels[projectStage(project)]}{!project.stage&&" · 이전 등록"}</span>
+    {!project.stage&&<button type="button" disabled={saving || !!busy} onClick={()=>change("development")}>개발 단계로 설정</button>}
+    {planning&&<button type="button" disabled={saving || !!busy} onClick={()=>change("idea")}>기획으로 전환</button>}
+    {error && <p role="alert">{error}</p>}</div>;
 }

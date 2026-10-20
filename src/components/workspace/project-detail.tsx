@@ -555,6 +555,7 @@ function ProjectEditor({
       }}
     >
       <form className={styles.modalBody} onSubmit={save} aria-busy={saving}>
+        <ProjectStageControl project={project} planning={false} />
         <label className={styles.field}>
           프로젝트 이름
           <input
