@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, rm, realpath, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, realpath, readFile, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { readFileSync } from 'node:fs';
@@ -53,6 +53,21 @@ test('macOS runtime loads an external dylib with an exact read grant while sibli
   const denied=await runCommand('/usr/bin/sandbox-exec',['-f',profile,executable,secret],{cwd:root,env:developmentEnvironment(root,0)});assert.notEqual(denied.code,0,'baseline must reproduce a loader failure outside the runtime directory');assert.match(denied.err,/Library not loaded/);assert(denied.err.includes(library));
   await writeFile(profile,developmentSandbox(root,data,[],executable,await developmentRuntimeLibraries([library])));
   const allowed=await runCommand('/usr/bin/sandbox-exec',['-f',profile,executable,secret],{cwd:root,env:developmentEnvironment(root,0)});assert.equal(allowed.code,0,allowed.err);assert.equal(allowed.out,'runtime-library-42');
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+test('macOS Homebrew-style opt aliases load with discovered runtime grants while adjacent files stay private',{skip:process.platform!=='darwin'},async()=>{
+ const dir=await realpath(await mkdtemp(join(tmpdir(),"jarvis-homebrew-'"))),root=join(dir,'release'),bin=join(dir,'Cellar','node','26','bin'),deps=join(dir,'Cellar','llhttp','9.4','lib'),opt=join(dir,'opt'),data=join(root,'data');
+ for(const path of[root,bin,deps,opt,data])await mkdir(path,{recursive:true});
+ const library=join(deps,'libfixture.dylib'),alias=join(opt,'llhttp','lib','libfixture.dylib'),secret=join(deps,'private-original.txt'),executable=join(bin,'fixture'),profile=join(root,'sandbox.sb');
+ try{
+  await symlink(join(deps,'..'),join(opt,'llhttp'));await writeFile(secret,'PRIVATE_ORIGINAL');
+  await writeFile(join(root,'library.c'),'int fixture(void){return 42;}');
+  await writeFile(join(root,'main.c'),'#include <stdio.h>\nextern int fixture(void);int main(int argc,char**argv){if(argc>1){FILE*f=fopen(argv[1],"r");if(f){fclose(f);return 88;}}printf("homebrew-runtime-%d",fixture());return 0;}');
+  for(const args of [['-dynamiclib',join(root,'library.c'),'-install_name',alias,'-o',library],[join(root,'main.c'),alias,'-o',executable]]){const r=await runCommand('/usr/bin/clang',args,{cwd:root});assert.equal(r.code,0,r.err);}
+  await writeFile(profile,developmentSandbox(root,data,[],executable));
+  const denied=await runCommand('/usr/bin/sandbox-exec',['-f',profile,executable,secret],{cwd:root,env:developmentEnvironment(root,0)});assert.notEqual(denied.code,0);assert.match(denied.err,/Library not loaded/);assert(denied.err.includes(alias));
+  await writeFile(profile,developmentSandbox(root,data,[],executable,await developmentRuntimeLibraries([alias])));
+  const allowed=await runCommand('/usr/bin/sandbox-exec',['-f',profile,executable,secret],{cwd:root,env:developmentEnvironment(root,0)});assert.equal(allowed.code,0,allowed.err);assert.equal(allowed.out,'homebrew-runtime-42');
  }finally{await rm(dir,{recursive:true,force:true});}
 });
 test('macOS native lifecycle reuses a live server, preserves DATA_DIR across versions, stops/restarts and enforces isolation', { skip: process.platform !== 'darwin' }, async () => {
