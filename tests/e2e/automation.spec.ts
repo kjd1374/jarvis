@@ -397,10 +397,11 @@ test("새 프로젝트는 자동 준비와 첫 개발 요청을 저장하고 준
   const form = page.getByRole("dialog", { name: "프로젝트 만들기", exact: true });
   await form.getByLabel("프로젝트 이름", { exact: true }).fill("자동 그래프 앱");
   await form.getByLabel("프로젝트 설명", { exact: true }).fill("연도별 수익률 그래프를 만들고 입력값 저장");
+  await form.getByRole("radio", { name: /개발 시작·이어가기/ }).check();
   await expect(form.getByRole("checkbox", { name: "저장소·실행 환경 자동 준비" })).toBeChecked();
   await form.getByRole("button", { name: "프로젝트 저장", exact: true }).click(); await expect(form).not.toBeVisible();
   const project = (await state(page))!.projects.find(p => p.name === "자동 그래프 앱")!;
-  expect(project.setup).toMatchObject({ status: "queued", target: "auto", requests: [{ request: "연도별 수익률 그래프를 만들고 입력값 저장", mode: "change" }] });
+  expect(project.setup).toMatchObject({ status: "queued", target: "mac", requests: [{ request: "연도별 수익률 그래프를 만들고 입력값 저장", mode: "change" }] });
   await page.goto(`/projects/${project.id}`); await ready(page);
   const agent = page.getByRole("region", { name: "프로젝트 AI 작업실", exact: true });
   await expect(agent).toContainText("개발 환경 자동 준비");

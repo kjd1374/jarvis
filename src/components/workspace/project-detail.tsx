@@ -1,5 +1,6 @@
 "use client";
 import { ProjectScreen } from "./project-screen";
+import { ProjectPlanning, ProjectService, ProjectStageControl } from "./project-planning";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -62,6 +63,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         </section>
       </div>
     );
+  if (project.stage === "idea") return <ProjectPlanning key={`${project.id}:${project.space}`} project={project} />;
+  if (project.stage === "live") return <ProjectService key={`${project.id}:${project.space}`} project={project} />;
   return (
     <ProjectView key={`${project.id}:${project.space}`} project={project} />
   );
@@ -200,6 +203,7 @@ function ProjectView({ project }: { project: Project }) {
           {notice}
         </p>
       )}
+      <ProjectStageControl project={project} />
       <ProjectScreen project={project} />
       <ProjectAgent project={project} />
       <ProjectAutomaticResults project={project} />

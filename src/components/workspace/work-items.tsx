@@ -16,7 +16,7 @@ import { useWorkspace } from "./workspace-provider";
 import { Modal, WorkspaceControls } from "./workspace-controls";
 import { Icon } from "./icon";
 import { RequestsPanel } from "./requests-panel";
-import { newProjectSetup } from "@/lib/automation/provision";
+import { createStagedProject, projectStage, stageLabels, stageCards, type ProjectStage } from "@/lib/projects/lifecycle";
 import styles from "./studio.module.css";
 
 export function WorkItems({
@@ -56,6 +56,8 @@ function WorkItemsView({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [automatic, setAutomatic] = useState(true);
+  const [stage, setStage] = useState<ProjectStage>("idea");
+  const [launchUrl, setLaunchUrl] = useState("");
   const [selectedProject, setSelectedProject] = useState(projectId ?? "");
   const [dueDate, setDueDate] = useState(today());
   const [status, setStatus] = useState<TaskStatus>("todo");
@@ -68,23 +70,10 @@ function WorkItemsView({
     event.preventDefault();
     if (!title.trim() || saving || creatingNow.current) return;
     creatingNow.current = true;
+    const createdId = id();
     try {
       await mutate((d) => {
-        if (kind === "projects")
-          return {
-            ...d,
-            projects: [
-              ...d.projects,
-              {
-                id: id(),
-                space,
-                name: title.trim(),
-                description: description.trim(),
-                ...(automatic ? { setup: { ...newProjectSetup(now()), requests: description.trim() ? [{ id: id(), request: description.trim().slice(0, 8000), mode: "change" as const, publish: "merge" as const, createdAt: now() }] : [] } } : {}),
-                createdAt: now(),
-              },
-            ],
-          };
+        if (kind === "projects") return createStagedProject(d, { space, name: title, description, stage, launchUrl, automatic }, now(), createdId);
         assertLinks(d, space, selectedProject || null);
         return {
           ...d,
@@ -106,6 +95,7 @@ function WorkItemsView({
       setTitle("");
       setDescription("");
       setError("");
+      if (kind === "projects" && stage === "idea") router.push(`/projects/${createdId}`);
     } catch (error) {
       setError(error instanceof Error ? error.message : "저장하지 못했습니다.");
     } finally {
@@ -200,13 +190,16 @@ function WorkItemsView({
           {kind === "projects" ? (
             <div className={styles.projectGrid}>
               {projects.length ? (
-                projects.map((project) => (
+                projects.map((project) => (<div key={project.id} className={styles.projectCardContainer}>
                   <Link
-                    href={`/projects/${project.id}`}
+                    href={project.stage === "live" ? project.launchUrl! : `/projects/${project.id}`}
+                    target={project.stage === "live" ? "_blank" : undefined}
+                    rel={project.stage === "live" ? "noopener noreferrer" : undefined}
                     className={styles.projectCard}
                     key={project.id}
                     aria-label={`${project.name} 프로젝트 열기`}
                     onClick={(event) => {
+                      if (project.stage === "live") return;
                       if (
                         event.metaKey ||
                         event.ctrlKey ||
@@ -231,7 +224,7 @@ function WorkItemsView({
                       <Icon name="folder" size={25} />
                     </span>
                     <span className={styles.itemScope}>
-                      {spaceLabels[space]}
+                      {spaceLabels[space]} · {stageLabels[projectStage(project)]}
                     </span>
                     <h2>{project.name}</h2>
                     <p>
@@ -264,9 +257,11 @@ function WorkItemsView({
                       </span>
                     </div>
                     <span className={styles.projectOpen}>
-                      프로젝트 열기 <Icon name="arrow" size={16} />
+                      {project.stage === "live" ? "서비스 열기" : project.stage === "idea" ? "기획 이어가기" : "프로젝트 열기"} <Icon name="arrow" size={16} />
                     </span>
                   </Link>
+                  {project.stage === "live" && <Link className={styles.projectManage} href={`/projects/${project.id}`}>{project.name} 관리</Link>}
+                  </div>
                 ))
               ) : (
                 <EmptyState
@@ -370,10 +365,14 @@ function WorkItemsView({
             <p className={styles.modalDescription}>
               {spaceLabels[space]} 영역에 저장합니다.
             </p>
+            {kind === "projects" && <fieldset className={styles.stageChoices}><legend>프로젝트 시작 단계</legend>{stageCards.map(card => <label key={card.stage} className={styles.stageChoice}>
+              <input type="radio" name="project-stage" value={card.stage} checked={stage === card.stage} onChange={() => setStage(card.stage)} />
+              <strong>{card.title}</strong><span>{card.description}</span>
+            </label>)}</fieldset>}
             <label className={styles.field}>
               {label} 이름
               <input
-                autoFocus
+                autoFocus={kind !== "projects"}
                 required
                 maxLength={160}
                 value={title}
@@ -391,11 +390,14 @@ function WorkItemsView({
                   maxLength={10000}
                   value={description}
                   onChange={(event) => setDescription(event.target.value)}
-                  placeholder="만들고 싶은 기능과 목표를 적어주세요. 자동 준비 시 첫 개발 요청으로 실행합니다."
+                  placeholder={stage === "idea" ? "떠올린 아이디어와 누구에게 필요한지 적어주세요." : stage === "live" ? "서비스의 목적과 사용 방법을 적어주세요." : "만들고 싶은 기능과 목표를 적어주세요. 자동 준비 시 첫 개발 요청으로 실행합니다."}
                 />
               </label>
-              <label className={styles.field}><span><input type="checkbox" checked={automatic} onChange={e => setAutomatic(e.target.checked)} /> 저장소·실행 환경 자동 준비</span></label>
-              <p className={styles.modalDescription}>비공개 GitHub 저장소를 만들고 사용 가능한 환경을 선택합니다. 설명이 있으면 첫 개발 요청으로 실행하고, 검증 후 병합합니다. 유료 서비스로 자동 전환하지 않습니다. 기존 저장소를 직접 연결하려면 해제하세요.</p></>
+              {stage === "development" && <><label className={styles.field}><span><input type="checkbox" checked={automatic} onChange={e => setAutomatic(e.target.checked)} /> 저장소·실행 환경 자동 준비</span></label>
+              <p className={styles.modalDescription}>비공개 GitHub와 맥미니 개발 환경을 준비합니다. 설명은 첫 개발 요청으로 이어집니다. 기존 저장소를 직접 연결하려면 해제하세요.</p></>}
+              {stage === "idea" && <p className={styles.modalDescription}>기획안과 AI 대화로 시작합니다. 개발을 시작할 때 저장소를 준비합니다.</p>}
+              {stage === "live" && <label className={styles.field}>서비스 주소<input aria-label="서비스 주소" type="url" required maxLength={2000} value={launchUrl} onChange={e => setLaunchUrl(e.target.value)} placeholder="https://서비스주소" /></label>}
+              </>
             ) : (
               <>
                 <label className={styles.field}>

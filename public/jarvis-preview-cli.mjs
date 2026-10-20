@@ -15,7 +15,7 @@ export function completionInput(raw) {
   return { messages: raw.messages.map(({ role, content }) => ({ role, content })), json: raw.response_format?.type === "json_object",
     maxTokens: Number.isInteger(raw.max_tokens) && raw.max_tokens > 0 ? Math.min(4096, raw.max_tokens) : 4096 };
 }
-export async function completeWithSubscription(raw, { run, env = process.env, signal } = {}) {
+export async function completeWithSubscription(raw, { run, env = process.env, signal, timeout = 40000 } = {}) {
   const input = completionInput(raw);
   if (typeof run !== "function") throw fail("cli_unavailable");
   const allowed = ["PATH", "HOME", "USERPROFILE", "SystemRoot", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR", "CODEX_HOME", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "NODE_EXTRA_CA_CERTS"];
@@ -42,7 +42,7 @@ export async function completeWithSubscription(raw, { run, env = process.env, si
     const result = await command(["exec", "--ignore-user-config", "--ignore-rules", "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check",
       "--disable", "shell_tool", "--disable", "unified_exec", "--disable", "multi_agent", "--disable", "multi_agent_v2", "--config", 'web_search="disabled"',
       "--config", 'approval_policy="never"', "--config", 'model_reasoning_effort="low"', "--output-schema", schema, "--output-last-message", output,
-      "--cd", directory, "--color", "never", "-"], { input: prompt, timeout: 40000, maxBytes: 500000 });
+      "--cd", directory, "--color", "never", "-"], { input: prompt, timeout: Math.min(180000, Math.max(1000, timeout)), maxBytes: 500000 });
     if (result.code !== 0) {
       const evidence = (result.err ?? "") + (result.out ?? "");
       throw fail(/usage limit|rate.limit|quota|limit reached/i.test(evidence) ? "cli_limit" : /not logged|login required|authentication/i.test(evidence) ? "cli_login_required" : "cli_unavailable");

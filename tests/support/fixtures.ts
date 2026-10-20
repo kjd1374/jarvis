@@ -67,6 +67,7 @@ export async function projectForm(page: Page, name: string) {
     .getByRole("button", { name: "프로젝트 만들기", exact: true })
     .click();
   const modal = page.getByRole("dialog", { name: "프로젝트 만들기" });
+  await modal.getByRole("radio", { name: /개발 시작·이어가기/ }).check();
   await modal.getByLabel("프로젝트 이름").fill(name);
   await modal.getByLabel("프로젝트 설명").fill("자동 회귀 테스트용 합성 자료");
   return modal;

@@ -23,12 +23,12 @@ export default defineConfig({
   projects: [
     {
       name: "desktop",
-      testMatch: /(?:ui|workroom|cloud|automation|sheets)\.spec\.ts/,
+      testMatch: /(?:ui|workroom|cloud|automation|sheets|planning)\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "mobile",
-      testMatch: /(?:ui|workroom|cloud|automation|sheets)\.spec\.ts/,
+      testMatch: /(?:ui|workroom|cloud|automation|sheets|planning)\.spec\.ts/,
       use: { ...devices["Pixel 7"] },
     },
     {

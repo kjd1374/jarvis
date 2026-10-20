@@ -209,14 +209,15 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   }, [loadAttempt, retryCloud]);
 
   const documentPending = data.documents.some(d => d.sheet?.questions.some(q => q.status === "queued" || q.status === "running"));
-  const monitoringActive = documentPending || data.documents.some(d => d.sheet) || data.services.some(s => s.monitoring?.enabled) || data.projects.some(p => p.automation?.turns.some(t => t.status === "queued" || t.status === "running"));
+  const planningPending = data.projects.some(p => p.planning?.turns.some(t => t.status === "queued" || t.status === "running"));
+  const monitoringActive = planningPending || documentPending || data.documents.some(d => d.sheet) || data.services.some(s => s.monitoring?.enabled) || data.projects.some(p => p.automation?.turns.some(t => t.status === "queued" || t.status === "running"));
   useEffect(() => {
     if (!account?.authenticated || !monitoringActive) return;
     const timer = setInterval(() => {
       if (document.visibilityState === "visible" && !conflictRef.current) setLoadAttempt(n => n + 1);
-    }, documentPending ? 5_000 : 30_000);
+    }, documentPending || planningPending ? 5_000 : 30_000);
     return () => clearInterval(timer);
-  }, [account?.authenticated, monitoringActive, documentPending]);
+  }, [account?.authenticated, monitoringActive, documentPending, planningPending]);
 
   function retryLoad() {
     if (!conflictRef.current) setError(null);

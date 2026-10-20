@@ -1,5 +1,7 @@
 import { validateSetup } from "../automation/provision";
 import { validateProjectAutomation } from "../automation/work";
+import { validatePlanning } from "../projects/planning";
+import { projectUrl } from "./project-links";
 import { validateSheetDocument } from "../sheets/documents";
 import { validateMonitoring } from "../automation/validation";
 import { unifyProjectConnections } from "./project-connections";
@@ -153,6 +155,9 @@ export function normalizeWorkspace(value: unknown): WorkspaceData {
   for (const project of data.projects)
     if (
       (project.connectionsUnified !== undefined && project.connectionsUnified !== true) ||
+      project.stage !== undefined && !["idea", "development", "live"].includes(project.stage) ||
+      project.launchUrl !== undefined && (typeof project.launchUrl !== "string" || !projectUrl(project.launchUrl)) ||
+      project.stage === "live" && !project.launchUrl ||
       !text(project.name, 160) ||
       !project.name.trim() ||
       !text(project.description, 10000)
@@ -252,7 +257,7 @@ export function normalizeWorkspace(value: unknown): WorkspaceData {
     }
   }
   for (const service of data.services) validateMonitoring(service, data);
-  for (const project of data.projects) { validateProjectAutomation(project, data); validateSetup(project); }
+  for (const project of data.projects) { validateProjectAutomation(project, data); validateSetup(project); validatePlanning(project); }
   const sourceIds = new Set<string>();
   for (const row of data.sourceRecords) {
     const identity = JSON.stringify([row.serviceId, row.externalId]);

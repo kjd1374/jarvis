@@ -1,4 +1,5 @@
 import { runAutopilotLifecycle } from "./autopilot-lifecycle.mjs";
+import { runPlanningLifecycle } from "./planning-lifecycle.mjs";
 // Connected browser -> real private storage -> runner -> Git -> Docker -> TLS
 // -> signed viewer ticket -> app persistence. External CLI/provider data is synthetic.
 import assert from "node:assert/strict";
@@ -86,6 +87,7 @@ http.createServer((req,res)=>{
     let form = page.getByRole("dialog", { name: "프로젝트 만들기", exact: true });
     const name = "합성 연결 전체 흐름";
     await form.getByLabel("프로젝트 이름").fill(name);
+    await form.getByRole("radio", { name: /개발 시작·이어가기/ }).check();
     await form.getByRole("checkbox", { name: "저장소·실행 환경 자동 준비" }).uncheck();
     await form.getByLabel("프로젝트 설명").fill("등록부터 실제 화면 저장까지 연결 검증");
     await form.getByRole("button", { name: "프로젝트 저장", exact: true }).click(); await expect(form).not.toBeVisible();
@@ -162,6 +164,7 @@ http.createServer((req,res)=>{
     assert(!(await api("/api/workspace?space=company", account.token)).body.data.projects.some(p => p.id === project.id));
     recordCheck("connected lifecycle: browser registration -> existing scoped runner discovery -> synthetic CLI answer -> resumed runner -> real Git/Docker -> persisted result -> real signed-ticket HTTPS open -> isolated app save/reload; outage, copied links, revoked device and cross-space access rejected; no production/model calls");
     await runAutopilotLifecycle({ base, browser, runner: resumed, network, approve, snapshot, recordCheck });
+    await runPlanningLifecycle({ base, browser, runner: resumed, approve, snapshot, recordCheck });
   } catch (error) {
     await page?.screenshot({ path: "test-results/project-lifecycle-failure.png", fullPage: true }).catch(() => {});
     throw error;

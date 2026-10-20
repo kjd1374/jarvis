@@ -60,7 +60,7 @@ export function newProjectSetup(stamp: string, target: ProjectSetup["target"] = 
 export function queueSetupRequest(data: WorkspaceData, space: Space, projectId: string, request: string, mode: "ask" | "change", publish: "pr" | "merge", stamp: string, requestId = id()) {
   const p = data.projects.find(p => p.space === space && p.id === projectId);
   if (!p || !request.trim() || request.length > 8000) throw new Error("프로젝트와 요청을 확인해주세요.");
-  const setup = p.setup ?? newProjectSetup(stamp);
+  const setup = p.setup ?? newProjectSetup(stamp, p.stage === "development" ? "mac" : "auto");
   if (setup.requests.some(r => r.id === requestId)) return data;
   if (setup.requests.length >= 100 || setup.status === "cancelled") throw new Error("자동 준비 상태를 확인해주세요.");
   return { ...data, projects: data.projects.map(row => row.id === p.id ? { ...row, setup: { ...setup, requests: [...setup.requests, { id: requestId, request: request.trim(), mode, publish, createdAt: stamp }] } } : row) };

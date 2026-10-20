@@ -57,12 +57,17 @@ export function mergeCloudWorkspace(
       return preference === "remote" ? r : l;
     }
     const turn = path.length === 5 && path[0] === "projects" && path[2] === "automation" && path[3] === "turns";
+    const planningTurn = path.length === 5 && path[0] === "projects" && path[2] === "planning" && path[3] === "turns";
     const question = path.length === 5 && path[0] === "documents" && path[2] === "sheet" && path[3] === "questions";
     const job = path.length === 4 && path[0] === "services" && path[2] === "monitoring" && path[3] === "job";
     const observation = path.length === 4 && path[0] === "services" && path[2] === "monitoring" &&
       ["runnerSeenAt", "runnerVersion", "runnerConnection", "lastSuccessAt", "lastAttemptAt", "error", "nextRetryAt", "inspection", "analysis", "previousAnalyses", "webLinks"].includes(path[3]) ||
       path.length === 3 && path[0] === "sourceRecords" && path[2] !== "taskId";
     if (path[0] === "providerConnections") return r;
+    if (path.length === 4 && path[0] === "projects" && path[2] === "planning" && path[3] === "runnerSeenAt") return r;
+    if (base && b === undefined && planningTurn && object(l) && object(r) && l.status === "queued" && l.attempt === 0 &&
+      l.updatedAt === l.createdAt && ["leaseOwner", "leaseToken", "leaseUntil", "baseRevision", "baseVersionId", "result", "error", "appliedRevision"].every(k => l[k] === undefined) &&
+      ["id", "request", "createdAt"].every(k => same(l[k], r[k]))) return r;
     if (observation || path.length === 4 && path[0] === "documents" && path[2] === "sheet" && path[3] === "runnerSeenAt") return r;
     if (base && b === undefined && turn && acknowledgedWork(l, r)) return r;
     // The task created by that same initial send may already be in progress.
@@ -74,12 +79,17 @@ export function mergeCloudWorkspace(
       if (l.id === `work-${left?.id}` && acknowledgedWork(left, right)) return r;
     }
     // Never splice lease/result fields or roll back a progressing execution during review.
-    if (turn || job || question || path.length === 3 && path[0] === "projects" && path[2] === "setup") {
+    if (path.length === 4 && path[0] === "projects" && path[2] === "planning" && path[3] === "document") {
+      conflicts.push(path.join("."));
+      return preference === "remote" ? r : l;
+    }
+    if (turn || planningTurn || job || question || path.length === 3 && path[0] === "projects" && path[2] === "setup") {
       conflicts.push(path.join("."));
       return r;
     }
     const keyed = path.length === 1 && collections.includes(path[0] as typeof collections[number]) ||
       path.length === 4 && path[0] === "projects" && path[2] === "automation" && path[3] === "turns" ||
+      path.length === 4 && path[0] === "projects" && path[2] === "planning" && ["turns", "history"].includes(path[3]) ||
       path.length === 4 && path[0] === "documents" && path[2] === "sheet" && ["questions", "snapshots", "tabs"].includes(path[3]);
     if (keyed && Array.isArray(l) && Array.isArray(r) && (b === undefined || Array.isArray(b))) {
       const indexed = (rows: unknown[]) => new Map(rows.map(row => {
