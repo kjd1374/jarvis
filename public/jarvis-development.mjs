@@ -1,8 +1,9 @@
 // Managed macOS processes. App code never inherits the runner's home, credentials or network.
-import { spawn } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
+import { spawn, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { createHash, randomUUID, randomInt } from 'node:crypto';
 import { mkdir, readFile, writeFile, rm, cp, realpath, open } from 'node:fs/promises';
-import { dirname, join, isAbsolute } from 'node:path';
+import { dirname, basename, join, isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import net from 'node:net';
 import { constants as osConstants } from 'node:os';
@@ -17,13 +18,28 @@ let handlers = false;
 export function developmentEnvironment(root, port) {
   return { PATH: `${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`, HOME: join(root, 'home'), TMPDIR: join(root, 'tmp'),
     PORT: String(port), HOST: '127.0.0.1', HOSTNAME: '127.0.0.1', NODE_ENV: 'production', NEXT_TELEMETRY_DISABLED: '1', CI: 'true',
+    // Homebrew OpenSSL otherwise reads its host configuration outside the sandbox.
+    // Use OpenSSL's defaults without importing host paths, engines or credentials.
+    OPENSSL_CONF: '/dev/null',
     npm_config_userconfig: join(root, 'npmrc'), npm_config_globalconfig: join(root, 'global-npmrc'), npm_config_cache: join(root, 'npm-cache') };
 }
-export async function developmentRuntimeLibraries(objects = process.report.getReport().sharedObjects) {
+export async function developmentRuntimeLibraries(objects) {
   // Only binaries already loaded by the trusted runner, never project-provided paths.
   // Homebrew may keep Node's dylibs outside the Node installation directory.
+  if (objects === undefined) {
+    objects = process.report.getReport().sharedObjects;
+    if (process.platform === 'darwin') {
+      // Also inspect the trusted executable's direct load commands. dyld image
+      // reports vary across Node/macOS versions; a required dylib must not be lost.
+      try {
+        const { stdout } = await promisify(execFile)('/usr/bin/otool', ['-L', await realpath(process.execPath)], { timeout: 10_000, maxBuffer: 256_000 });
+        const linked = stdout.split('\n').slice(1).map(line => line.trim().split(' (')[0]).filter(isAbsolute);
+        objects = [...objects, ...linked];
+      } catch { /* Optional load-command inspection; the mandatory sandbox probe still fails closed. */ }
+    }
+  }
   const libraries = new Set();
-  for (const value of Array.isArray(objects) ? objects.slice(0,256) : []) {
+  for (const value of Array.isArray(objects) ? objects.slice(0,4096) : []) {
     if (typeof value !== 'string' || !isAbsolute(value) || value.includes('\0')) continue;
     let file;
     try {
@@ -34,16 +50,33 @@ export async function developmentRuntimeLibraries(objects = process.report.getRe
   }
   return [...libraries].sort();
 }
-export function developmentSandbox(root, data, ports, executable = process.execPath, libraries = []) {
+export async function developmentRuntimeTools(executable = process.execPath) {
+  try {
+    const npm = await realpath(join(dirname(executable), 'npm'));
+    if (basename(npm) !== 'npm-cli.js' || basename(dirname(npm)) !== 'bin') return [];
+    const root = dirname(dirname(npm));
+    const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+    return manifest.name === 'npm' && manifest.bin?.npm === 'bin/npm-cli.js' ? [root] : [];
+  } catch { return []; }
+}
+export function developmentSandbox(root, data, ports, executable = process.execPath, libraries = [], tools = []) {
   // No blanket home, /private/var, /Library or outbound-network permission.
+  // TCP clients also bind kernel-selected source ports. Permit loopback bind,
+  // while inbound listeners and outbound destinations stay on assigned ports.
   const runtime = dirname(dirname(executable));
-  return `(version 1)\n(deny default)\n(allow process-fork process-exec sysctl-read mach-lookup)\n(allow file-read-metadata)\n(allow file-map-executable)\n(allow signal (target self))\n(allow file-read* (literal "/") (subpath "/System") (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/Library/Apple") (subpath ${quote(runtime)}) (subpath ${quote(root)}) (subpath ${quote(data)}) ${libraries.filter(p=>typeof p==='string'&&isAbsolute(p)&&!p.includes('\0')).map(p=>`(literal ${quote(p)})`).join(' ')} (literal "/dev/null") (literal "/dev/random") (literal "/dev/urandom") (literal "/private/etc/localtime") (literal "/private/etc/hosts"))\n(allow file-write* (subpath ${quote(root)}) (subpath ${quote(data)}) (literal "/dev/null"))\n${ports.map(p => `(allow network-bind network-inbound (local ip "localhost:${p}"))\n(allow network-outbound (remote ip "localhost:${p}"))`).join('\n')}\n`;
+  return `(version 1)\n(deny default)\n(allow process-fork process-exec sysctl-read mach-lookup)\n(allow file-read-metadata)\n(allow file-map-executable)\n(allow signal (target self))\n(allow file-read* (literal "/") (subpath "/System") (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/Library/Apple") (subpath ${quote(runtime)}) (subpath ${quote(root)}) (subpath ${quote(data)}) ${libraries.filter(p=>typeof p==='string'&&isAbsolute(p)&&!p.includes('\0')).map(p=>`(literal ${quote(p)})`).join(' ')} ${tools.filter(p=>typeof p==='string'&&isAbsolute(p)&&!p.includes('\0')).map(p=>`(subpath ${quote(p)})`).join(' ')} (literal "/dev/null") (literal "/dev/random") (literal "/dev/urandom") (literal "/private/etc/localtime") (literal "/private/etc/hosts"))\n(allow file-write* (subpath ${quote(root)}) (subpath ${quote(data)}) (literal "/dev/null"))\n(allow network-bind (local ip "localhost:*"))\n${ports.map(p => `(allow network-inbound (local tcp "localhost:${p}"))\n(allow network-outbound (remote tcp "localhost:${p}"))`).join('\n')}\n`;
 }
 async function freePort() {
-  const socket = net.createServer();
-  await new Promise((resolve, reject) => { socket.once('error', reject); socket.listen(0, '127.0.0.1', resolve); });
-  const port = socket.address().port;
-  await new Promise(resolve => socket.close(resolve)); return port;
+  // Keep app listeners out of macOS's ephemeral client-port range. Health
+  // probes and npm can otherwise consume a released port before the app binds.
+  for (let attempt = 0; attempt < 32; attempt++) {
+    const socket = net.createServer(), port = randomInt(16000, 32000);
+    try {
+      await new Promise((resolve, reject) => { socket.once('error', reject); socket.listen(port, '127.0.0.1', resolve); });
+      await new Promise(resolve => socket.close(resolve)); return port;
+    } catch (error) { if (error.code !== 'EADDRINUSE') throw error; }
+  }
+  throw new Error('development_port_unavailable');
 }
 export function developmentStatus(group, action = 'logs', redact = value => value) {
   const key = keyOf(group), item = servers.get(key);
@@ -52,7 +85,7 @@ export function developmentStatus(group, action = 'logs', redact = value => valu
   if (action === 'stop' || action === 'restart') item.close();
   return { running: action === 'logs', detail: action === 'stop' ? '프로젝트 서버와 원격 연결을 종료했습니다. 프로젝트 데이터는 보존됩니다.' : detail };
 }
-export async function startDevelopmentPreview(options, { platform = process.platform, launch = spawn, bindAttempt = 0 } = {}) {
+export async function startDevelopmentPreview(options, { platform = process.platform, launch = spawn, bindAttempt = 0, allocatePort = freePort } = {}) {
   const { cwd, files, sha, stateDir, group, persistent, run, signal, publish, cliInference, aiProvider = 'codex', authorizeCliPreparation } = options;
   if (platform !== 'darwin') return null; // The existing isolated Docker path remains the explicit compatibility path.
   const key = keyOf(group), provider = cliInference ? aiProvider : 'none';
@@ -93,11 +126,13 @@ export async function startDevelopmentPreview(options, { platform = process.plat
     const plan = previewPlan(copied, await json('package.json'), await json('package-lock.json'));
     if (!plan) throw new Error('development_start_unsupported');
     const ports = [];
-    while (ports.length < 3) { const port = await freePort(); if (!ports.includes(port)) ports.push(port); }
+    while (ports.length < 3) { const port = await allocatePort(); if (!ports.includes(port)) ports.push(port); }
     const env = developmentEnvironment(directory, ports[0]);
     const executable = await realpath(process.execPath);
     const profile = join(directory, 'sandbox.sb');
-    await writeFile(profile, developmentSandbox(directory, persistent ? data : join(directory, 'tmp', 'app-data'), ports, executable, await developmentRuntimeLibraries()), { mode: 0o600 });
+    const [libraries, tools] = await Promise.all([developmentRuntimeLibraries(), developmentRuntimeTools()]);
+    appLog = `Runtime preflight ${new Date().toISOString()} · Node ${process.version} · ${libraries.length} runtime libraries\n`;
+    await writeFile(profile, developmentSandbox(directory, persistent ? data : join(directory, 'tmp', 'app-data'), ports, executable, libraries, tools), { mode: 0o600 });
     // Fail closed if the installed macOS sandbox cannot run. Never silently execute on the host.
     const supported = await command('/usr/bin/sandbox-exec', ['-f', profile, executable, '-e', 'process.stdout.write("sandbox-ready")'], { cwd: app, env, signal, timeout: 10_000 });
     if (supported.code !== 0 || supported.out !== 'sandbox-ready') {
@@ -111,11 +146,11 @@ export async function startDevelopmentPreview(options, { platform = process.plat
     plan.persistent = persistent; plan.cli = !!cliInference; plan.aiProvider = aiProvider;
     if (plan.vite) plan.start = plan.start.map(value => value === '3000' ? String(ports[0]) : value);
     const nativeApp = app; // no second copy: this release is already disposable.
-    let source = previewServerSource.replace("if(plan.entry) await cp('/app',cwd,{recursive:true});", '').replace(/'\/runtime\/([^']+)'/g, (_match, name) => quote(join(directory, name))).replaceAll("'/app'", quote(app)).replaceAll("'/tmp/jarvis-preview-app'", quote(nativeApp))
+    let source = previewServerSource.replace(/\b300[01]\b/g, value => String(ports[Number(value.at(-1))])).replace("if(plan.entry) await cp('/app',cwd,{recursive:true});", '').replace(/'\/runtime\/([^']+)'/g, (_match, name) => quote(join(directory, name))).replaceAll("'/app'", quote(app)).replaceAll("'/tmp/jarvis-preview-app'", quote(nativeApp))
       .replace("if(plan.entry) await cp('/app',cwd,{recursive:true});", '')
       .replaceAll("'/persistent'", quote(data)).replaceAll("'/tmp/app-data'", quote(join(directory, 'tmp', 'app-data')))
       .replaceAll("HOME:'/tmp',TMPDIR:'/tmp'", `HOME:${quote(env.HOME)},TMPDIR:${quote(env.TMPDIR)}`)
-      .replaceAll('3000', String(ports[0])).replaceAll('3001', String(ports[1])).replaceAll("'0.0.0.0'", "'127.0.0.1'").replace("stdio:'ignore'", "stdio:'inherit'").replace("NEXT_TELEMETRY_DISABLED:'1'", `NEXT_TELEMETRY_DISABLED:'1',npm_config_userconfig:${quote(env.npm_config_userconfig)},npm_config_globalconfig:${quote(env.npm_config_globalconfig)},npm_config_cache:${quote(env.npm_config_cache)}`);
+      .replaceAll("'0.0.0.0'", "'127.0.0.1'").replace("stdio:'ignore'", "stdio:'inherit'").replace("NEXT_TELEMETRY_DISABLED:'1'", `NEXT_TELEMETRY_DISABLED:'1',OPENSSL_CONF:'/dev/null',npm_config_userconfig:${quote(env.npm_config_userconfig)},npm_config_globalconfig:${quote(env.npm_config_globalconfig)},npm_config_cache:${quote(env.npm_config_cache)}`);
     const token = randomUUID(), cliToken = randomUUID();
     await writeFile(join(directory, 'server.mjs'), source, { mode: 0o600 });
     await writeFile(join(directory, 'plan.json'), JSON.stringify(plan), { mode: 0o600 });
@@ -177,7 +212,7 @@ export async function runDevelopmentTests({ cwd, files, stateDir, identity, run,
     const preload = join(directory, 'test-loopback.mjs');
     await writeFile(preload, `import net from 'node:net';import fs from 'node:fs';const ports=${JSON.stringify(ports)},locks=${JSON.stringify(locks)},listen=net.Server.prototype.listen;
 net.Server.prototype.listen=function(...args){const options=args[0],ephemeral=options===0||options&&typeof options==='object'&&options.port===0;if(!ephemeral)return listen.apply(this,args);let chosen;for(const port of ports){try{fs.mkdirSync(locks+'/'+port);chosen=port;break;}catch(error){if(error.code!=='EEXIST')throw error;}}if(!chosen)throw Error('test_loopback_capacity');let released=false;const release=()=>{if(released)return;released=true;try{fs.rmdirSync(locks+'/'+chosen)}catch{}};this.once('close',release);this.once('error',release);if(options===0){args[0]=chosen;if(typeof args[1]!=='string')args.splice(1,0,'127.0.0.1');}else args[0]={...options,port:chosen,host:options.host??'127.0.0.1'};try{return listen.apply(this,args)}catch(error){release();throw error;}};`, {mode:0o600});
-    await writeFile(profile, developmentSandbox(directory, join(directory, 'data'), ports, executable, await developmentRuntimeLibraries()), { mode: 0o600 });
+    await writeFile(profile, developmentSandbox(directory, join(directory, 'data'), ports, executable, await developmentRuntimeLibraries(), await developmentRuntimeTools()), { mode: 0o600 });
     env.NODE_OPTIONS = `--import=${pathToFileURL(preload).href}`;
     if (plan.install) await prepareDependencies({ app, directory, root, key: keyOf(identity.replace(/:checks$/, '')), run, signal });
     const checks = [];

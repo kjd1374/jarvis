@@ -102,6 +102,7 @@ http.createServer((req,res)=>{
     await form.getByLabel("서비스 웹 주소", { exact: true }).fill(`https://github.com/${repository}`);
     await form.getByRole("button", { name: "서비스 저장", exact: true }).click(); await expect(form).not.toBeVisible();
     const agent = page.getByRole("region", { name: "프로젝트 AI 작업실", exact: true });
+    await agent.locator("summary").filter({ hasText: /^요청 설정/ }).click();
     await agent.getByLabel("요청 방식", { exact: true }).selectOption("ask");
     await agent.getByLabel("AI에게 요청", { exact: true }).fill("합성 프로젝트의 실행 구조를 확인해주세요.");
     await agent.getByRole("button", { name: "요청 보내기", exact: true }).click();

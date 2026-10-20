@@ -11,7 +11,7 @@ export function ProjectDevelopment({ project }: { project: Project }) {
     const open = () => { setTab("chat"); requestAnimationFrame(() => document.getElementById("project-agent-message")?.focus()); };
     window.addEventListener("jarvis-project-chat", open); return () => window.removeEventListener("jarvis-project-chat", open);
   }, []);
-  const tests = [...(project.automation?.turns ?? [])].reverse().filter(turn => turn.result?.checks.length);
+  const tests = [...(project.automation?.turns ?? [])].reverse().filter(turn => turn.mode === "test" && turn.result?.checks.length);
   return <div className={styles.workspace} data-view={tab} aria-label="개발 작업 공간">
     <nav className={styles.tabs} aria-label="개발 작업 보기">{[["screen", "화면"], ["chat", "개발 대화"], ["tests", "검사 결과"], ["all", "함께 보기"]].map(([value, label]) => <button key={value} aria-pressed={tab === value} onClick={() => setTab(value)}>{label}</button>)}</nav>
     <div className={styles.screen}><ProjectScreen project={project} /></div>

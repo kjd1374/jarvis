@@ -1,0 +1,48 @@
+.preview,.agent {padding:20px!important;border-radius:16px!important;min-width:0}
+.preview {display:flex;flex-direction:column;gap:14px;min-height:clamp(460px,65dvh,960px)}
+.toolbar {margin:0!important;gap:12px;align-items:center}
+.toolbar h2 {display:flex;align-items:center;gap:8px;font-size:15px!important}
+.toolbar>div {margin:0;gap:8px}
+.toolbar button {padding:9px 13px;min-height:38px;font-size:12px;border-radius:8px}
+.settings {border:1px solid var(--border);border-radius:10px;min-width:0;background:var(--surface)}
+.settings>summary {display:flex;align-items:center;gap:10px;cursor:pointer;list-style:none;padding:12px;font-size:12px;color:var(--foreground);min-height:40px;box-sizing:border-box;flex-wrap:wrap}
+.settings>summary::-webkit-details-marker {display:none}
+.settings>summary::after {content:'⌄';margin-left:auto;color:var(--muted)}
+.settings[open]>summary::after {transform:rotate(180deg)}
+.settings>summary>span {color:var(--muted);font-size:11px}
+.fields {display:flex;flex-wrap:wrap;align-items:start;gap:12px;padding:0 12px 12px;min-width:0}
+.fields label {display:grid;gap:7px;flex:1 1 200px;min-width:0;color:var(--muted);font-size:12px}
+.fields select {width:100%;min-width:0;background:var(--surface-raised);color:var(--foreground);border:1px solid var(--border-control);border-radius:8px;padding:10px;font:inherit;font-size:12px}
+.fields p,.fields>div {flex-basis:100%;font-size:12px!important;line-height:1.7}
+.canvas {flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:26px 18px;border:1px solid var(--border);border-radius:12px;background:var(--surface);min-width:0;min-height:300px;text-align:center}
+.canvasIcon {display:grid;place-items:center;width:56px;height:56px;border:1px solid var(--border);border-radius:16px;color:var(--muted);background:var(--surface-raised)}
+.canvas[data-failed=true] .canvasIcon {color:var(--warning)}
+.canvas>div[aria-label] {justify-content:center;width:100%;max-width:620px}
+.canvas p {font-size:13px!important;line-height:1.8;max-width:520px}
+.canvas small {font-size:11px;line-height:1.7}
+.canvas details {text-align:left;width:100%}
+.canvas[data-ready=true] {padding:12px;justify-content:start}
+.canvas[data-ready=true]>div {max-width:none;width:100%}
+.serverActions {display:flex;gap:16px;flex-wrap:wrap;align-items:center;padding:0 2px}
+.serverActions button {font-size:12px;min-height:36px}
+.agent>div:first-child {align-items:center;gap:10px;flex-wrap:wrap}
+.agent>div:first-child h2 {font-size:15px}
+.agent>div:first-child>span {font-size:10px;white-space:normal}
+.agent>form {gap:10px;margin:16px 0 0}
+.agent>form>button {align-self:flex-end;min-height:40px;font-size:12px;padding:10px 16px;border-radius:9px}
+.agent>form>p {font-size:11px;line-height:1.7}
+.agent>form>details>div {padding:0 12px 12px;display:grid;grid-template-columns:1fr;gap:12px}
+.agent>form>details select {width:100%;font-size:12px}
+.agent>form textarea {min-height:100px;font-size:13px}
+.agent pre {white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:600px){.preview,.agent {padding:14px!important}.preview {min-height:440px}.canvas {padding:20px 12px;min-height:270px}.toolbar {align-items:start}.toolbar>div {width:100%;justify-content:flex-end}.settings>summary>span {font-size:10px}.agent>form>button {width:100%}}
+.header {align-items:center;gap:16px;margin-bottom:16px}
+.header h1 {font-size:26px;line-height:1.3;overflow-wrap:anywhere}
+.header>div:first-child>span {width:44px;height:44px;border-radius:12px}
+.header button {padding:10px 13px;min-height:38px;border-radius:8px;font-size:12px}
+.quickLinks {margin:0 0 16px;padding:0 0 12px}
+.quickLinks>div {gap:8px}
+.quickLinks a,.quickLinks button {padding:8px 12px;min-height:36px;border-radius:8px;font-size:12px}
+@media(max-width:600px){.header {gap:12px}.header h1 {font-size:22px}.header>div {gap:10px}.quickLinks {margin-bottom:12px}}
+/* iOS Safari zooms the page when focusing a form control smaller than 16px. */
+@media(max-width:600px){.agent>form textarea,.agent>form>details select,.fields select {font-size:16px}}

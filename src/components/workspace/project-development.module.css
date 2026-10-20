@@ -1,4 +1,4 @@
-.workspace {display:grid;grid-template-columns:minmax(0,1.35fr) minmax(340px,1fr);gap:20px;min-width:0;align-items:start}
+.workspace {display:grid;grid-template-columns:minmax(0,1.9fr) minmax(320px,430px);gap:16px;min-width:0;align-items:start}
 .screen,.chat,.tests {min-width:0}
 .screen>section>div:first-child {flex-wrap:wrap;gap:12px}
 .workspace .screen>section,.workspace .chat>section {margin:0;height:100%}
@@ -16,6 +16,8 @@
  .screen,.chat,.tests {margin-bottom:16px}
  .workspace[data-view=screen] .chat,.workspace[data-view=screen] .tests,.workspace[data-view=chat] .screen,.workspace[data-view=chat] .tests,.workspace[data-view=tests] .screen,.workspace[data-view=tests] .chat {display:none}
  .workspace[data-view=all] .tests {display:none}
+ .workspace[data-view=all] .screen>section {min-height:0}
+ .workspace[data-view=all] .screen [data-ready] {min-height:120px}
 }
 
 @media(max-width:400px){.workspace .screen>section,.workspace .chat>section {padding:14px}.screen,.chat {margin-bottom:12px}}

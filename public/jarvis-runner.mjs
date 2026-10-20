@@ -9,7 +9,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { completeWithSubscription, createLocalInference } from "./jarvis-preview-cli.mjs";
 
-export const VERSION = "2.9.1";
+export const VERSION = "2.9.2";
 export class RunnerError extends Error {
   constructor(code) { super(code); this.code = code; }
 }

@@ -34,7 +34,7 @@ export default defineConfig({
     {
       name: "safari",
       testMatch: /automation\.spec\.ts/,
-      grep: /개발 작업 공간은 사진과 설명/,
+      grep: /개발 작업 공간은 사진과 설명|개발 작업 공간은 실패/,
       use: { ...devices["iPhone 13"] },
     },
     {

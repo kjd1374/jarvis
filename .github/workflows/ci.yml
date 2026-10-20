@@ -38,6 +38,15 @@ jobs:
       # No user credentials, paid AI or provider access; real Seatbelt + synthetic app.
       # Always report completed assertions even if a failed synthetic child kept a pipe open.
       - run: node --test --test-force-exit tests/development-runtime.test.mjs
+      # Homebrew dynamically links Node to libraries outside its formula directory.
+      # Official setup-node binaries alone cannot verify this user environment.
+      - run: brew install node
+        if: ${{ !cancelled() }}
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+      - name: Homebrew Node native startup and isolation
+        if: ${{ !cancelled() }}
+        run: '"$(brew --prefix node)/bin/node" --test --test-force-exit tests/development-runtime.test.mjs'
 
   browser-tests:
     runs-on: ubuntu-latest

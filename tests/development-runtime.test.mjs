@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, rm, realpath, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, realpath, readFile, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { readFileSync } from 'node:fs';
@@ -12,8 +12,9 @@ test('native app environment drops all inherited credentials and sandbox does no
   const env = developmentEnvironment('/private/release', 4567);
   assert(!env.OPENAI_API_KEY && !env.GH_TOKEN && !env.JARVIS_PREVIEW_CLI_TOKEN);
   assert.equal(env.HOME, '/private/release/home');
+  assert.equal(env.OPENSSL_CONF, '/dev/null');
   const policy = developmentSandbox('/private/release', '/private/project-data', [4567,4568,4569], '/opt/runtime/bin/node');
-  assert(policy.includes('(deny default)')); assert(policy.includes('localhost:4567'));
+  assert(policy.includes('(deny default)')); assert(policy.includes('(allow network-bind (local ip "localhost:*"))') && policy.includes('(remote tcp "localhost:4567")'));
   assert(!policy.includes('(allow network*)') && !policy.includes('(subpath "/Users")') && !policy.includes('11434'));
 });
 test('unsupported hosts do not run untrusted native code', async () => {
@@ -43,7 +44,7 @@ test('failed sandbox probe preserves its exit status and scoped logs without sta
   assert.match(developmentStatus(group).detail,/Library not loaded/);assert(!developmentStatus('company:probe:example/fixture').detail.includes('Library not loaded'));
  }finally{developmentStatus(group,'stop');await rm(dir,{recursive:true,force:true});}
 });
-test('macOS runtime loads an external dylib with an exact read grant while sibling files stay private',{skip:process.platform!=='darwin'},async()=>{
+test('macOS runtime loads an external dylib with an exact read grant while sibling files stay private',{skip:process.platform!=='darwin',timeout:90_000},async()=>{
  const dir=await realpath(await mkdtemp(join(tmpdir(),"jarvis-external-lib-'"))),root=join(dir,'release'),bin=join(dir,'runtime','bin'),deps=join(dir,'dependencies'),data=join(root,'data');for(const path of[root,bin,deps,data])await mkdir(path,{recursive:true});
  const library=join(deps,'libfixture.dylib'),secret=join(deps,'private-original.txt'),executable=join(bin,'fixture'),profile=join(root,'sandbox.sb');
  try{
@@ -55,7 +56,22 @@ test('macOS runtime loads an external dylib with an exact read grant while sibli
   const allowed=await runCommand('/usr/bin/sandbox-exec',['-f',profile,executable,secret],{cwd:root,env:developmentEnvironment(root,0)});assert.equal(allowed.code,0,allowed.err);assert.equal(allowed.out,'runtime-library-42');
  }finally{await rm(dir,{recursive:true,force:true});}
 });
-test('macOS native lifecycle reuses a live server, preserves DATA_DIR across versions, stops/restarts and enforces isolation', { skip: process.platform !== 'darwin' }, async () => {
+test('macOS Homebrew-style opt aliases load with discovered runtime grants while adjacent files stay private',{skip:process.platform!=='darwin',timeout:90_000},async()=>{
+ const dir=await realpath(await mkdtemp(join(tmpdir(),"jarvis-homebrew-'"))),root=join(dir,'release'),bin=join(dir,'Cellar','node','26','bin'),deps=join(dir,'Cellar','llhttp','9.4','lib'),opt=join(dir,'opt'),data=join(root,'data');
+ for(const path of[root,bin,deps,opt,data])await mkdir(path,{recursive:true});
+ const library=join(deps,'libfixture.dylib'),alias=join(opt,'llhttp','lib','libfixture.dylib'),secret=join(deps,'private-original.txt'),executable=join(bin,'fixture'),profile=join(root,'sandbox.sb');
+ try{
+  await symlink(join(deps,'..'),join(opt,'llhttp'));await writeFile(secret,'PRIVATE_ORIGINAL');
+  await writeFile(join(root,'library.c'),'int fixture(void){return 42;}');
+  await writeFile(join(root,'main.c'),'#include <stdio.h>\nextern int fixture(void);int main(int argc,char**argv){if(argc>1){FILE*f=fopen(argv[1],"r");if(f){fclose(f);return 88;}}printf("homebrew-runtime-%d",fixture());return 0;}');
+  for(const args of [['-dynamiclib',join(root,'library.c'),'-install_name',alias,'-o',library],[join(root,'main.c'),alias,'-o',executable]]){const r=await runCommand('/usr/bin/clang',args,{cwd:root});assert.equal(r.code,0,r.err);}
+  await writeFile(profile,developmentSandbox(root,data,[],executable));
+  const denied=await runCommand('/usr/bin/sandbox-exec',['-f',profile,executable,secret],{cwd:root,env:developmentEnvironment(root,0)});assert.notEqual(denied.code,0);assert.match(denied.err,/Library not loaded/);assert(denied.err.includes(alias));
+  await writeFile(profile,developmentSandbox(root,data,[],executable,await developmentRuntimeLibraries([alias])));
+  const allowed=await runCommand('/usr/bin/sandbox-exec',['-f',profile,executable,secret],{cwd:root,env:developmentEnvironment(root,0)});assert.equal(allowed.code,0,allowed.err);assert.equal(allowed.out,'homebrew-runtime-42');
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+test('macOS native lifecycle reuses a live server, preserves DATA_DIR across versions, stops/restarts and enforces isolation', { skip: process.platform !== 'darwin', timeout:90_000 }, async () => {
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'jarvis-native-test-'))), cwd = join(dir, 'source'), stateDir = join(dir, 'state'), secret = join(dir, 'other-project');
   await mkdir(cwd); await mkdir(stateDir); await writeFile(secret, 'OTHER_PROJECT_PRIVATE');
   const source = `import http from 'node:http';import {readFile,writeFile,mkdir} from 'node:fs/promises';
@@ -83,7 +99,7 @@ test('macOS native lifecycle reuses a live server, preserves DATA_DIR across ver
     assert.equal(await (await fetch(restarted.url + 'save')).text(), '4');
     // A real child under the production profile cannot read a sibling project or connect to an arbitrary host port.
     const isolationRoot = join(stateDir, 'isolation'); await mkdir(isolationRoot); const profile = join(isolationRoot, 'sandbox.sb');
-    await writeFile(profile, developmentSandbox(isolationRoot, join(isolationRoot,'data'), [], await realpath(process.execPath)));
+    await writeFile(profile, developmentSandbox(isolationRoot, join(isolationRoot,'data'), [], await realpath(process.execPath), await developmentRuntimeLibraries()));
     const probe = await runCommand('/usr/bin/sandbox-exec', ['-f', profile, process.execPath, '-e', `const fs=require('node:fs');let blocked=false;try{fs.readFileSync(${JSON.stringify(secret)})}catch{blocked=true}if(!blocked)process.exit(11);const net=require('node:net');const c=net.connect(11434,'127.0.0.1');c.on('connect',()=>process.exit(12));c.on('error',()=>process.stdout.write('isolated'));setTimeout(()=>process.exit(13),2000).unref();`], { cwd: isolationRoot, env: developmentEnvironment(isolationRoot,0) });
     assert.equal(probe.code, 0, probe.err); assert.equal(probe.out,'isolated');
     await writeFile(join(cwd, 'fixture.test.mjs'), `import{test}from'node:test';import assert from'node:assert/strict';test('actual synthetic check',()=>assert.equal(2+2,4));`);
@@ -92,7 +108,7 @@ test('macOS native lifecycle reuses a live server, preserves DATA_DIR across ver
   } finally { developmentStatus(group, 'stop'); await new Promise(resolve=>setTimeout(resolve,100)); await rm(dir,{recursive:true,force:true}); }
 });
 
-test('native AI bridge verifies once, reuses its worker and fences app inference by browser approval', { skip: process.platform !== 'darwin' }, async()=>{
+test('native AI bridge verifies once, reuses its worker and fences app inference by browser approval', { skip: process.platform !== 'darwin', timeout:90_000 }, async()=>{
  const dir=await realpath(await mkdtemp(join(tmpdir(),"jarvis-native-ai-'"))),cwd=join(dir,'source'),stateDir=join(dir,'state'),group='personal:ai:example/fixture';await mkdir(cwd);await mkdir(stateDir);
  await writeFile(join(cwd,'server.mjs'),`import http from'node:http';import{readFile}from'node:fs/promises';const config=JSON.parse(await readFile(new URL('config.json',import.meta.url)));http.createServer(async(req,res)=>{if(req.url==='/translate'){const r=await fetch(config.profiles.jarvis.baseUrl+'/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:'안녕하세요'}]})});res.writeHead(r.status,{'Content-Type':'application/json'});res.end(await r.text());return;}res.setHeader('Content-Type','text/html');res.end('<h1>AI fixture</h1>')}).listen(Number(process.env.PORT),'127.0.0.1');`);
  await writeFile(join(cwd,'config.example.json'),JSON.stringify({profiles:{},teacher:{}}));let calls=0;
@@ -105,7 +121,7 @@ test('native AI bridge verifies once, reuses its worker and fences app inference
   assert(attachPreviewCliAuthorization(first.url,async()=>false));assert.equal((await fetch(first.url+'translate')).status,503);assert.equal(calls,2);
  }finally{developmentStatus(group,'stop');await new Promise(resolve=>setTimeout(resolve,100));await rm(dir,{recursive:true,force:true});}
 });
-test('native npm releases and separate checks reuse the same lock cache without install hooks', {skip:process.platform!=='darwin'},async()=>{
+test('native npm releases and separate checks reuse the same lock cache without install hooks', {skip:process.platform!=='darwin',timeout:90_000},async()=>{
  const dir=await realpath(await mkdtemp(join(tmpdir(),'jarvis-native-npm-'))),cwd=join(dir,'source'),stateDir=join(dir,'state'),group='personal:npm:example/fixture';await mkdir(cwd);await mkdir(stateDir);let installs=0, testPolicy='';
  const pkg={name:'synthetic-native',version:'1.0.0',private:true,scripts:{start:'node server.mjs',build:'node -e "process.stdout.write(\'built\')"',test:'node --test fixture.test.mjs',preinstall:'node -e "process.exit(91)"'}};
  await writeFile(join(cwd,'package.json'),JSON.stringify(pkg));await writeFile(join(cwd,'package-lock.json'),JSON.stringify({name:pkg.name,version:pkg.version,lockfileVersion:3,packages:{'':{name:pkg.name,version:pkg.version,hasInstallScript:true}}}));
@@ -120,9 +136,29 @@ test('native npm releases and separate checks reuse the same lock cache without 
  }finally{developmentStatus(group,'stop');await new Promise(resolve=>setTimeout(resolve,100));await rm(dir,{recursive:true,force:true});}
 });
 
-test('native startup retries one observed port collision without rerunning inference or discarding data', {skip:process.platform!=='darwin'},async()=>{
+test('native startup retries one observed port collision without rerunning inference or discarding data', {skip:process.platform!=='darwin',timeout:90_000},async()=>{
  const dir=await realpath(await mkdtemp(join(tmpdir(),'jarvis-native-bind-'))),cwd=join(dir,'source'),stateDir=join(dir,'state'),group='personal:bind:example/fixture';await mkdir(cwd);await mkdir(stateDir);let starts=0;const diagnostic=[];
  await writeFile(join(cwd,'server.mjs'),`import http from'node:http';http.createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end('<h1>Bind fixture</h1>')}).listen(Number(process.env.PORT),'127.0.0.1');`);
  try{const result=await startDevelopmentPreview({cwd,files:['server.mjs'],sha:'b'.repeat(40),stateDir,group,persistent:true,run:runCommand},{launch:(bin,args,opts)=>{starts++;const profile=readFileSync(args[1],'utf8'),source=readFileSync(args[3],'utf8');diagnostic.push({attempt:starts,port:opts.env.PORT,allowed:[...profile.matchAll(/localhost:(\d+)/g)].map(m=>m[1]),appPort:source.match(/PORT:'(\d+)'/)?.[1],proxyPort:source.match(/\.listen\((\d+)/)?.[1]});return starts===1?spawn(bin,[...args.slice(0,3),'-e',"console.error('EADDRINUSE');process.exit(1)"],opts):spawn(bin,args,opts);}});if(result.state!=='ready')console.error('synthetic native bind diagnostic',JSON.stringify({result,diagnostic,detail:developmentStatus(group).detail}));assert.equal(result.state,'ready',JSON.stringify(result)+' '+developmentStatus(group).detail);assert.equal(starts,2);assert.equal(result.dataPersistence,'project');}
  finally{developmentStatus(group,'stop');await new Promise(resolve=>setTimeout(resolve,100));await rm(dir,{recursive:true,force:true});}
+});
+
+test('macOS repeated app startups bind only their assigned TCP ports', {skip:process.platform!=='darwin',timeout:90_000},async()=>{
+ const dir=await realpath(await mkdtemp(join(tmpdir(),'jarvis-repeat-start-'))),cwd=join(dir,'source'),stateDir=join(dir,'state'),group='personal:repeated:example/fixture';await mkdir(cwd);await mkdir(stateDir);await writeFile(join(cwd,'index.html'),'<h1>Repeated native fixture</h1>');
+ try{
+  for(let attempt=0;attempt<12;attempt++){
+   const result=await startDevelopmentPreview({cwd,files:['index.html'],sha:attempt.toString(16).padStart(40,'0'),stateDir,group,persistent:true,run:runCommand});
+   assert.equal(result.state,'ready',`attempt ${attempt}: ${JSON.stringify(result)} ${developmentStatus(group).detail}`);
+   assert.match(await(await fetch(result.url)).text(),/Repeated native fixture/);
+  }
+ }finally{developmentStatus(group,'stop');await new Promise(resolve=>setTimeout(resolve,100));await rm(dir,{recursive:true,force:true});}
+});
+
+test('generated runtime keeps real paths and overlapping port numbers intact',async()=>{
+ const dir=await realpath(await mkdtemp(join(tmpdir(),'jarvis-3000-template-'))),cwd=join(dir,'source'),stateDir=join(dir,'state');await mkdir(cwd);await mkdir(stateDir);await writeFile(join(cwd,'index.html'),'<h1>Template fixture</h1>');let captured;
+ try{
+  const ports=[30011,30012,30013];
+  await startDevelopmentPreview({cwd,files:['index.html'],sha:'a'.repeat(40),stateDir,group:'personal:template:example/fixture',run:async()=>({code:0,out:'sandbox-ready',err:''})},{platform:'darwin',allocatePort:async()=>ports.shift(),launch:(_bin,args,opts)=>{captured={source:readFileSync(args[3],'utf8'),app:opts.cwd};throw Error('synthetic_stop_before_launch');}});
+  assert(captured);assert(captured.source.includes(JSON.stringify(captured.app)),'path digits must remain unchanged');assert(captured.source.includes('127.0.0.1:30011'),'app port must not be replaced a second time');assert(captured.source.includes('.listen(30012,'),'proxy port must match its sandbox grant');
+ }finally{await rm(dir,{recursive:true,force:true});}
 });
