@@ -1,5 +1,6 @@
 import "server-only";
 import { authorize, CloudError, loadSpace, spaceParam } from "@/lib/cloud/server";
+import { currentPreviewTurn } from "@/lib/automation/work";
 import { repositoryFor } from "@/lib/automation/state";
 import { issuePreviewTicket, previewOrigin, ticketPublicKey } from "../../../public/jarvis-preview-auth.mjs";
 
@@ -19,9 +20,8 @@ export async function authorizedPreview(request: Request, input: Record<string, 
   const turn = project?.automation?.turns.find(t => t.id === input.turnId);
   const service = data.services.find(s => s.space === space && s.projectId === project?.id && s.id === turn?.serviceId);
   const preview = turn?.result?.preview;
-  const latest = [...(project?.automation?.turns ?? [])].reverse().find(t => t.serviceId === turn?.serviceId && t.repository === turn?.repository && t.result?.preview?.state === "ready");
-  const stopped = (project?.automation?.turns ?? []).some(t => t.serviceId === turn?.serviceId && t.repository === turn?.repository && t.runtimeAction === "stop" && t.status === "completed" && (project?.automation?.turns.indexOf(t) ?? -1) >= (project?.automation?.turns.indexOf(turn!) ?? -1));
-  if (stopped || !project || !turn || !service || repositoryFor(service) !== turn.repository || turn.status !== "completed" ||
+  const latest = project && turn && currentPreviewTurn(project, turn.serviceId, turn.repository);
+  if (!project || !turn || !service || repositoryFor(service) !== turn.repository || turn.status !== "completed" ||
     latest?.id !== turn.id || preview?.kind !== "remote" || preview.state !== "ready" || !preview.remoteId || !previewOrigin(preview.url))
     throw new CloudError(404, "preview_unavailable", "현재 프로젝트의 미리보기를 다시 준비해주세요.");
   if (!preview.expiresAt || Date.parse(preview.expiresAt) <= Date.now())

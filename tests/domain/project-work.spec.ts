@@ -272,3 +272,14 @@ test("서버 제어는 명시적 형식과 새 실행기 역량이 있어야 가
   expect(claimProjectWork(queued, { ...scope, previews: true, remoteWork: true }, stamp).job).toBeNull();
   expect(claimProjectWork(queued, { ...scope, previews: true, development: true }, stamp).job!.runtimeAction).toBe("stop");
 });
+
+test("서버 종료 이후 로그 조회가 이전 화면을 되살리지 않고 새 준비 이후에만 열 수 있다", async () => {
+  const { currentPreviewTurn } = await import("../../src/lib/automation/work");
+  const project = automationWorkspace().projects[0], base = { id: uuid, serviceId: "auto-service", repository: "example/synthetic", request: "합성 화면", mode: "preview" as const, publish: "pr" as const, status: "completed" as const, phase: "reporting" as const, attempt: 1, createdAt: stamp, updatedAt: stamp };
+  const ready = { ...base, result: parseWorkResult({ ...result, outcome: "answered" as const, branch: null, prUrl: null, preview: { state: "ready" as const, kind: "remote" as const, remoteId: uuid, url: "https://synthetic-active.trycloudflare.com/", sha: "a".repeat(40), checkedAt: stamp, expiresAt: new Date(Date.parse(stamp)+3600000).toISOString(), message: "합성 준비" } }, base.repository, "preview") };
+  project.automation = { turns: [ready] }; expect(currentPreviewTurn(project, base.serviceId, base.repository)?.id).toBe(uuid);
+  project.automation.turns.push({ ...base, id: "22222222-2222-4222-8222-222222222222", runtimeAction: "stop" }, { ...base, id: "33333333-3333-4333-8333-333333333333", runtimeAction: "logs" });
+  expect(currentPreviewTurn(project, base.serviceId, base.repository)).toBeUndefined();
+  project.automation.turns.push({ ...ready, id: "44444444-4444-4444-8444-444444444444" });
+  expect(currentPreviewTurn(project, base.serviceId, base.repository)?.id).toBe("44444444-4444-4444-8444-444444444444");
+});

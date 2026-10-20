@@ -113,6 +113,12 @@ export function validateProjectAutomation(project: Project, data: WorkspaceData)
 function updateTurn(data: WorkspaceData, project: Project, turn: ProjectTurn) {
   return { ...data, projects: data.projects.map(p => p.id === project.id ? { ...p, automation: { turns: (p.automation?.turns ?? []).map(t => t.id === turn.id ? turn : t) } } : p) };
 }
+export function currentPreviewTurn(project: Project, serviceId: string, repository: string) {
+  const turns = project.automation?.turns ?? [];
+  const latest = [...turns].reverse().find(turn => turn.serviceId === serviceId && turn.repository === repository && turn.result?.preview?.state === "ready");
+  if (!latest || turns.some((turn, index) => index > turns.indexOf(latest) && turn.serviceId === serviceId && turn.repository === repository && turn.runtimeAction === "stop" && turn.status === "completed")) return undefined;
+  return latest;
+}
 export function latestWorkSource(project: Project, serviceId: string, repository: string) {
   const latest = [...(project.automation?.turns ?? [])].reverse().find(t => t.serviceId === serviceId && t.repository === repository && t.mode === "change" && t.result?.headSha && t.result.prUrl);
   return latest?.result?.outcome === "pr_open" ? latest : undefined;

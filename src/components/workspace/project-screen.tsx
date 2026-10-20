@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { enqueueWork, latestWorkSource, preferredWorkRevision } from "@/lib/automation/work";
+import { enqueueWork, currentPreviewTurn, latestWorkSource, preferredWorkRevision } from "@/lib/automation/work";
 import { repositoryFor } from "@/lib/automation/state";
 import { queuedWorkMessage } from "@/lib/automation/runner-status";
 import { dateLabel, id, now, type Project } from "@/lib/workspace/types";
@@ -20,19 +20,21 @@ export function previewMessage(preview: WorkPreview) {
 export function PreviewResult({ preview, project, turnId }: { preview: WorkPreview; project: Project; turnId: string }) {
   const clock = useWorkspaceClock();
   const expired = !!preview.expiresAt && Date.parse(preview.expiresAt) <= clock;
+  const turn = project.automation?.turns.find(turn => turn.id === turnId);
+  const superseded = preview.state === "ready" && !!turn && currentPreviewTurn(project, turn.serviceId, turn.repository)?.id !== turn.id;
   const href = preview.kind === "remote" ? `/api/preview/open?${new URLSearchParams({ space: project.space, projectId: project.id, turnId })}` : preview.url;
   return <div aria-label="화면 준비 결과" className={styles.screenResult}>
-    <strong>{expired ? "미리보기 시간 만료" : preview.state === "ready" ? preview.kind === "mac" ? "맥미니 전용 미리보기" : preview.kind === "remote" ? "원격 미리보기 준비됨" : "웹 배포 확인됨" : "화면 준비 필요"}</strong>
-    {preview.state === "ready" && !expired && href && <a className={styles.primaryButton} href={href} target="_blank" rel="noopener noreferrer">
+    <strong>{expired ? "미리보기 시간 만료" : superseded ? "이전 화면 · 다시 준비 필요" : preview.state === "ready" ? preview.kind === "mac" ? "맥미니 전용 미리보기" : preview.kind === "remote" ? "원격 미리보기 준비됨" : "웹 배포 확인됨" : "화면 준비 필요"}</strong>
+    {preview.state === "ready" && !expired && !superseded && href && <a className={styles.primaryButton} href={href} target="_blank" rel="noopener noreferrer">
       {preview.kind === "mac" ? "맥미니에서만 열기 ↗" : preview.kind === "remote" ? "이 PC에서 화면 열기 ↗" : "이 버전의 웹 화면 열기 ↗"}
     </a>}
-    <p>{expired ? "화면 준비를 다시 누르면 현재 코드로 새 미리보기를 준비합니다." : previewMessage(preview)}</p>
+    <p>{expired ? "화면 준비를 다시 누르면 현재 코드로 새 미리보기를 준비합니다." : superseded ? "이후 다른 화면을 준비했거나 서버를 종료했습니다. 위의 화면 준비에서 현재 코드를 확인해주세요." : previewMessage(preview)}</p>
     {preview.execution && <small>{preview.execution === "native" ? "맥미니 로컬 서버" : "Docker 호환 실행"}{preview.reused ? " · 실행 중인 서버 재사용" : ""}</small>}
     {preview.ai && <p>{preview.ai.provider === "ollama" ? "로컬 LLM 실제 응답 확인 · TranslateGemma" : "구독 CLI 실제 응답 확인"} · 안녕하세요 → {preview.ai.sample} · {dateLabel(preview.ai.verifiedAt)}</p>}
     {preview.diagnostic && <details className={styles.compactDisclosure}><summary>연결 진단</summary>
       <p>{previewStages[preview.diagnostic.stage]} · {preview.diagnostic.code}{preview.diagnostic.statusCode ? ` · HTTP ${preview.diagnostic.statusCode}` : ""}{preview.diagnostic.exitCode !== undefined ? ` · 종료 코드 ${preview.diagnostic.exitCode}` : ""}</p>
     </details>}
-    {preview.kind === "mac" && preview.state === "ready" && preview.url && !expired && <p>이전 실행기가 만든 주소입니다. <Link href="/settings#cli-runner">맥미니 실행기를 업데이트</Link>한 뒤 화면 준비를 다시 누르면 다른 PC에서도 열 수 있습니다.</p>}
+    {preview.kind === "mac" && !preview.execution && preview.state === "ready" && preview.url && !expired && <p>이전 실행기가 만든 주소입니다. <Link href="/settings#cli-runner">맥미니 실행기를 업데이트</Link>한 뒤 화면 준비를 다시 누르면 다른 PC에서도 열 수 있습니다.</p>}
     <small>코드 {preview.sha.slice(0, 8)} · 확인 {dateLabel(preview.checkedAt)}{preview.expiresAt ? ` · 종료 ${dateLabel(preview.expiresAt)}` : ""}</small>
   </div>;
 }
@@ -72,7 +74,7 @@ export function ProjectScreen({ project }: { project: Project }) {
   const lastStop = [...turns].reverse().find(turn => turn.runtimeAction === "stop" && turn.status === "completed");
   const stopped = !!lastStop && (!latest || turns.indexOf(lastStop) >= turns.indexOf(latest));
   const embedPreview = stopped ? undefined : latest?.result?.preview;
-  const canEmbed = embedPreview?.state === "ready" && embedPreview.kind === "remote" && !!embedPreview.execution && Date.parse(embedPreview.expiresAt ?? "") > clock;
+  const canEmbed = embedPreview?.state === "ready" && embedPreview.kind === "remote" && currentPreviewTurn(project, service!.id, repositoryFor(service!)!)?.id === latest?.id && !!embedPreview.execution && Date.parse(embedPreview.expiresAt ?? "") > clock;
   useEffect(() => {
     const message = (event: MessageEvent) => {
       if (!embedPreview?.url || event.origin !== new URL(embedPreview.url).origin || event.source !== frame.current?.contentWindow || event.data?.type !== "jarvis-preview-open-tab") return;

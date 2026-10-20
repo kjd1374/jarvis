@@ -447,7 +447,7 @@ The audit reproduced a separate UI defect: a project without a GitHub repository
 
 ## 2026-10-20 개발 작업 공간과 로컬 실행 (Issue #72)
 
-공식 GitHub 후보를 비교했다. `apple/container`(Apache-2.0, 2026-10-19 갱신)는 macOS/Linux VM 격리에 유용하지만 Apple silicon·OS 조건과 이미지 준비가 추가되어 이번 직접 프로세스 요구에는 도입하지 않는다. `Unitech/pm2`(AGPL-3.0, 2026-10-19 갱신)는 프로세스 관리에는 적합하지만 파일/네트워크 격리·Jarvis 기기/임대 범위를 제공하지 않고 별도 데몬과 라이선스 검토가 필요해 보류한다. 기존 `cloudflare/cloudflared`(Apache-2.0, 검토 시 2026-10-19 갱신)는 설치된 고정 2026.10.1 바이너리와 해시 검증·사설 티켓 게이트를 재사용한다. 신규 계정·유료 서비스·패키지는 추가하지 않는다. 이미지/앱은 승인된 Jarvis 기기와 기존 사설 저장소·Cloudflare 전송 경로를 이용하고, 수정용 사진은 요청에 선택한 구독 CLI에 전달한다. GitHub에는 올리지 않는다.
+공식 GitHub 후보를 비교했다. `apple/container`(검토 릴리스 1.6.0, Apache-2.0, 2026-10-19 갱신)는 macOS/Linux VM 격리에 유용하지만 Apple silicon·OS 조건과 이미지 준비가 추가되어 이번 직접 프로세스 요구에는 도입하지 않는다. `Unitech/pm2`(검토 릴리스 v7.0.4, AGPL-3.0, 2026-10-19 갱신)는 프로세스 관리에는 적합하지만 파일/네트워크 격리·Jarvis 기기/임대 범위를 제공하지 않고 별도 데몬과 라이선스 검토가 필요해 보류한다. 기존 `cloudflare/cloudflared`(Apache-2.0, 검토 시 2026-10-19 갱신)는 설치된 고정 2026.10.1 바이너리와 해시 검증·사설 티켓 게이트를 재사용한다. 신규 계정·유료 서비스·패키지는 추가하지 않는다. 이미지/앱은 승인된 Jarvis 기기와 기존 사설 저장소·Cloudflare 전송 경로를 이용하고, 수정용 사진은 요청에 선택한 구독 CLI에 전달한다. GitHub에는 올리지 않는다.
 
 실행기 2.9.0: macOS Seatbelt(`sandbox-exec`)로 정제한 프로젝트 사본·별도 HOME/tmp·프로젝트 DATA_DIR·고정 loopback 포트만 허용한다. 호스트 자격증명과 다른 프로젝트, 인터넷·Ollama 관리 포트는 허용하지 않는다. OS 격리가 실패하면 호스트 무격리 실행으로 전환하지 않는다. 다른 OS의 기존 Docker 격리 경로는 유지하며 결과에 실행 방식을 기록한다. Docker는 Mac 설치 필수 조건에서 제외한다. 기존 Docker 영속 데이터가 있는 프로젝트는 한 번만 정지·읽기 전용 원본 복사로 이관하고 원본 볼륨은 유지한다. 이관을 확인하지 못하면 새 빈 데이터로 시작하지 않는다.
 
@@ -462,3 +462,5 @@ macOS 테스트가 `listen(0)`으로 임시 HTTP 서버를 실행할 때도 다�
 기존 Docker 데이터의 첫 이관에서만 고정 공식 Node 이미지가 없으면 받아 읽기 전용 원본 볼륨을 복사한다. BuildKit의 FROM 캐시는 실행 가능한 이미지 태그와 다르므로 태그의 존재를 별도로 확인한다. 복사 컨테이너는 네트워크·루트 쓰기를 차단하고 두 프로젝트 데이터 경로만 마운트한다. 비공개 파일 읽기와 호스트 사용자 소유권 복원에 필요한 DAC_OVERRIDE/CHOWN만 추가하며, 원본 볼륨은 덮어쓰지 않는다. 신규 Mac 프로젝트와 이관 이후의 서버/검사는 Docker가 필요 없다.
 
 Cloudflare의 현행 공식 문서 `cloudflare/cloudflare-docs/production/src/content/docs/tunnel/get-started/quick-tunnels/index.mdx`는 Quick Tunnel의 SSE 미지원을 명시한다. 따라서 원격 HTML에 선행 로드한 전송 어댑터가 동일 origin의 fetch/EventSource만 처리하고, 맥의 실제 SSE 응답을 최대 4개·32 MB 스트림으로 유지해 승인 세션에 묶인 짧은 JSON 조회로 전달한다. 읽지 않으면 backpressure로 멈추고, 취소/30초 미조회/승인 폐기/만료 시 원본 요청도 종료한다. 인증 쿠키는 앱이나 JSON에 노출하지 않는다. 다른 origin의 요청은 바꾸지 않는다. 원시 SSE를 임시 주소에서 지원한다고 주장하거나 새 클라우드 계정 설정을 요구하지 않는다.
+
+검증 경계: macOS 14 실제 Seatbelt 프로세스로 서버 재사용·버전 교체·데이터·종료/재시작·다른 프로젝트/임의 포트 차단, 별도 HTTP 테스트, 의존성 캐시와 합성 AI 연결을 검사했다. 로컬 실제 사설 Supabase와 브라우저에서 사진 저장→임대 원본 확인→실제 CLI 이미지 인자→사본 삭제→재열기를 확인했다. Cloudflare 실제 임시 터널도 macOS/Linux 양쪽에서 스트림 첫 청크/후속 청크·WebSocket 왕복·서명 입장·복사 링크 거부·승인 폐기를 통과했다. 외부로 내보낸 앱/키/내용은 합성 자료이며 운영 사용자 데이터와 유료 모델은 쓰지 않았다. 실제 사용자 Mac의 2.9.0 적용과 휴대폰 마이크 권한/앱 기능은 이 검사 결과와 별도다.
