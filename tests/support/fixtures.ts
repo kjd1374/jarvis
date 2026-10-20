@@ -100,6 +100,10 @@ export async function seed(page: Page, data: WorkspaceData) {
       }),
     data,
   );
+  // WebKit reports aborted Next.js prefetches as page errors on a forced reload.
+  // Finish that fixture-only navigation before reloading seeded state.
+  if (page.context().browser()?.browserType().name() === "webkit")
+    await page.waitForLoadState("networkidle");
   await page.reload();
   await ready(page);
 }

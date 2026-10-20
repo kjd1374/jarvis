@@ -51,7 +51,7 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci --no-audit --no-fund
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps chromium webkit
       # No environment secrets: each suite builds a disposable, local-only app.
       - run: npm run test:${{ matrix.suite }}
       - uses: actions/upload-artifact@v4

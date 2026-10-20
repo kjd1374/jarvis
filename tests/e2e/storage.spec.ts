@@ -529,6 +529,20 @@ test("파일 원본과 프로젝트·업무 연결, 연결 변경과 대화 첨�
     .click();
   const download = await downloadPromise;
   expect(await readFile((await download.path())!)).toEqual(original);
+  // Existing v1 Blob records remain readable without rewriting the database.
+  const fileId = (await state(page))!.documents[0].id;
+  await page.evaluate(async ({ fileId, bytes }) => {
+    const db = await new Promise<IDBDatabase>(resolve => { const r = indexedDB.open("jarvis-workspace", 1); r.onsuccess = () => resolve(r.result); });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction("files", "readwrite");
+      tx.objectStore("files").put(new Blob([new Uint8Array(bytes)], { type: "text/plain" }), fileId);
+      tx.oncomplete = () => resolve(); tx.onabort = () => reject(tx.error);
+    }); db.close();
+  }, { fileId, bytes: [...original] });
+  await page.reload(); await ready(page);
+  const legacyDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "합성-기획.txt 다운로드", exact: true }).click();
+  expect(await readFile((await (await legacyDownload).path())!)).toEqual(original);
   const stored = (await state(page))!;
   expect(stored.documents[0]).toMatchObject({
     projectId: stored.projects[0].id,

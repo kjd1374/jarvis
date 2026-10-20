@@ -15,7 +15,7 @@
     "db:reset": "supabase db reset --local",
     "deploy:preview": "node --use-env-proxy scripts/deploy-preview.mjs --deploy",
     "deploy:production": "vercel --prod",
-    "test:e2e": "playwright test --project=desktop --project=mobile",
+    "test:e2e": "playwright test --project=desktop --project=mobile --project=safari",
     "test:storage": "playwright test --project=storage",
     "test:all": "playwright test",
     "test:report": "playwright show-report",

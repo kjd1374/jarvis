@@ -19,7 +19,7 @@ export async function runProjectLifecycle({ base, api, account, sql, users, netw
   assert.equal(base, "http://127.0.0.1:4317");
   const directory = await mkdtemp(join(tmpdir(), "jarvis-project-lifecycle-"));
   const seed = join(directory, "seed"), bare = join(directory, "remote.git"), space = "personal", repository = "example/lifecycle-fixture";
-  let browser, page, gitServer, bridge, container, modelCalls = 0;
+  let browser, page, gitServer, bridge, container, dataVolume, modelCalls = 0;
   const nativeFetch = globalThis.fetch, unexpected = [];
   const snapshot = async () => { const result = await api(`/api/workspace?space=${space}`, account.token); assert.equal(result.status, 200); return result.body; };
   const git = args => execFileSync("git", ["-c", "core.hooksPath=/dev/null", ...args], { cwd: seed,
@@ -67,7 +67,7 @@ http.createServer((req,res)=>{
     let status = await runner.request("/api/account");
     if (!status.pairingCode) { await runner.request("/api/account/device", {}); status = await runner.request("/api/account"); }
     await approve(status); assert.equal((await runner.request("/api/account")).authenticated, true);
-    const installedScope = { space, projectIds: ["removed-installed-project"], provider: "codex", runnerVersion: VERSION, workVersion: 1, remoteWorkVersion: 1, previewVersion: 1, previewCliVersion: 1 };
+    const installedScope = { space, projectIds: ["removed-installed-project"], provider: "codex", runnerVersion: VERSION, workVersion: 1, remoteWorkVersion: 1, previewVersion: 1, previewCliVersion: 1, developmentVersion: 1 };
     assert.equal((await runner.request("/api/automation/claim", installedScope)).job, null);
     const before = await snapshot();
     browser = await chromium.launch({ proxy: { server: network.proxy, bypass: "localhost,127.0.0.1" }, ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } : {}) });
@@ -141,6 +141,7 @@ http.createServer((req,res)=>{
     await expect.poll(async () => (await snapshot()).data.projects.find(p => p.id === project.id).automation.turns.at(-1).mode).toBe("preview");
     const previewJob = (await resumed.request("/api/automation/claim", installedScope)).job;
     assert.equal(previewJob.mode, "preview"); assert.equal(previewJob.previewAI, undefined);
+    dataVolume = `jarvis-data-${createHash("sha256").update(`${space}:${project.id}:${repository}`).digest("hex").slice(0, 24)}`;
     container = `jarvis-preview-${createHash("sha256").update(`${space}:${project.id}:${repository}:${sha}:none`).digest("hex").slice(0, 24)}`;
     await executeProjectWork(resumed, previewJob, options);
     const saved = await snapshot(), result = saved.data.projects.find(p => p.id === project.id).automation.turns.at(-1).result;
@@ -173,6 +174,7 @@ http.createServer((req,res)=>{
   } finally {
     globalThis.fetch = nativeFetch; await browser?.close(); bridge?.close();
     if (container) { await runCommand("docker", ["rm", "-f", container]).catch(() => {}); await runCommand("docker", ["image", "rm", `${container}:app`]).catch(() => {}); }
+    if (dataVolume) await runCommand("docker", ["volume", "rm", dataVolume]).catch(() => {});
     if (gitServer) { gitServer.closeAllConnections(); await new Promise(r => gitServer.close(r)); }
     await rm(directory, { recursive: true, force: true });
   }

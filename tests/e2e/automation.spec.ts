@@ -494,7 +494,9 @@ test("로컬 LLM 선택은 구독 CLI와 구분해 저장하고 구버전 실행
 });
 
 test("개발 작업 공간은 사진과 설명을 같은 요청에 저장하고 모바일 탭과 대화를 복원한다", async ({ page, isMobile }) => {
-  const data = automationWorkspace(new Date().toISOString()); await seed(page, data); await page.goto("/projects/auto-project"); await ready(page);
+  const data = automationWorkspace(new Date().toISOString()); await seed(page, data);
+  if (page.context().browser()?.browserType().name() === "webkit") await page.waitForLoadState("networkidle");
+  await page.goto("/projects/auto-project"); await ready(page);
   const nav = page.getByRole("navigation", { name: "개발 작업 보기" }), agent = page.getByRole("region", { name: "프로젝트 AI 작업실", exact: true });
   if (isMobile) {
     await nav.getByRole("button", { name: "개발 대화", exact: true }).click();
@@ -513,6 +515,12 @@ test("개발 작업 공간은 사진과 설명을 같은 요청에 저장하고 
   await page.reload(); await ready(page); await expect(agent).toContainText("첨부 사진 1장");
   if (isMobile) { await nav.getByRole("button", { name: "검사 결과", exact: true }).click(); await expect(page.getByRole("region", { name: "개발 검사 결과" })).toBeVisible(); await expect(agent).not.toBeVisible(); }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.goto("/library"); await ready(page);
+  const downloading = page.waitForEvent("download");
+  await page.getByRole("button", { name: "synthetic-screen.jpg 다운로드", exact: true }).click();
+  const { readFile } = await import("node:fs/promises"), { createHash } = await import("node:crypto");
+  const bytes = await readFile((await (await downloading).path())!);
+  expect(createHash("sha256").update(bytes).digest("hex")).toBe(turn.images![0].sha256);
 });
 
 test("개발 화면은 기존 서버를 새 요청 없이 열고 제한된 iframe은 새 탭으로 안내하며 서버 명령을 보관한다", async ({ page, isMobile }) => {
