@@ -114,7 +114,7 @@ export async function startDevelopmentPreview(options, { platform = process.plat
     child = launch('/usr/bin/sandbox-exec', ['-f', profile, executable, join(directory, 'server.mjs')], { cwd: app, env: { ...env, JARVIS_PREVIEW_ID: token, JARVIS_PREVIEW_CLI_TOKEN: cliToken, JARVIS_PREVIEW_TTL: String(ttl) }, detached: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
     const item = { sha, provider, persistent: !!persistent, token, close, log: '', ready: null };
     for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => { item.log = (item.log + chunk.toString()).slice(-16_000); appLog = item.log; });
-    child.on('error', close); child.on('exit', close);
+    child.on('error', close); child.on('close', close);
     bridge = registerDevelopmentBridge(`development-${key}-${token}`, `http://127.0.0.1:${ports[1]}/`, expiresAt, close);
     let healthy = false;
     for (let attempt = 0; attempt < 100 && !closed; attempt++) {
