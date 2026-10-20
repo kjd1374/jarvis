@@ -175,6 +175,9 @@ export async function migrateDevelopmentData({ data, key, run, signal, legacyDoc
     const volume = `jarvis-data-${key}`;
     const inspected = await run('docker', ['volume', 'inspect', volume], { signal, timeout: 15_000 });
     if (inspected.code !== 0) throw new Error('development_data_migration_required');
+    const image = 'node:24.19.0-bookworm-slim';
+    const cachedImage = await run('docker', ['image', 'inspect', image], { signal, timeout: 15_000 });
+    if (cachedImage.code !== 0 && (await run('docker', ['pull', image], { signal, timeout: 180_000, maxBytes: 4096 })).code !== 0) throw new Error('development_data_image_unavailable');
     const listed = await run('docker', ['ps', '--quiet', '--filter', `label=jarvis.preview.group=${key}`], { signal, timeout: 15_000 });
     if (listed.code !== 0) throw new Error('development_data_migration_required');
     const ids = listed.out.trim().split('\n').filter(Boolean);
@@ -186,7 +189,7 @@ export async function migrateDevelopmentData({ data, key, run, signal, legacyDoc
     const staging = `${data}.migration`;
     await rm(staging, { recursive: true, force: true }); await mkdir(staging, { mode: 0o700 });
     const script = `const fs=require('node:fs');const uid=Number(process.argv[1]),gid=Number(process.argv[2]);let total=0;function copy(from,to){for(const d of fs.readdirSync(from,{withFileTypes:true})){const a=from+'/'+d.name,b=to+'/'+d.name;if(d.isSymbolicLink())throw Error('symlink');if(d.isDirectory()){fs.mkdirSync(b);copy(a,b);fs.chownSync(b,uid,gid)}else if(d.isFile()){total+=fs.statSync(a).size;if(total>1024*1024*1024)throw Error('size');fs.copyFileSync(a,b);fs.chownSync(b,uid,gid)}else throw Error('type')}}copy('/source','/target');`;
-    // No pull: reuse the already installed official runtime image. Failure stays visible.
+    // The fixed official image is loaded only for this one-time legacy volume copy.
     const copied = await run('docker', ['run', '--rm', '--pull=never', '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--cap-add', 'CHOWN', '--cap-add', 'DAC_OVERRIDE', '--security-opt', 'no-new-privileges', '--mount', `type=volume,src=${volume},dst=/source,readonly`, '--mount', `type=bind,src=${staging},dst=/target`, 'node:24.19.0-bookworm-slim', 'node', '-e', script, String(process.getuid()), String(process.getgid())], { signal, timeout: 120_000, maxBytes: 4096 });
     if (copied.code !== 0) throw new Error('development_data_migration_required');
     const { readdir, rename } = await import('node:fs/promises');

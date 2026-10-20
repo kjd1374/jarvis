@@ -190,7 +190,7 @@ function ProjectView({ project }: { project: Project }) {
           </a>)}
           <ServiceRegistrationButton preset="custom" projectId={project.id}><Icon name="plus" size={15} />{links.web.length ? "웹 주소 추가" : "웹 주소 직접 보완"}</ServiceRegistrationButton>
           {!links.github.length && <ServiceRegistrationButton preset="github" projectId={project.id}>GitHub 연결</ServiceRegistrationButton>}
-          <a className={styles.textButton} href="#project-ai">AI에 수정 요청 →</a>
+          <a className={styles.textButton} href="#project-ai" onClick={() => window.dispatchEvent(new Event("jarvis-project-chat"))}>AI에 수정 요청 →</a>
         </div>
         <p>{links.web.length ? "실제 화면을 새 탭에서 확인하고 바로 아래 AI에게 요청하세요. GitHub에서 발견한 웹 주소도 자동으로 표시됩니다." : links.github.length ? "아래 화면 준비를 누르면 현재 코드의 배포 또는 맥미니 미리보기를 확인할 수 있습니다." : "GitHub를 연결하면 실행기가 웹 주소와 프로젝트 내용을 확인합니다."}</p>
         {data.services.some(s => s.space === project.space && s.projectId === project.id && s.monitoring?.webLinks?.length) &&
