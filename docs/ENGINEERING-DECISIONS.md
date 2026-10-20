@@ -460,3 +460,5 @@ The audit reproduced a separate UI defect: a project without a GitHub repository
 macOS 테스트가 `listen(0)`으로 임시 HTTP 서버를 실행할 때도 다른 호스트 서비스/Ollama에 접근해서는 안 된다. 테스트별 사전에 확보한 16개 loopback 포트만 Seatbelt에 허용하고 Node preload가 임시 포트를 이 풀에 배정한다. 테스트 프로세스 간 포트 임대는 전용 임시 폴더의 원자 mkdir로 구분한다. 전체 loopback/인터넷 허용으로 완화하지 않는다. 다른 고정 포트를 요구하는 검사는 실패 로그로 표시한다. 새 Mac 프로젝트 준비에서도 Docker 필수 검사와 불필요한 운영 클라우드 계정 조회를 제거한다.
 
 기존 Docker 데이터의 첫 이관에서만 고정 공식 Node 이미지가 없으면 받아 읽기 전용 원본 볼륨을 복사한다. BuildKit의 FROM 캐시는 실행 가능한 이미지 태그와 다르므로 태그의 존재를 별도로 확인한다. 복사 컨테이너는 네트워크·루트 쓰기를 차단하고 두 프로젝트 데이터 경로만 마운트한다. 비공개 파일 읽기와 호스트 사용자 소유권 복원에 필요한 DAC_OVERRIDE/CHOWN만 추가하며, 원본 볼륨은 덮어쓰지 않는다. 신규 Mac 프로젝트와 이관 이후의 서버/검사는 Docker가 필요 없다.
+
+Cloudflare의 현행 공식 문서 `cloudflare/cloudflare-docs/production/src/content/docs/tunnel/get-started/quick-tunnels/index.mdx`는 Quick Tunnel의 SSE 미지원을 명시한다. 따라서 원격 HTML에 선행 로드한 전송 어댑터가 동일 origin의 fetch/EventSource만 처리하고, 맥의 실제 SSE 응답을 최대 4개·32 MB 스트림으로 유지해 승인 세션에 묶인 짧은 JSON 조회로 전달한다. 읽지 않으면 backpressure로 멈추고, 취소/30초 미조회/승인 폐기/만료 시 원본 요청도 종료한다. 인증 쿠키는 앱이나 JSON에 노출하지 않는다. 다른 origin의 요청은 바꾸지 않는다. 원시 SSE를 임시 주소에서 지원한다고 주장하거나 새 클라우드 계정 설정을 요구하지 않는다.

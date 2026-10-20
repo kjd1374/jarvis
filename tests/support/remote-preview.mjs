@@ -25,7 +25,7 @@ export async function fixture(run) {
   const peers = new Set();
   const upstream = http.createServer((req, res) => {
     reached++; forwarded = req.headers;
-    if (req.url === "/stream") { res.writeHead(200,{"Content-Type":"text/event-stream"}); res.write("data: first\n\n"); setTimeout(()=>res.end("data: last\n\n"),200); return; }
+    if (req.url.startsWith("/stream")) { res.writeHead(200,{"Content-Type":"text/event-stream"}); res.write("data: first\n\n"); setTimeout(()=>res.end("data: last\n\n"),req.url.includes("slow")?1500:200); return; }
     if (req.url === "/api") { res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify({ writes: req.method === "POST" ? ++writes : writes })); return; }
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.end('<h1>Synthetic remote preview</h1><button>Save</button><output></output><script>document.querySelector("button").onclick=async()=>{const r=await fetch("/api",{method:"POST"});document.querySelector("output").textContent=(await r.json()).writes}</script>');

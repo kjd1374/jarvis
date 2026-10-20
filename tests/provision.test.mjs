@@ -58,7 +58,7 @@ test('verified updates stage separately and reject corrupt or failed candidates 
  const {stageUpdate}=await import('../public/jarvis-supervisor.mjs');const {createHash}=await import('node:crypto');
  const dir=await mkdtemp(join(tmpdir(),'jarvis-updater-'));try{
   const runtime=join(dir,'current');await mkdir(runtime);await writeFile(join(runtime,'jarvis-runtime.json'),JSON.stringify({version:'2.6.0'}));await writeFile(join(runtime,'cloudflared'),'synthetic tunnel');
-  const names=['jarvis-runner.mjs','jarvis-preview.mjs','jarvis-development.mjs','jarvis-remote-preview.mjs','jarvis-preview-auth.mjs','jarvis-preview-cli.mjs','jarvis-provision.mjs','jarvis-supervisor.mjs','jarvis-mac.mjs'];const bytes='// verified synthetic runtime\n',hash=createHash('sha256').update(bytes).digest('hex');
+  const names=['jarvis-runner.mjs','jarvis-preview.mjs','jarvis-development.mjs','jarvis-stream-transport.mjs','jarvis-remote-preview.mjs','jarvis-preview-auth.mjs','jarvis-preview-cli.mjs','jarvis-provision.mjs','jarvis-supervisor.mjs','jarvis-mac.mjs'];const bytes='// verified synthetic runtime\n',hash=createHash('sha256').update(bytes).digest('hex');
   const manifest={version:'2.6.1',files:Object.fromEntries(names.map(n=>[n,hash]))};
   const transport=async(url,options)=>{assert.equal(options.redirect,'error');return new Response(url.endsWith('jarvis-runtime.json')?JSON.stringify(manifest):bytes);};
   const candidate=await stageUpdate({runtime,directory:dir,origin:'https://fixture.invalid',transport,run:async(bin,args)=>{assert.equal(bin,process.execPath);assert.equal(args.at(-1),'--self-check');return{code:0};}});
@@ -99,7 +99,7 @@ test('supervisor restores the previous verified runtime when a candidate passes 
   const runtime=join(dir,'installed');await mkdir(runtime);await writeFile(join(runtime,'jarvis-runtime.json'),JSON.stringify({version:'2.6.0'}));await writeFile(join(runtime,'cloudflared'),'synthetic tunnel');
   await writeFile(join(runtime,'jarvis-runner.mjs'),"process.send({type:'ready'});process.send({type:'idle',activePreviews:0});process.on('message',()=>{});setInterval(()=>{},10000);");
   const config=join(dir,'config.json');await writeFile(config,JSON.stringify({origin:'https://synthetic.invalid'}));
-  const names=['jarvis-runner.mjs','jarvis-preview.mjs','jarvis-development.mjs','jarvis-remote-preview.mjs','jarvis-preview-auth.mjs','jarvis-preview-cli.mjs','jarvis-provision.mjs','jarvis-supervisor.mjs','jarvis-mac.mjs'];const source="if(process.argv.includes('--self-check'))process.exit(0);process.exit(1);";
+  const names=['jarvis-runner.mjs','jarvis-preview.mjs','jarvis-development.mjs','jarvis-stream-transport.mjs','jarvis-remote-preview.mjs','jarvis-preview-auth.mjs','jarvis-preview-cli.mjs','jarvis-provision.mjs','jarvis-supervisor.mjs','jarvis-mac.mjs'];const source="if(process.argv.includes('--self-check'))process.exit(0);process.exit(1);";
   const manifest={version:'2.6.1',files:Object.fromEntries(names.map(name=>[name,createHash('sha256').update(source).digest('hex')]))};
   const transport=async url=>new Response(url.endsWith('jarvis-runtime.json')?JSON.stringify(manifest):source);
   await supervise({runtime,directory:dir,config,transport,signal:abort.signal,spawnProcess:(bin,args,options)=>{const child=spawn(bin,args,options);if(args[0]===join(runtime,'jarvis-runner.mjs')){oldStarts++;if(oldStarts===2)child.on('message',m=>{if(m.type==='ready')setTimeout(()=>abort.abort(),20);});}return child;}});

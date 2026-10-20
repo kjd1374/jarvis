@@ -1,5 +1,7 @@
 // Authenticated HTTPS access to one disposable preview. Never forwards runner credentials.
 import http from "node:http";
+import { createStreamTransport, injectStreamClient } from "./jarvis-stream-transport.mjs";
+import { gunzipSync, brotliDecompressSync, inflateSync, createGunzip, createBrotliDecompress, createInflate } from "node:zlib";
 import https from "node:https";
 import { resolve4 } from "node:dns/promises";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -56,6 +58,7 @@ export async function createRemoteGate({ localUrl, appOrigin, publicKey, remoteI
     })().finally(() => { session.checking = null; });
     return session.checking;
   };
+  const streams = createStreamTransport({ allowed, clock });
   const server = http.createServer({ maxHeaderSize: 16_384, requestTimeout: 30_000 }, async (req, res) => {
     protectedHeaders(res, appOrigin);
     const deny = (status = 403) => { res.statusCode = status; res.setHeader("Content-Type", "text/html; charset=utf-8"); res.end(errorPage + `<script>if(parent!==window)parent.postMessage({type:"jarvis-preview-open-tab"},${JSON.stringify(appOrigin)})</script>`); };
@@ -81,18 +84,19 @@ export async function createRemoteGate({ localUrl, appOrigin, publicKey, remoteI
         res.setHeader("Set-Cookie", `${session.embed ? embedCookie : cookieName}=${token}; Path=/; HttpOnly; Secure; SameSite=${session.embed ? "None; Partitioned" : "Lax"}; Max-Age=${Math.max(0, Math.floor((session.until - clock()) / 1000))}`);
         res.writeHead(303, { Location: "/" }); res.end(); return;
       }
-      if (req.url.startsWith("/_jarvis/")) { deny(404); return; }
       const cookie = (req.headers.cookie ?? "").split(";").map(s => s.trim()).find(s => (s.startsWith(`${embedCookie}=`) || s.startsWith(`${cookieName}=`)))?.split("=")[1];
       const session = cookie && sessions.get(digest(cookie));
       if (!session || !await allowed(session)) { deny(); return; }
       session.seenAt = clock();
       const entry = req.method === "GET" && req.url === "/" && req.headers["sec-fetch-mode"] === "navigate" && (req.headers["sec-fetch-dest"] === "document" || session.embed && req.headers["sec-fetch-dest"] === "iframe");
       if (req.headers.origin && req.headers.origin !== origin || ["cross-site", "same-site"].includes(req.headers["sec-fetch-site"]) && !entry) { deny(); return; }
+      if (await streams.handle(req, res, session)) return;
+      if (req.url.startsWith("/_jarvis/")) { deny(404); return; }
       if (!["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"].includes(req.method)) { deny(405); return; }
       const body = await bodyOf(req, 4_000_000);
       const headers = { host: upstream.host };
       for (const key of ["accept", "accept-language", "content-type", "range", "if-none-match", "if-modified-since", "if-match", "if-unmodified-since", "user-agent", "sec-fetch-mode", "sec-fetch-dest", "sec-fetch-user",
-        "rsc", "next-action", "next-router-state-tree", "next-router-prefetch", "next-url", "x-csrf-token", "x-xsrf-token", "x-requested-with"]) {
+        "rsc", "next-action", "next-router-state-tree", "next-router-prefetch", "next-url", "x-csrf-token", "x-xsrf-token", "x-requested-with", "last-event-id"]) {
         if (req.headers[key]) headers[key] = req.headers[key];
       }
       // Only preview-owned cookies reach the app, never the gateway credential.
@@ -101,6 +105,7 @@ export async function createRemoteGate({ localUrl, appOrigin, publicKey, remoteI
       if (req.headers.origin) headers.origin = upstream.origin;
       headers["sec-fetch-site"] = entry ? "none" : "same-origin";
       if (body.length) headers["content-length"] = String(body.length);
+      let detachedStream = false;
       const request = http.request({ hostname: "127.0.0.1", port: upstream.port, path: req.url, method: req.method, headers }, response => {
         res.statusCode = response.statusCode ?? 502;
         for (const key of ["content-type", "content-encoding", "content-language", "content-disposition", "accept-ranges", "content-range", "vary", "x-action-redirect", "x-action-revalidated"]) {
@@ -113,13 +118,26 @@ export async function createRemoteGate({ localUrl, appOrigin, publicKey, remoteI
         }
         const cookies = (response.headers["set-cookie"] ?? []).filter(c => !c.trimStart().toLowerCase().startsWith(cookieName.toLowerCase() + "=") && !c.trimStart().toLowerCase().startsWith(embedCookie.toLowerCase() + "=")).map(c => c.replace(/;\s*domain=[^;]*/ig, ""));
         if (cookies.length) res.setHeader("Set-Cookie", cookies);
+        if (req.headers["x-jarvis-stream"] === "poll-v1" && ![204,205,304].includes(response.statusCode) && /text\/event-stream/i.test(response.headers["content-type"] ?? "")) {
+          detachedStream = true; res.removeHeader("Content-Encoding");res.setHeader("X-Jarvis-Stream","poll-v1");let source=response;const encoding=response.headers["content-encoding"];
+          const decoder=encoding==='gzip'?createGunzip():encoding==='br'?createBrotliDecompress():encoding==='deflate'?createInflate():null;
+          if(decoder){source=response.pipe(decoder);source.statusCode=response.statusCode;source.headers=response.headers;source.once('close',()=>response.destroy());response.on('error',error=>source.destroy(error));}
+          streams.open(source,session,res);return;
+        }
+        if (/text\/html/i.test(response.headers["content-type"] ?? "") && req.method !== "HEAD") {
+          const chunks=[];let size=0;response.on("data",part=>{size+=part.length;if(size>16_000_000){response.destroy();res.destroy();}else chunks.push(part);});
+          response.on("end",()=>{if(res.destroyed)return;try{let bytes=Buffer.concat(chunks);const encoding=response.headers["content-encoding"];
+            const options={maxOutputLength:16_000_000};if(encoding==='gzip')bytes=gunzipSync(bytes,options);else if(encoding==='br')bytes=brotliDecompressSync(bytes,options);else if(encoding==='deflate')bytes=inflateSync(bytes,options);else if(encoding&&encoding!=='identity')throw Error('encoding');
+            res.removeHeader("Content-Encoding");res.end(injectStreamClient(bytes.toString('utf8')));
+          }catch{deny(502);}});response.on("error",()=>res.destroy());return;
+        }
         let bytes = 0;
         response.on("data", chunk => { bytes += chunk.length; if (bytes > 32_000_000) { response.destroy(); res.destroy(); } });
         response.on("error", () => res.destroy()); response.pipe(res);
       });
       request.setTimeout(cli ? 75_000 : 30_000, () => request.destroy());
       request.on("error", () => { if (!res.headersSent) deny(502); else res.destroy(); });
-      res.once("close", () => request.destroy());
+      res.once("close", () => { if (!detachedStream) request.destroy(); });
       request.end(body);
     } catch { if (!res.headersSent) deny(); else res.destroy(); }
   });
@@ -152,7 +170,7 @@ export async function createRemoteGate({ localUrl, appOrigin, publicKey, remoteI
     } catch { clearInterval(timer); request?.destroy(); deny(); }
   });
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
-  const close = () => { if (closed) return; closed = true; clearTimeout(timer); server.close(); for (const socket of sockets) socket.destroy(); sessions.clear(); used.clear(); };
+  const close = () => { if (closed) return; closed = true; streams.close(); clearTimeout(timer); server.close(); for (const socket of sockets) socket.destroy(); sessions.clear(); used.clear(); };
   const timer = setTimeout(close, Math.max(1, Date.parse(expiresAt) - clock())); timer.unref();
   return { localUrl: `http://127.0.0.1:${server.address().port}/`, close,
     async authorizeCli() {

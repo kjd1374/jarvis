@@ -72,7 +72,7 @@ export function ProjectScreen({ project }: { project: Project }) {
   const lastStop = [...turns].reverse().find(turn => turn.runtimeAction === "stop" && turn.status === "completed");
   const stopped = !!lastStop && (!latest || turns.indexOf(lastStop) >= turns.indexOf(latest));
   const embedPreview = stopped ? undefined : latest?.result?.preview;
-  const canEmbed = embedPreview?.state === "ready" && embedPreview.kind === "remote" && Date.parse(embedPreview.expiresAt ?? "") > clock;
+  const canEmbed = embedPreview?.state === "ready" && embedPreview.kind === "remote" && !!embedPreview.execution && Date.parse(embedPreview.expiresAt ?? "") > clock;
   useEffect(() => {
     const message = (event: MessageEvent) => {
       if (!embedPreview?.url || event.origin !== new URL(embedPreview.url).origin || event.source !== frame.current?.contentWindow || event.data?.type !== "jarvis-preview-open-tab") return;

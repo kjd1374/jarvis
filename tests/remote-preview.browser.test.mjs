@@ -34,3 +34,13 @@ for(const engine of ['chromium','webkit'])test(`signed preview frame or top-leve
   assert.equal(new URL(page.url()).origin,appOrigin);
   const other=await browser.newContext({ignoreHTTPSErrors:true});assert.equal((await(await other.newPage()).goto(remoteUrl)).status(),403);await other.close();await context.close();
 },{embed:true,engine})));
+
+for(const engine of ['chromium','webkit'])test(`fetch and EventSource remain incremental through authenticated JSON transport in ${engine}`,async()=>fixture(async f=>withPreviewHttps(f,async browser=>{
+ const context=await browser.newContext({ignoreHTTPSErrors:true}),page=await context.newPage();await page.goto(appOrigin,{waitUntil:'commit'});await page.waitForURL(remoteUrl);
+ await page.waitForFunction(()=>window.__jarvisStreamTransport===true);
+ const first=await page.evaluate(async()=>{const res=await fetch('/stream?slow=1');window.fixtureReader=res.body.getReader();const next=await window.fixtureReader.read();return{type:res.headers.get('content-type'),text:new TextDecoder().decode(next.value)};});
+ assert(first.type.includes('text/event-stream'));assert(first.text.includes('first'));assert(!first.text.includes('last'));
+ const rest=await page.evaluate(async()=>{let text='';while(true){const next=await window.fixtureReader.read();if(next.done)return text;text+=new TextDecoder().decode(next.value);}});assert(rest.includes('last'));
+ const event=await page.evaluate(()=>new Promise((resolve,reject)=>{const source=new EventSource('/stream?slow=1');source.onmessage=e=>{source.close();resolve({data:e.data,state:source.readyState});};source.onerror=()=>{source.close();reject(Error('stream failed'));};}));
+ assert.deepEqual(event,{data:'first',state:2});await context.close();
+},{engine})));

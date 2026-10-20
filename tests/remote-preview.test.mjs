@@ -223,3 +223,19 @@ test('remote HTTP delivers the first streaming chunk before the response ends',a
     });req.on('error',reject);
   });
 }));
+
+test('Quick Tunnel stream chunks use short JSON polls bound to the exact approved session and cancel cleanly',async()=>fixture(async f=>{
+ const owner=cookieOf(await enter(f)),other=cookieOf(await enter(f));
+ const response=await f.request('/stream',{headers:{cookie:owner,origin:expected.origin,'x-jarvis-stream':'poll-v1'}});
+ assert.equal(response.status,200);assert.equal(response.headers['x-jarvis-stream'],'poll-v1');assert.match(response.headers['content-type'],/application\/json/);
+ const meta=JSON.parse(response.body),path='/_jarvis/stream/'+meta.id;assert.equal(meta.status,200);
+ assert.equal((await f.request(path,{headers:{cookie:other,origin:expected.origin}})).status,404);
+ const first=JSON.parse((await f.request(path,{headers:{cookie:owner,origin:expected.origin}})).body);
+ assert.equal(Buffer.from(first.chunks[0],'base64').toString(),'data: first\n\n');assert.equal(first.done,false);
+ const chunks=[];let done=false;for(let attempt=0;attempt<4&&!done;attempt++){const batch=JSON.parse((await f.request(path,{headers:{cookie:owner,origin:expected.origin}})).body);chunks.push(...batch.chunks);done=batch.done;}
+ assert(chunks.some(chunk=>Buffer.from(chunk,'base64').toString().includes('last')));assert.equal(done,true);
+ assert.equal((await f.request(path,{headers:{cookie:owner,origin:expected.origin}})).status,404);
+ const another=JSON.parse((await f.request('/stream?slow=1',{headers:{cookie:owner,origin:expected.origin,'x-jarvis-stream':'poll-v1'}})).body);
+ assert.equal((await f.request('/_jarvis/stream/'+another.id,{method:'DELETE',headers:{cookie:owner,origin:expected.origin}})).status,200);
+ assert.equal((await f.request('/_jarvis/stream/'+another.id,{headers:{cookie:owner,origin:expected.origin}})).status,404);
+}));
