@@ -31,9 +31,11 @@ export async function developmentRuntimeLibraries(objects) {
     if (process.platform === 'darwin') {
       // Also inspect the trusted executable's direct load commands. dyld image
       // reports vary across Node/macOS versions; a required dylib must not be lost.
-      const { stdout } = await promisify(execFile)('/usr/bin/otool', ['-L', await realpath(process.execPath)], { timeout: 10_000, maxBuffer: 256_000 });
-      const linked = stdout.split('\n').slice(1).map(line => line.trim().split(' (')[0]).filter(isAbsolute);
-      objects = [...objects, ...linked];
+      try {
+        const { stdout } = await promisify(execFile)('/usr/bin/otool', ['-L', await realpath(process.execPath)], { timeout: 10_000, maxBuffer: 256_000 });
+        const linked = stdout.split('\n').slice(1).map(line => line.trim().split(' (')[0]).filter(isAbsolute);
+        objects = [...objects, ...linked];
+      } catch { /* Optional load-command inspection; the mandatory sandbox probe still fails closed. */ }
     }
   }
   const libraries = new Set();
@@ -51,7 +53,7 @@ export async function developmentRuntimeLibraries(objects) {
 export function developmentSandbox(root, data, ports, executable = process.execPath, libraries = []) {
   // No blanket home, /private/var, /Library or outbound-network permission.
   const runtime = dirname(dirname(executable));
-  return `(version 1)\n(deny default)\n(allow process-fork process-exec sysctl-read mach-lookup)\n(allow file-read-metadata)\n(allow file-map-executable)\n(allow signal (target self))\n(allow file-read* (literal "/") (subpath "/System") (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/Library/Apple") (subpath ${quote(runtime)}) (subpath ${quote(root)}) (subpath ${quote(data)}) ${libraries.filter(p=>typeof p==='string'&&isAbsolute(p)&&!p.includes('\0')).map(p=>`(literal ${quote(p)})`).join(' ')} (literal "/dev/null") (literal "/dev/random") (literal "/dev/urandom") (literal "/private/etc/localtime") (literal "/private/etc/hosts"))\n(allow file-write* (subpath ${quote(root)}) (subpath ${quote(data)}) (literal "/dev/null"))\n${ports.map(p => `(allow network-bind network-inbound (local ip "127.0.0.1:${p}"))\n(allow network-outbound (remote ip "127.0.0.1:${p}"))`).join('\n')}\n`;
+  return `(version 1)\n(deny default)\n(allow process-fork process-exec sysctl-read mach-lookup)\n(allow file-read-metadata)\n(allow file-map-executable)\n(allow signal (target self))\n(allow file-read* (literal "/") (subpath "/System") (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/Library/Apple") (subpath ${quote(runtime)}) (subpath ${quote(root)}) (subpath ${quote(data)}) ${libraries.filter(p=>typeof p==='string'&&isAbsolute(p)&&!p.includes('\0')).map(p=>`(literal ${quote(p)})`).join(' ')} (literal "/dev/null") (literal "/dev/random") (literal "/dev/urandom") (literal "/private/etc/localtime") (literal "/private/etc/hosts"))\n(allow file-write* (subpath ${quote(root)}) (subpath ${quote(data)}) (literal "/dev/null"))\n${ports.map(p => `(allow network-bind network-inbound (local tcp "localhost:${p}"))\n(allow network-outbound (remote tcp "localhost:${p}"))`).join('\n')}\n`;
 }
 async function freePort() {
   const socket = net.createServer();
