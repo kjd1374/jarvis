@@ -1,11 +1,11 @@
 {
-  "version": "2.7.0",
+  "version": "2.8.0",
   "files": {
-    "jarvis-runner.mjs": "3d70dd1ad8bc18a3ec83d3c80bc7dbf3ba3ae5be7efa14575ca0fa0f24937f00",
+    "jarvis-runner.mjs": "01ed7279516a4b386c5639673139cd110fa6723e695cea4c0e6d362ca08a5842",
     "jarvis-preview.mjs": "886acad4c8ff95ee8252456c711e8994e6d339182562fde96591d3e10d00614a",
     "jarvis-remote-preview.mjs": "3653f50f8826c8e179815d3451d3e0f334e7bb0655e61e9c6520adbfcfbf01dd",
     "jarvis-preview-auth.mjs": "5fe9b1442b41e860e053c58a45592aabd65c406c20a5f655c4e18da18baa4572",
-    "jarvis-preview-cli.mjs": "99b22b494a94e075d05493c82528ba67a0b8fb269ea14147b444e831a3cdb3ff",
+    "jarvis-preview-cli.mjs": "47f66922e970626695b59a14682835d5a5bfb213947500c97c6b7e0452f5bfb0",
     "jarvis-provision.mjs": "8a9cae18045b305a7df6099c5fe6faa46d4874c30817d015d189def800f9ed5d",
     "jarvis-supervisor.mjs": "612bd4de26ee008c30dac8fbb300955e985712b6a81021e2c0407a5e013cc065",
     "jarvis-mac.mjs": "8e3dc068854f88ac3e101843abb4b10b7937f8415f0724b65cc1cdfa781f0283"

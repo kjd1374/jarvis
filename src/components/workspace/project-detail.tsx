@@ -1,5 +1,7 @@
 "use client";
 import { ProjectScreen } from "./project-screen";
+import { ProjectPlanning, ProjectService, ProjectStageControl } from "./project-planning";
+import { projectStage, stageLabels } from "@/lib/projects/lifecycle";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -62,6 +64,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         </section>
       </div>
     );
+  if (project.stage === "idea") return <ProjectPlanning key={`${project.id}:${project.space}`} project={project} />;
+  if (project.stage === "live") return <ProjectService key={`${project.id}:${project.space}`} project={project} />;
   return (
     <ProjectView key={`${project.id}:${project.space}`} project={project} />
   );
@@ -153,7 +157,7 @@ function ProjectView({ project }: { project: Project }) {
           </span>
           <div>
             <p className={styles.eyebrow}>
-              {spaceLabels[project.space]} 프로젝트
+              {spaceLabels[project.space]} 프로젝트 · {stageLabels[projectStage(project)]}
             </p>
             <h1>{project.name}</h1>
             <p>화면을 확인하고 요청하세요. AI가 작업하고 결과를 정리합니다.</p>
@@ -205,6 +209,7 @@ function ProjectView({ project }: { project: Project }) {
       <ProjectAutomaticResults project={project} />
       <details className={styles.projectDisclosure}>
         <summary>프로젝트 정보·연결 <span>목표와 서비스 관리</span></summary>
+        <ProjectStageControl project={project} />
         <div className={styles.projectDetailGrid}>
         <section
           className={`${styles.detailSection} ${styles.projectOverview}`}

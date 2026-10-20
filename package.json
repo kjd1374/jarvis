@@ -25,7 +25,7 @@
     "deploy:preview:resume": "node --use-env-proxy scripts/deploy-preview.mjs --resume",
     "test:deploy": "node --test tests/deploy-preview.test.mjs",
     "test:devices": "node --test tests/devices.test.mjs",
-    "test:automation": "node --test tests/automation-runner.test.mjs tests/project-work-runner.test.mjs tests/preview-runtime.test.mjs tests/document-runner.test.mjs tests/remote-preview.test.mjs tests/preview-cli.test.mjs tests/provision.test.mjs",
+    "test:automation": "node --test tests/automation-runner.test.mjs tests/project-work-runner.test.mjs tests/preview-runtime.test.mjs tests/document-runner.test.mjs tests/remote-preview.test.mjs tests/preview-cli.test.mjs tests/provision.test.mjs tests/planning-runner.test.mjs",
     "test:preview": "node scripts/test-preview-runtime.mjs",
     "test:remote-preview": "node --test tests/remote-preview.browser.test.mjs",
     "runtime:manifest": "node scripts/update-runtime-manifest.mjs"

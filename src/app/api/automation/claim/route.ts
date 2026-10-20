@@ -1,5 +1,6 @@
 import { credentialsFor } from "@/lib/automation/providers";
 import { claimSetup } from "@/lib/automation/provision";
+import { claimPlanning } from "@/lib/projects/planning";
 import { checkOrigin, CloudError, failure, readJson, reply, spaceParam } from "@/lib/cloud/server";
 import { changeWorkspace } from "@/lib/automation/server";
 import { claimProjectWork } from "@/lib/automation/work";
@@ -27,6 +28,11 @@ export async function POST(request: Request) {
       catch { throw new CloudError(400, "mixed_scope", "이 영역의 프로젝트만 실행기에 연결할 수 있습니다."); }
       const original = data;
       if (supportsWork) data = observeWorkRunner(data, { space, projectIds: projects, projectScope }, body, stamp);
+      if (supportsWork && body.planningVersion === 1) {
+        const planning = claimPlanning(data, { space, projectIds: projects, deviceId }, stamp);
+        data = planning.data;
+        if (planning.job) return { data, result: { job: planning.job } };
+      }
       if (body.documentVersion === 1 && provider === "codex") {
         const document = claimDocumentQuestion(data, { space, projectIds: projects, deviceId }, stamp);
         data = document.data;

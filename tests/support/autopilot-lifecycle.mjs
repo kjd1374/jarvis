@@ -18,6 +18,7 @@ export async function runAutopilotLifecycle({base,browser,runner,network,approve
   await page.getByRole('button',{name:'기기 연결 다시 확인',exact:true}).click();await page.getByRole('button',{name:'개인',exact:true}).click();await expect(page.getByRole('button',{name:'개인',exact:true})).toHaveAttribute('aria-pressed','true');
   await page.goto(base+'/projects');await page.getByRole('button',{name:'프로젝트 만들기',exact:true}).click();
   const form=page.getByRole('dialog',{name:'프로젝트 만들기',exact:true});await form.getByLabel('프로젝트 이름').fill('합성 자동 개발');
+  await form.getByRole('radio',{name:/개발 시작·이어가기/}).check();
   await form.getByLabel('프로젝트 설명').fill('카운터 값을 저장하는 웹 앱');await expect(form.getByRole('checkbox')).toBeChecked();await form.getByRole('button',{name:'프로젝트 저장',exact:true}).click();await expect(form).not.toBeVisible();
   await expect.poll(async()=> (await snapshot()).data.projects.find(p=>p.name==='합성 자동 개발')?.id).toBeTruthy();
   project=(await snapshot()).data.projects.find(p=>p.name==='합성 자동 개발');await page.goto(base+'/projects/'+project.id);

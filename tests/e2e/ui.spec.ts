@@ -328,6 +328,7 @@ test("프로젝트 카드는 상세 화면을 열고 프로젝트 대화에서 �
     .getByRole("button", { name: "프로젝트 만들기", exact: true })
     .click();
   const form = page.getByRole("dialog", { name: "프로젝트 만들기" });
+  await form.getByRole("radio", { name: /개발 시작·이어가기/ }).check();
   await form.getByLabel("프로젝트 이름").fill("합성 한국어 공부");
   await form
     .getByLabel("프로젝트 설명")

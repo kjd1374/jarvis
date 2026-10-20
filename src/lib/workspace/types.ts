@@ -2,6 +2,9 @@ import type { GitHubMonitoring } from "../automation/types";
 export type Space = "company" | "personal";
 export type TaskStatus = "todo" | "in_progress" | "decision" | "done";
 export type Project = {
+  stage?: "idea" | "development" | "live";
+  launchUrl?: string;
+  planning?: import("../projects/planning").ProjectPlanning;
   setup?: import("../automation/provision").ProjectSetup;
   automation?: import("../automation/work-types").ProjectAutomation;
   id: string;

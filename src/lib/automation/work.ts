@@ -177,7 +177,8 @@ export function claimProjectWork(data: WorkspaceData, scope: { space: Space; pro
           targetRepository: turn.repository,
           webWorkflow: "사용자는 다른 PC의 Jarvis 브라우저에서 개발·테스트·화면 확인을 완료한다. 맥미니는 실행 서버다. 사용자에게 node/npm 명령, JSON 설정 실행, localhost 접속을 일반 테스트 절차로 요구하지 않는다. 자동 테스트는 Jarvis의 테스트 실행, 화면은 화면 준비와 이 PC에서 화면 열기로 안내한다. 테스트 실행 결과와 실제 AI·외부 연동 성공은 별도다. 아직 준비하지 않은 링크나 실행 결과를 만들지 않는다. 과거 답변의 구현 주장은 실제 커밋·PR·검사 상태와 구분한다. PR 작성은 병합 완료가 아니다.",
           connectionScope: "이 요청은 승인된 Jarvis 실행기가 가져왔다. 실행기 연결과 대상 저장소 앱 내부 Codex/Claude 연동은 별개다. 앱에 어댑터가 없거나 격리 작업 폴더에서 CLI/네트워크를 사용할 수 없는 것은 호스트 실행기 미연결의 근거가 아니다. 호스트의 다른 공급자 로그인·연결 상태는 미확인이다.",
-        }, project: { name: project.name, description: project.description, environment: project.setup?.result }, history,
+        }, project: { name: project.name, description: project.description, environment: project.setup?.result,
+          ...(project.planning ? { plan: project.planning.document.content, planRevision: project.planning.document.revision } : {}) }, history,
           tasks: current.tasks.filter(t => t.projectId === project.id && t.space === project.space).slice(-50).map(t => ({ title: t.title, status: t.status })) } } };
     }
   }

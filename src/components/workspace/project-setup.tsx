@@ -24,7 +24,7 @@ export function ProjectSetupPanel({ project }: { project: Project }) {
   const needsUpdate = runner?.version?.startsWith("2.") && Number(runner.version.split(".")[1]) < 6;
   async function act(action: "start" | "retry" | "cancel") {
     try {
-      await mutate(d => action === "start" ? { ...d, projects: d.projects.map(p => p.id === project.id && p.space === project.space ? { ...p, setup: newProjectSetup(now()) } : p) } : changeSetup(d, project.space, project.id, action, now()));
+      await mutate(d => action === "start" ? { ...d, projects: d.projects.map(p => p.id === project.id && p.space === project.space ? { ...p, setup: newProjectSetup(now(), p.stage === "development" ? "mac" : "auto") } : p) } : changeSetup(d, project.space, project.id, action, now()));
     } catch (e) { setError(e instanceof Error ? e.message : "준비 요청을 저장하지 못했습니다."); }
   }
   return <section className={styles.agentConnection} aria-label="프로젝트 자동 준비">
