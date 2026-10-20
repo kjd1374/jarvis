@@ -377,7 +377,7 @@ test("최근 수정본으로 원격 테스트·화면 준비·후속 요청을 �
     reply: "합성 검증 결과", summary: "실패", currentStatus: "", nextAction: "", changes: [], checks: [{ name: "npm run test", status: "failed", detail: "격리 실행 · 종료 코드 1" }], followUps: [], outcome: "blocked", branch: null, baseSha: "b".repeat(40), headSha: null, prUrl: null, deployment: { state: "not_configured", url: null, sha: null },
   } }, "runner", stamp);
   await seed(page, complete); await page.goto("/projects/auto-project"); await ready(page);
-  await expect(page.getByText("npm run test · 실패", { exact: true })).toBeVisible();
+  await expect(page.getByRole("article", { name: "작업 요청" }).getByText("npm run test · 실패", { exact: true })).toBeVisible();
   await screen.getByRole("button", { name: "화면 준비", exact: true }).click();
   saved = (await state(page))!;
   expect(saved.projects[0].automation!.turns.at(-1)).toMatchObject({ mode: "preview", sourceTurnId: job.id });
@@ -491,4 +491,74 @@ test("로컬 LLM 선택은 구독 CLI와 구분해 저장하고 구버전 실행
   await expect(screen.getByLabel('미리보기 AI')).toHaveValue('ollama');
   await expect(screen).toContainText('실행기 2.7.0 적용 대기');
   await expect(page.getByRole('region',{name:'프로젝트 AI 작업실',exact:true})).toContainText('화면 준비 · 로컬 LLM 선택');
+});
+
+test("개발 작업 공간은 사진과 설명을 같은 요청에 저장하고 모바일 탭과 대화를 복원한다", async ({ page, isMobile }) => {
+  const data = automationWorkspace(new Date().toISOString()); await seed(page, data);
+  if (page.context().browser()?.browserType().name() === "webkit") await page.waitForLoadState("networkidle");
+  await page.goto("/projects/auto-project"); await ready(page);
+  const nav = page.getByRole("navigation", { name: "개발 작업 보기" }), agent = page.getByRole("region", { name: "프로젝트 AI 작업실", exact: true });
+  if (isMobile) {
+    await nav.getByRole("button", { name: "개발 대화", exact: true }).click();
+    await expect(agent).toBeVisible(); await expect(page.getByRole("region", { name: "수정된 화면 확인", exact: true })).not.toBeVisible();
+  } else {
+    const screen = (await page.getByRole("region", { name: "수정된 화면 확인", exact: true }).boundingBox())!, chat = (await agent.boundingBox())!;
+    expect(screen.x + screen.width).toBeLessThan(chat.x + 1);
+  }
+  await agent.getByLabel("프로젝트 사진 첨부").setInputFiles({ name: "synthetic-screen.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=", "base64") });
+  await expect(agent).toContainText("synthetic-screen.jpg"); await agent.getByLabel("AI에게 요청", { exact: true }).fill("사진의 버튼 간격을 수정해주세요.");
+  await agent.getByRole("button", { name: "요청 보내기", exact: true }).click();
+  const saved = (await state(page))!, turn = saved.projects[0].automation!.turns.at(-1)!;
+  expect(turn.images).toHaveLength(1); const doc = saved.documents.find(doc => doc.id === turn.images![0].id)!;
+  expect(doc).toMatchObject({ projectId: "auto-project", space: "company", mime: "image/jpeg" }); expect(doc.size).toBeGreaterThan(10); expect(turn.images![0].sha256).toMatch(/^[a-f0-9]{64}$/);
+  expect(await page.evaluate(async fileId => { const db = await new Promise<IDBDatabase>(resolve => { const request = indexedDB.open("jarvis-workspace", 1); request.onsuccess = () => resolve(request.result); }); const blob = await new Promise<Blob>(resolve => { const request = db.transaction("files").objectStore("files").get(fileId); request.onsuccess = () => resolve(request.result); }); db.close(); return blob.size; }, doc.id)).toBe(doc.size);
+  await page.reload(); await ready(page); await expect(agent).toContainText("첨부 사진 1장");
+  if (isMobile) { await nav.getByRole("button", { name: "검사 결과", exact: true }).click(); await expect(page.getByRole("region", { name: "개발 검사 결과" })).toBeVisible(); await expect(agent).not.toBeVisible(); }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.goto("/library"); await ready(page);
+  const downloading = page.waitForEvent("download");
+  await page.getByRole("button", { name: "synthetic-screen.jpg 다운로드", exact: true }).click();
+  const { readFile } = await import("node:fs/promises"), { createHash } = await import("node:crypto");
+  const bytes = await readFile((await (await downloading).path())!);
+  expect(createHash("sha256").update(bytes).digest("hex")).toBe(turn.images![0].sha256);
+});
+
+test("개발 화면은 기존 서버를 새 요청 없이 열고 제한된 iframe은 새 탭으로 안내하며 서버 명령을 보관한다", async ({ page, isMobile }) => {
+  const { enqueueWork, claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
+  const stamp = new Date().toISOString(), first = claimProjectWork(enqueueWork(automationWorkspace(stamp), "company", "auto-project", "auto-service", "화면 준비", "preview", "pr", stamp), { space: "company", projectIds: ["auto-project"], deviceId: "runner", previews: true }, stamp), job = first.job!;
+  const url = "https://synthetic-development.trycloudflare.com/";
+  const data = reportProjectWork(first.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: { reply: "로컬 서버 실행", summary: "준비", currentStatus: "", nextAction: "", changes: [], checks: [], followUps: [], outcome: "answered", branch: null, baseSha: "a".repeat(40), headSha: null, prUrl: null, deployment: { state: "not_configured", url: null, sha: null }, preview: { state: "ready", kind: "remote", execution: "native", reused: true, remoteId: job.id, url, sha: "a".repeat(40), checkedAt: stamp, expiresAt: new Date(Date.now()+3600000).toISOString(), message: "기존 서버 재사용" } } }, "runner", stamp);
+  await seed(page, data);
+  await page.context().route("**/api/preview/open?**", route => route.fulfill({ contentType: "text/html", body: `<script>location.replace(${JSON.stringify(url)})</script>` }));
+  await page.context().route(url + "**", route => route.fulfill({ contentType: "text/html", body: `<h1>Private fixture</h1><script>if(parent!==window)parent.postMessage({type:'jarvis-preview-open-tab'},'http://127.0.0.1:4317')</script>` }));
+  await page.goto("/projects/auto-project"); await ready(page);
+  const screen = page.getByRole("region", { name: "수정된 화면 확인", exact: true });
+  if (isMobile) await page.getByRole("navigation", { name: "개발 작업 보기" }).getByRole("button", { name: "화면", exact: true }).click();
+  await expect(screen).toContainText("실행 중인 서버 재사용"); await screen.getByRole("button", { name: "작업실에서 화면 보기", exact: true }).click();
+  await expect(screen).toContainText("브라우저가 작업실 안의 연결을 제한했습니다").catch(async error => {
+    const frames = await Promise.all(page.frames().map(async frame => ({ url: frame.url(), text: await frame.locator("body").innerText().catch(() => "unavailable") })));
+    await test.info().attach("frame-debug", { body: JSON.stringify(frames), contentType: "application/json" }); throw error;
+  });
+  const popup = page.waitForEvent("popup"); await screen.getByRole("link", { name: "이 PC에서 화면 열기 ↗", exact: true }).click(); const app = await popup; await expect(app.locator("h1")).toHaveText("Private fixture"); await app.close();
+  expect((await state(page))!.projects[0].automation!.turns).toHaveLength(1);
+  await screen.getByRole("button", { name: "서버 로그", exact: true }).click(); expect((await state(page))!.projects[0].automation!.turns.at(-1)).toMatchObject({ runtimeAction: "logs", mode: "preview", status: "queued" });
+});
+
+test("첫 개발 프로젝트는 다른 서비스가 없어도 준비 결과를 자동으로 받는다", async ({ page }) => {
+  const { emptyWorkspace } = await import("../../src/lib/workspace/types"), { newProjectSetup, claimSetup, reportSetup } = await import("../../src/lib/automation/provision");
+  const stamp = new Date().toISOString(), data = emptyWorkspace();
+  data.projects.push({ id: "first-native", name: "첫 로컬 개발", description: "합성 프로젝트", space: "company", stage: "development", createdAt: stamp, setup: newProjectSetup(stamp, "mac") });
+  const remote = { company: { data, revision: 1 }, personal: { data: emptyWorkspace(), revision: 1 } };
+  await page.clock.install();
+  await page.route("**/api/account", route => route.fulfill({ json: { enabled: true, configured: true, authenticated: true, accountId: "11111111-1111-4111-8111-111111111111", deviceId: "synthetic-device" } }));
+  await page.route("**/api/workspace?*", route => route.fulfill({ json: remote[new URL(route.request().url()).searchParams.get("space") as "company" | "personal"] }));
+  await page.goto("/projects/first-native"); await ready(page);
+  const setup = page.getByRole("region", { name: "프로젝트 자동 준비" }); await expect(setup).toContainText("2.9.0");
+  const scope = { space: "company" as const, projectIds: ["first-native"], deviceId: "runner", development: true }, claim = claimSetup(data, scope, stamp), job = claim.job!;
+  remote.company = { revision: 2, data: reportSetup(claim.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: { repository: "example/first-native", target: "mac", database: "none", reason: "로컬 개발", checks: [{ name: "저장소", status: "passed", detail: "합성 준비" }] } }, "runner", stamp) };
+  await page.clock.fastForward(6000);
+  await expect(setup).toContainText("개발 환경 준비 완료");
+  const nav = page.getByRole("navigation", { name: "개발 작업 보기" }); if (await nav.isVisible()) await nav.getByRole("button", { name: "화면", exact: true }).click();
+  await expect(page.getByRole("button", { name: "화면 준비 대기·진행 중", exact: true })).toBeDisabled();
+  expect(remote.company.data.projects[0].automation!.turns.at(-1)).toMatchObject({ mode: "preview", status: "queued" });
 });

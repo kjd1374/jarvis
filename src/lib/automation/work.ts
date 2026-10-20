@@ -1,7 +1,7 @@
 import { id, type Project, type Space, type WorkspaceData } from "../workspace/types";
 import { repositoryFor } from "./state";
 import { publicWebUrl } from "./web-links";
-import type { ProjectTurn, WorkResult, WorkPreview } from "./work-types";
+import type { ProjectTurn, WorkResult, WorkPreview, WorkImage, RuntimeAction } from "./work-types";
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const text = (v: unknown, n: number): v is string => typeof v === "string" && v.length <= n;
 const date = (v: unknown) => typeof v === "string" && Number.isFinite(Date.parse(v));
@@ -10,6 +10,13 @@ const strings = (v: unknown, n: number, length: number): v is string[] => Array.
 const repo = (v: unknown): v is string => typeof v === "string" && /^[a-z0-9_.-]{1,100}\/[a-z0-9_.-]{1,100}$/.test(v) && !v.includes("..");
 const clean = (v: string) => v.replace(/\b(?:ghp_|gho_|github_pat_|sk-(?:proj-)?)[A-Za-z0-9_-]{16,}\b/g, "[토큰 제외]");
 const phaseValues = ["queued", "preparing", "coding", "testing", "publishing", "reporting"];
+export function validateWorkImages(data: WorkspaceData, space: Space, projectId: string, images: WorkImage[]) {
+  if (!Array.isArray(images) || images.length > 3 || new Set(images.map(i => i.id)).size !== images.length) invalid();
+  for (const image of images) {
+    const doc = data.documents.find(d => d.id === image.id && d.space === space && d.projectId === projectId && !d.sourceUrl);
+    if (!doc || !["image/jpeg", "image/png", "image/webp"].includes(doc.mime) || doc.size < 1 || doc.size > 1_000_000 || !/^[a-f0-9]{64}$/.test(image.sha256)) invalid();
+  }
+}
 function invalid(): never { throw new Error("프로젝트 실행 기록의 범위·형식을 확인해주세요."); }
 export function parseWorkPreview(raw: unknown): WorkPreview {
   if (!object(raw) || !["ready", "unavailable", "failed"].includes(String(raw.state)) || !["deployment", "mac", "remote"].includes(String(raw.kind)) ||
@@ -45,6 +52,8 @@ export function parseWorkPreview(raw: unknown): WorkPreview {
     ai = { provider: a.provider as "codex" | "ollama", ...(a.provider === "ollama" ? { model: "translategemma:4b" } : {}), verifiedAt: a.verifiedAt as string, sample: a.sample };
   }
   return { state: raw.state as WorkPreview["state"], kind: raw.kind as WorkPreview["kind"], url: raw.url as string | null, sha: raw.sha,
+    ...(raw.execution === "native" || raw.execution === "docker" ? { execution: raw.execution } : {}),
+    ...(raw.reused === true ? { reused: true } : {}),
     ...(raw.dataPersistence === "project" ? { dataPersistence: "project" as const } : {}),
     ...(ai ? { ai } : {}),
     ...(diagnostic ? { diagnostic } : {}),
@@ -91,6 +100,11 @@ export function validateProjectAutomation(project: Project, data: WorkspaceData)
       turn.leaseUntil !== undefined && !date(turn.leaseUntil) || turn.error !== undefined && !text(turn.error, 100)) invalid();
     // Deleted connections may leave historical turns, but never a cross-scope connection.
     if (data.services.some(s => s.id === turn.serviceId && (s.space !== project.space || s.projectId !== project.id))) invalid();
+    if (turn.images !== undefined) {
+      if (!["ask", "change"].includes(turn.mode)) invalid();
+      validateWorkImages(data, project.space, project.id, turn.images);
+    }
+    if (turn.runtimeAction !== undefined && (turn.mode !== "preview" || !["restart", "stop", "logs"].includes(turn.runtimeAction))) invalid();
     if (turn.result) parseWorkResult(turn.result, turn.repository, turn.mode);
     if (turn.result?.preview?.ai && turn.previewAI !== turn.result.preview.ai.provider || turn.previewAI && turn.result?.preview?.state === "ready" && !turn.result.preview.ai) invalid();
     ids.add(turn.id);
@@ -98,6 +112,13 @@ export function validateProjectAutomation(project: Project, data: WorkspaceData)
 }
 function updateTurn(data: WorkspaceData, project: Project, turn: ProjectTurn) {
   return { ...data, projects: data.projects.map(p => p.id === project.id ? { ...p, automation: { turns: (p.automation?.turns ?? []).map(t => t.id === turn.id ? turn : t) } } : p) };
+}
+export function currentPreviewTurn(project: Project, serviceId: string, repository: string) {
+  const turns = project.automation?.turns ?? [];
+  const latest = [...turns].reverse().find(turn => turn.serviceId === serviceId && turn.repository === repository && turn.result?.preview?.state === "ready");
+  if (latest?.result?.preview?.kind === "deployment") return latest;
+  if (!latest || turns.some((turn, index) => index > turns.indexOf(latest) && turn.serviceId === serviceId && turn.repository === repository && turn.runtimeAction === "stop" && turn.status === "completed")) return undefined;
+  return latest;
 }
 export function latestWorkSource(project: Project, serviceId: string, repository: string) {
   const latest = [...(project.automation?.turns ?? [])].reverse().find(t => t.serviceId === serviceId && t.repository === repository && t.mode === "change" && t.result?.headSha && t.result.prUrl);
@@ -116,17 +137,22 @@ export function preferredWorkRevision(project: Project, serviceId: string, repos
       t.mode === "test" && t.result?.outcome !== "blocked" && !!t.result?.checks.length && t.result.checks.every(c => c.status === "passed")));
   return verified && !verified.sourceTurnId ? "main" : "latest";
 }
-export function enqueueWork(data: WorkspaceData, space: Space, projectId: string, serviceId: string, request: string, mode: ProjectTurn["mode"], publish: ProjectTurn["publish"], stamp: string, turnId = id(), sourceTurnId?: string, previewAI?: "codex" | "ollama", followLatest = false) {
+export function enqueueWork(data: WorkspaceData, space: Space, projectId: string, serviceId: string, request: string, mode: ProjectTurn["mode"], publish: ProjectTurn["publish"], stamp: string, turnId = id(), sourceTurnId?: string, previewAI?: "codex" | "ollama", followLatest = false, options: { images?: WorkImage[]; runtimeAction?: RuntimeAction } = {}) {
   const project = data.projects.find(p => p.id === projectId && p.space === space);
   const service = data.services.find(s => s.id === serviceId && s.space === space && s.projectId === projectId);
   const repository = service && repositoryFor(service);
   if (!project || !repository || !request.trim() || request.length > 8000) throw new Error("현재 프로젝트의 GitHub 연결과 요청 내용을 확인해주세요.");
   if (previewAI !== undefined && (!["codex", "ollama"].includes(previewAI) || mode !== "preview")) invalid();
+  if (options.images?.length) {
+    if (!["ask", "change"].includes(mode)) invalid();
+    validateWorkImages(data, space, projectId, options.images);
+  }
+  if (options.runtimeAction && (mode !== "preview" || !["restart", "stop", "logs"].includes(options.runtimeAction))) invalid();
   const turns = project.automation?.turns ?? [];
   if (turns.some(t => t.id === turnId)) return data;
   if (sourceTurnId && !turns.some(t => t.id === sourceTurnId && t.serviceId === serviceId && t.repository === repository && t.mode === "change" && t.result?.prUrl && t.result.headSha && t.result.branch)) throw new Error("선택한 수정본의 프로젝트·저장소를 확인해주세요.");
   if (turns.length >= 500) throw new Error("프로젝트 대화 기록 한도에 도달했습니다. 백업 후 기록을 정리해주세요.");
-  const turn: ProjectTurn = { id: turnId, serviceId, repository, request: request.trim(), mode, publish, ...(sourceTurnId ? { sourceTurnId } : {}), ...(followLatest ? { followLatest: true as const } : {}), ...(previewAI ? { previewAI } : {}), status: "queued", phase: "queued", createdAt: stamp, updatedAt: stamp, attempt: 0 };
+  const turn: ProjectTurn = { ...(options.images?.length ? { images: options.images } : {}), ...(options.runtimeAction ? { runtimeAction: options.runtimeAction } : {}), id: turnId, serviceId, repository, request: request.trim(), mode, publish, ...(sourceTurnId ? { sourceTurnId } : {}), ...(followLatest ? { followLatest: true as const } : {}), ...(previewAI ? { previewAI } : {}), status: "queued", phase: "queued", createdAt: stamp, updatedAt: stamp, attempt: 0 };
   return { ...data, projects: data.projects.map(p => p.id === projectId ? { ...p, automation: { turns: [...turns, turn] } } : p),
     tasks: mode === "change" ? [...data.tasks, { id: `work-${turnId}`, sourceMessageId: turnId, space, projectId, title: request.trim().slice(0, 160), status: "todo" as const, dueDate: "", createdAt: stamp }] : data.tasks };
 }
@@ -136,7 +162,7 @@ export function changeWorkState(data: WorkspaceData, space: Space, projectId: st
   const next = updateTurn(data, project, { ...turn, status: action === "cancel" ? "cancelled" : "queued", phase: "queued", updatedAt: stamp, error: undefined, leaseOwner: undefined, leaseToken: undefined, leaseUntil: undefined });
   return { ...next, tasks: next.tasks.map(t => t.id === `work-${turn.id}` ? { ...t, status: action === "cancel" ? "decision" as const : "todo" as const } : t) };
 }
-export function claimProjectWork(data: WorkspaceData, scope: { space: Space; projectIds: (string | null)[]; deviceId: string; previews?: boolean; remoteWork?: boolean; previewCli?: boolean; previewLocal?: boolean; managedWork?: boolean }, stamp: string) {
+export function claimProjectWork(data: WorkspaceData, scope: { space: Space; projectIds: (string | null)[]; deviceId: string; previews?: boolean; remoteWork?: boolean; previewCli?: boolean; previewLocal?: boolean; managedWork?: boolean; development?: boolean }, stamp: string) {
   let current = data;
   for (const project of current.projects.filter(p => p.space === scope.space && scope.projectIds.includes(p.id))) {
     if (project.setup && (project.setup.status !== "ready" || !scope.managedWork || project.setup.executionDevice !== scope.deviceId)) continue;
@@ -149,6 +175,7 @@ export function claimProjectWork(data: WorkspaceData, scope: { space: Space; pro
     }
     if (turns.some(t => ["running", "interrupted"].includes(t.status))) continue;
     for (const turn of turns.filter(t => t.status === "queued")) {
+      if ((project.stage === "development" && turn.mode !== "ask" || turn.images?.length || turn.runtimeAction) && !scope.development) continue;
       if (turn.mode === "preview" && !scope.previews) continue;
       if (turn.previewAI === "codex" && !scope.previewCli || turn.previewAI === "ollama" && !scope.previewLocal) continue;
       if ((turn.mode === "test" || turn.sourceTurnId || turn.followLatest) && !scope.remoteWork) continue;
@@ -170,14 +197,14 @@ export function claimProjectWork(data: WorkspaceData, scope: { space: Space; pro
       current = { ...current, tasks: current.tasks.map(t => t.id === `work-${turn.id}` ? { ...t, status: "in_progress" as const } : t) };
       const history = turns.filter(t => t.status === "completed" && t.serviceId === turn.serviceId && t.repository === turn.repository).slice(-6).map(t => ({ request: t.request, reply: t.result?.reply, outcome: t.result?.outcome, baseSha: t.result?.baseSha, headSha: t.result?.headSha, prUrl: t.result?.prUrl, checks: t.result?.checks, preview: t.result?.preview }));
       return { data: current, job: { kind: "work", id: turn.id, space: project.space, projectId: project.id, serviceId: service.id, repository: turn.repository,
-        provider: "codex", leaseToken: claimed.leaseToken, attempt: claimed.attempt, request: turn.request, mode: turn.mode, publish: turn.publish, ...(turn.previewAI ? { previewAI: turn.previewAI } : {}),
+        provider: "codex", ...(turn.images?.length ? { images: turn.images } : {}), ...(turn.runtimeAction ? { runtimeAction: turn.runtimeAction } : {}), leaseToken: claimed.leaseToken, attempt: claimed.attempt, request: turn.request, mode: turn.mode, publish: turn.publish, ...(turn.previewAI ? { previewAI: turn.previewAI } : {}),
         ...(source ? { source: { prUrl: source.prUrl!, headSha: source.headSha!, branch: source.branch!, baseSha: source.baseSha! } } : {}),
         context: { executionContext: {
           jarvisRunner: { connectedAt: stamp, provider: "codex", projectId: project.id, space: project.space },
           targetRepository: turn.repository,
           webWorkflow: "사용자는 다른 PC의 Jarvis 브라우저에서 개발·테스트·화면 확인을 완료한다. 맥미니는 실행 서버다. 사용자에게 node/npm 명령, JSON 설정 실행, localhost 접속을 일반 테스트 절차로 요구하지 않는다. 자동 테스트는 Jarvis의 테스트 실행, 화면은 화면 준비와 이 PC에서 화면 열기로 안내한다. 테스트 실행 결과와 실제 AI·외부 연동 성공은 별도다. 아직 준비하지 않은 링크나 실행 결과를 만들지 않는다. 과거 답변의 구현 주장은 실제 커밋·PR·검사 상태와 구분한다. PR 작성은 병합 완료가 아니다.",
           connectionScope: "이 요청은 승인된 Jarvis 실행기가 가져왔다. 실행기 연결과 대상 저장소 앱 내부 Codex/Claude 연동은 별개다. 앱에 어댑터가 없거나 격리 작업 폴더에서 CLI/네트워크를 사용할 수 없는 것은 호스트 실행기 미연결의 근거가 아니다. 호스트의 다른 공급자 로그인·연결 상태는 미확인이다.",
-        }, project: { name: project.name, description: project.description, environment: project.setup?.result,
+        }, project: { stage: project.stage, name: project.name, description: project.description, legacyDockerData: turns.some(t => t.result?.preview?.dataPersistence === "project" && t.result.preview.execution !== "native"), environment: project.setup?.result,
           ...(project.planning ? { plan: project.planning.document.content, planRevision: project.planning.document.revision } : {}) }, history,
           tasks: current.tasks.filter(t => t.projectId === project.id && t.space === project.space).slice(-50).map(t => ({ title: t.title, status: t.status })) } } };
     }

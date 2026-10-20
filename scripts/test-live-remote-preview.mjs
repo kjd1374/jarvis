@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { lookup, resolve4, resolve6, Resolver } from "node:dns/promises";
 import { spawn } from "node:child_process";
-import { generateKeyPairSync, randomUUID } from "node:crypto";
+import { createHash, generateKeyPairSync, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,9 +32,16 @@ async function diagnoseDns(name, label) {
   console.log("DNS evidence", label, results.map(r => r.status === "fulfilled" ? (Array.isArray(r.value) ? { answers: r.value.length } : r.value) : { code: r.reason.code ?? r.reason.cause?.code ?? r.reason.name }));
 }
 const app = http.createServer((req, res) => {
+  if (req.url === "/stream") { res.writeHead(200,{"Content-Type":"text/event-stream"});res.write("data: first\n\n");setTimeout(()=>res.end("data: last\n\n"),3000);return; }
   if (req.url === "/api") { res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify({ writes: req.method === "POST" ? ++writes : writes })); return; }
   res.setHeader("Content-Type", "text/html");
   res.end('<h1>Synthetic provider check</h1><button>Save</button><output></output><script>document.querySelector("button").onclick=async()=>{const r=await fetch("/api",{method:"POST"});document.querySelector("output").textContent=(await r.json()).writes}</script>');
+});
+app.on('upgrade',(req,socket,head)=>{
+  if(req.url!=='/socket'){socket.destroy();return;}
+  const accept=createHash('sha1').update(req.headers['sec-websocket-key']+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
+  socket.write('HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: '+accept+'\r\n\r\n');let buffer=head;
+  socket.on('data',chunk=>{buffer=Buffer.concat([buffer,chunk]);if(buffer.length<6)return;const length=buffer[1]&127;if(length>=126||buffer.length<6+length)return;if((buffer[0]&15)===8){socket.end(Buffer.from([136,0]));return;}const data=Buffer.from(buffer.subarray(6,6+length));for(let i=0;i<length;i++)data[i]^=buffer[2+i%4];buffer=buffer.subarray(6+length);socket.write(Buffer.concat([Buffer.from([129,length]),data]));});socket.on('error',()=>{});socket.on('end',()=>socket.destroy());
 });
 try {
   await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
@@ -79,6 +86,12 @@ try {
   await page.getByRole("button", { name: "Save" }).click();
   await page.waitForFunction(() => document.querySelector("output").textContent === "1");
   await page.reload(); assert.equal(await page.locator("h1").textContent(), "Synthetic provider check");
+  await page.waitForFunction(()=>window.__jarvisStreamTransport===true);
+  const streamFirst=await page.evaluate(async()=>{const res=await fetch('/stream');window.liveReader=res.body.getReader();const first=await window.liveReader.read();return new TextDecoder().decode(first.value);});
+  assert(streamFirst.includes('first')&&!streamFirst.includes('last'));
+  const streamRest=await page.evaluate(async()=>{let text='';while(true){const part=await window.liveReader.read();if(part.done)return text;text+=new TextDecoder().decode(part.value);}});assert(streamRest.includes('last'));
+  const socketAnswer=await page.evaluate(()=>new Promise((resolve,reject)=>{const socket=new WebSocket(location.origin.replace('https:','wss:')+'/socket'),timer=setTimeout(()=>{socket.close();reject(Error('socket timeout'));},15000);socket.onopen=()=>socket.send('synthetic-live');socket.onmessage=event=>{clearTimeout(timer);socket.close();resolve(event.data);};socket.onerror=()=>{clearTimeout(timer);reject(Error('socket failed'));};}));assert.equal(socketAnswer,'synthetic-live');
+  console.log('PASS: actual Quick Tunnel fetch stream is incremental over authenticated JSON polls; WebSocket round trip works; no paid model or user data.');
   assert.equal((await (await other.newPage()).goto(result.url)).status(), 403);
   approved = false;
   await page.waitForTimeout(10_100);

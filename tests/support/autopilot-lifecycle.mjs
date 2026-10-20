@@ -22,7 +22,7 @@ export async function runAutopilotLifecycle({base,browser,runner,network,approve
   await form.getByLabel('프로젝트 설명').fill('카운터 값을 저장하는 웹 앱');await expect(form.getByRole('checkbox')).toBeChecked();await form.getByRole('button',{name:'프로젝트 저장',exact:true}).click();await expect(form).not.toBeVisible();
   await expect.poll(async()=> (await snapshot()).data.projects.find(p=>p.name==='합성 자동 개발')?.id).toBeTruthy();
   project=(await snapshot()).data.projects.find(p=>p.name==='합성 자동 개발');await page.goto(base+'/projects/'+project.id);
-  const scope={space:'personal',projectIds:['old-removed-project'],provider:'codex',runnerVersion:VERSION,workVersion:1,remoteWorkVersion:1,previewVersion:1,provisionVersion:1};
+  const scope={space:'personal',projectIds:['old-removed-project'],provider:'codex',runnerVersion:VERSION,workVersion:1,remoteWorkVersion:1,previewVersion:1,provisionVersion:1,developmentVersion:1};
   const setup=(await runner.request('/api/automation/claim',scope)).job;assert.equal(setup.kind,'provision');assert.equal(setup.projectId,project.id);
   const repository='example/'+setupName(setup);
   const setupRun=async(bin,args,options)=>{
@@ -69,14 +69,13 @@ export async function runAutopilotLifecycle({base,browser,runner,network,approve
    }else{assert.equal(job.context.history[0].outcome,'merged');const file=join(cwd,'public/index.html');await writeFile(file,(await readFile(file,'utf8')).replace('Managed counter','Continued counter'));}
    return{blocked:false,reply:'합성 개발 응답 '+modelCalls,summary:'카운터 구현',currentStatus:'수정 완료',nextAction:'화면 확인',followUps:[]};
   };
-  const options={stateDir:directory,run,get,model,delay:async()=>{},log(){},previewEnabled:true,remotePreview:{origin:base,binary:network.binary},previewTools:{...preview,startMacPreview:opts=>preview.startMacPreview({...opts,bridge:async(...args)=>bridge=await preview.createPreviewBridge(...args)})}};
+  const options={stateDir:directory,run,get,model,delay:async()=>{},log(){},previewEnabled:true,remotePreview:{origin:base,binary:network.binary},previewTools:{...preview,startDevelopmentPreview:opts=>preview.startDevelopmentPreview({...opts,bridge:async(...args)=>bridge=await preview.createPreviewBridge(...args)})}};
   const agent=page.getByRole('region',{name:'프로젝트 AI 작업실',exact:true});
   for(let turn=1;turn<=2;turn++){
    if(turn===2){await agent.getByLabel('AI에게 요청',{exact:true}).fill('제목을 Continued counter로 바꾸고 저장값은 유지');await agent.getByRole('button',{name:'요청 보내기',exact:true}).click();await expect.poll(async()=> (await snapshot()).data.projects.find(p=>p.id===project.id).automation.turns.at(-1).status).toBe('queued');}
    const work=(await runner.request('/api/automation/claim',scope)).job;assert.equal(work.kind,'work');assert.equal(work.mode,'change');assert.equal(work.projectId,project.id);
-   containers.push('jarvis-preview-'+createHash('sha256').update(`personal:${project.id}:${work.id}`).digest('hex').slice(0,24));
    await executeProjectWork(runner,work,options);
-   current=(await snapshot()).data.projects.find(p=>p.id===project.id);const result=current.automation.turns.at(-1).result;assert.equal(result?.outcome,'merged',JSON.stringify(current.automation.turns.at(-1)));assert(result.checks.length>0&&result.checks.every(c=>c.status==='passed'),JSON.stringify(result.checks));assert.equal(result.preview?.state,'ready',JSON.stringify(result));assert.equal(result.preview.dataPersistence,'project');
+   current=(await snapshot()).data.projects.find(p=>p.id===project.id);const result=current.automation.turns.at(-1).result;assert.equal(result?.outcome,'merged',JSON.stringify(current.automation.turns.at(-1)));assert(result.checks.length>0&&result.checks.every(c=>c.status==='passed'),JSON.stringify(result.checks));assert.equal(result.preview?.state,'ready',JSON.stringify(result));assert.equal(result.preview.dataPersistence,'project');containers.push('jarvis-preview-'+createHash('sha256').update(`personal:${project.id}:${work.repository}:${result.preview.sha}:none`).digest('hex').slice(0,24));
    await expect(agent).toContainText('합성 개발 응답 '+turn,{timeout:40000});await page.reload();
    const popup=context.waitForEvent('page');await page.getByRole('region',{name:'수정된 화면 확인',exact:true}).getByRole('link',{name:'이 PC에서 화면 열기 ↗',exact:true}).click();const app=await popup;await app.waitForURL(lifecycleRemote);
    await expect(app.getByRole('heading',{name:turn===1?'Managed counter':'Continued counter',exact:true})).toBeVisible();await expect(app.locator('output')).toHaveText(turn===1?'0':'1');

@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useRef, useState } from "react";
 import { enqueueWork, changeWorkState, latestWorkSource, preferredWorkRevision } from "@/lib/automation/work";
+import { prepareProjectImage, type ProjectImage } from "@/lib/projects/images";
 import { repositoryFor } from "@/lib/automation/state";
 import { queuedWorkMessage, runnerOnline } from "@/lib/automation/runner-status";
 import type { GitHubMonitoring } from "@/lib/automation/types";
@@ -23,10 +24,12 @@ const errors: Record<string, string> = {
   runner_interrupted: "실행기 연결이 끊겼습니다. 원래 실행한 기기를 켜고 이어서 실행하면 저장된 작업 경과를 확인합니다.",
   repository_changed: "요청 이후 GitHub 연결이 바뀌었습니다. 현재 저장소로 다시 요청해주세요.",
   cli_login_required: "실행기에서 Codex의 ChatGPT 로그인이 필요합니다.", cli_limit: "Codex 구독 사용 한도에 도달했습니다.",
+  work_image_pending: "사진 원본 전송을 기다리고 있습니다. 저장 완료 후 이어서 실행해주세요.", work_image_changed: "첨부 사진 원본이 요청과 일치하지 않습니다. 사진을 다시 첨부해 요청해주세요.",
   cli_unavailable: "Codex 실행을 마치지 못했습니다. 실행기 상태를 확인해주세요.",
   github_auth_required: "실행기의 GitHub 저장소 접근 권한을 확인해주세요.", github_write_failed: "GitHub 반영을 마치지 못했습니다. 저장소 권한·보호 규칙을 확인해주세요.",
   base_changed: "작업 중 기본 브랜치가 변경돼 병합을 멈췄습니다. PR에서 최신 변경과 함께 확인해주세요.",
   branch_changed: "작업 브랜치가 변경돼 자동 반영을 멈췄습니다.", change_scope_exceeded: "자동 변경 범위를 벗어난 파일이 있어 확인이 필요합니다.",
+  private_image_in_change: "첨부한 사진 원본이 변경 파일에 포함돼 GitHub 게시를 중단했습니다. 원본을 제외한 새 수정 요청으로 이어갈 수 있습니다.",
   secret_in_change: "변경 파일에 인증값으로 보이는 내용이 있어 게시를 멈췄습니다.",
   work_source_changed: "선택한 PR이 변경되거나 닫혔습니다. 확인할 코드를 다시 선택해 요청해주세요.",
 };
@@ -41,6 +44,7 @@ function turnStatus(turn: ProjectTurn) {
 function WorkTurn({ turn, project, saving, onAction, monitoring, clock }: { turn: ProjectTurn; project: Project; saving: boolean; onAction: (turn: ProjectTurn, action: "cancel" | "retry") => void; monitoring?: GitHubMonitoring; clock: number }) {
   return <article className={styles.agentTurn} aria-label="작업 요청">
     <div className={styles.detailHeading}><strong>{turnStatus(turn)}</strong><span>{dateLabel(turn.createdAt)}</span></div>
+    {turn.images?.length ? <p>첨부 사진 {turn.images.length}장 · 이 요청의 CLI 입력</p> : null}
     <BriefText text={turn.request} label="요청 전문" limit={100} />
     <div className={styles.agentReply}>
       {turn.result ? <><BriefText text={turn.mode === "preview" && turn.result.preview ? previewMessage(turn.result.preview) : turn.result.reply} label="답변 전문" />
@@ -53,7 +57,7 @@ function WorkTurn({ turn, project, saving, onAction, monitoring, clock }: { turn
         {turn.result.preview && <details className={styles.compactDisclosure}><summary>이 작업의 화면</summary><PreviewResult preview={turn.result.preview} project={project} turnId={turn.id} /></details>}
         {turn.result.prUrl && <a href={turn.result.prUrl} target="_blank" rel="noopener noreferrer">변경 PR 열기 ↗</a>}
         {turn.result.deployment.url && <a href={turn.result.deployment.url} target="_blank" rel="noopener noreferrer">반영된 화면 열기 ↗</a>}
-      </> : !turn.error && <p>{turn.status === "queued" ? queuedWorkMessage(turn, monitoring, clock) : turn.status === "cancelled" ? "이미 반영된 변경은 유지됩니다." : "작업 중입니다. 결과는 자동으로 갱신됩니다."}</p>}
+      </> : !turn.error && <p>{turn.status === "queued" ? queuedWorkMessage(turn, monitoring, clock, project.stage === "development") : turn.status === "cancelled" ? "이미 반영된 변경은 유지됩니다." : "작업 중입니다. 결과는 자동으로 갱신됩니다."}</p>}
       {turn.error && <p role="status">{errors[turn.error] ?? "실행을 마치지 못했습니다. 저장된 결과를 확인한 뒤 이어서 시도해주세요."}</p>}
       <div className={styles.agentTurnActions}>
         <span>{turn.mode === "test" ? "자동 테스트 · 코드 게시·AI 호출 없음" : turn.mode === "preview" ? turn.previewAI === "ollama" ? "화면 준비 · 로컬 LLM 선택" : turn.previewAI === "codex" ? "화면 준비 · 구독 CLI 선택" : "화면 준비 · AI 호출 없음" : turn.mode === "ask" ? "질문" : turn.publish === "merge" ? "수정·검증 후 반영" : "수정 후 PR 검토"}</span>
@@ -70,6 +74,8 @@ export function ProjectAgent({ project }: { project: Project }) {
   const [serviceId, setServiceId] = useState(services[0]?.id ?? "");
   const service = services.find(s => s.id === serviceId) ?? services[0];
   const [message, setMessage] = useState("");
+  const [images, setImages] = useState<ProjectImage[]>([]);
+  const [preparingImages, setPreparingImages] = useState(false);
   const [mode, setMode] = useState<"change" | "ask">("change");
   const [publish, setPublish] = useState<"merge" | "pr">("merge");
   const [error, setError] = useState("");
@@ -88,13 +94,19 @@ export function ProjectAgent({ project }: { project: Project }) {
   const seen = monitoring?.runnerSeenAt;
   const online = runnerOnline(monitoring, clock);
   const cliUpdateNeeded = turns.some(t => t.serviceId === service?.id && t.status === "queued" && t.previewAI === "codex") && !monitoring?.runnerConnection?.previewCli;
-  const updateNeeded = online && (monitoring?.runnerConnection?.remoteWork === false || cliUpdateNeeded);
+  const nativeUpdateNeeded = project.stage === "development" && !monitoring?.runnerConnection?.development && turns.some(turn => ["queued", "running"].includes(turn.status) && turn.mode !== "ask");
+  const updateNeeded = online && (nativeUpdateNeeded || monitoring?.runnerConnection?.remoteWork === false || cliUpdateNeeded);
   const turnMonitoring = (turn: ProjectTurn) => services.find(s => s.id === turn.serviceId && s.monitoring?.repository === turn.repository)?.monitoring;
   async function submit(event: React.FormEvent) {
-    event.preventDefault(); if (pending.current || saving || !message.trim()) return;
+    event.preventDefault(); if (pending.current || saving || preparingImages || !message.trim()) return;
     pending.current = true; setError("");
     try {
-      await mutate(d => service ? enqueueWork(d, project.space, project.id, service.id, message, mode, publish, now(), requestId.current, source?.id, undefined, revision === "latest") : queueSetupRequest(d, project.space, project.id, message, mode, publish, now(), requestId.current));
+      if (images.length && !service) throw new Error("저장소 준비가 끝난 뒤 사진을 첨부해주세요. 입력한 내용은 유지됩니다.");
+      await mutate(d => {
+        const withFiles = { ...d, documents: [...d.documents, ...images.map(image => image.document)] };
+        return service ? enqueueWork(withFiles, project.space, project.id, service.id, message, mode, publish, now(), requestId.current, source?.id, undefined, revision === "latest", { images: images.map(image => image.image) }) : queueSetupRequest(d, project.space, project.id, message, mode, publish, now(), requestId.current);
+      }, images.map(image => ({ id: image.document.id, blob: image.blob, preventOverwrite: true })));
+      setImages([]);
       setMessage(""); requestId.current = id();
     } catch (e) { setError(e instanceof Error ? e.message : "요청을 저장하지 못했습니다."); }
     finally { pending.current = false; }
@@ -106,7 +118,7 @@ export function ProjectAgent({ project }: { project: Project }) {
   return <section id="project-ai" className={`${styles.detailSection} ${styles.projectAgent}`} aria-label="프로젝트 AI 작업실">
     <div className={styles.detailHeading}><h2><Icon name="message" size={18} /> AI와 프로젝트 작업</h2><span role="status" className={styles.runnerStatus} data-online={online && !updateNeeded}>{!service ? project.setup ? "개발 환경 자동 준비" : "GitHub 저장소 등록 필요" : updateNeeded ? "CLI 연결됨 · 새 기능 업데이트 필요" : online ? "Jarvis CLI 연결됨" : seen ? "Jarvis CLI 최근 응답 없음" : monitoring?.lastSuccessAt ? "CLI 실행 기록 있음 · 접속 미확인" : "CLI 연결 대기"}</span></div>
     {seen && <p className={styles.runnerEvidence}>실행기 최근 응답 {dateLabel(seen)} · 버전 {monitoring?.runnerConnection?.version ?? "미확인"} · 아래 답변은 대상 저장소의 작업 결과입니다.</p>}
-    {updateNeeded && <p className={styles.agentConnection}>{cliUpdateNeeded ? "구독 CLI 미리보기에는 실행기 2.5.0 이상이 필요합니다." : "최근 응답한 실행기는 자동 테스트·수정본 선택을 지원하지 않습니다."} <Link href="/settings#cli-runner">실행기 업데이트 안내 →</Link></p>}
+    {updateNeeded && <p className={styles.agentConnection}>{nativeUpdateNeeded ? "로컬 개발 서버에는 실행기 2.9.0 이상이 필요합니다." : cliUpdateNeeded ? "구독 CLI 미리보기에는 실행기 2.5.0 이상이 필요합니다." : "최근 응답한 실행기는 자동 테스트·수정본 선택을 지원하지 않습니다."} <Link href="/settings#cli-runner">실행기 업데이트 안내 →</Link></p>}
     {(project.setup || !service) && <ProjectSetupPanel project={project} />}
     {!service && !project.setup ? <div className={styles.agentConnection}><p>코드 작업과 화면 준비에 사용할 GitHub 저장소를 등록해주세요. 새 저장소는 README 등 초기 커밋이 있어야 합니다.</p><ServiceRegistrationButton preset="github" projectId={project.id}>GitHub 저장소 등록</ServiceRegistrationButton></div>
       : service && !online && <p className={styles.agentConnection}>{account?.authenticated ? "이 영역에 연결된 실행기가 프로젝트를 자동으로 찾습니다. 다음 응답을 기다리고 있으며 요청은 저장됩니다." : "CLI 자동 실행은 서버에 연결된 업무실에서 사용할 수 있습니다. 현재 요청은 이 브라우저에 저장됩니다."} <Link href="/settings#cli-runner">CLI 연결 안내 →</Link></p>}
@@ -115,14 +127,25 @@ export function ProjectAgent({ project }: { project: Project }) {
       {turns.slice(-historyLimit).map(turn => <WorkTurn key={turn.id} turn={turn} project={project} saving={saving} onAction={act} monitoring={turnMonitoring(turn)} clock={clock} />)}
     </div>}
     <form onSubmit={submit} className={styles.agentComposer}>
-      <label htmlFor="project-agent-message">AI에게 요청</label>
+      <div className={styles.agentAttachHeading}><label htmlFor="project-agent-message">AI에게 요청</label>
+        <label className={styles.textButton}>사진 첨부<input aria-label="프로젝트 사진 첨부" type="file" accept="image/*" multiple disabled={saving || preparingImages || !service || images.length >= 3} onChange={async event => {
+          const files = Array.from(event.target.files ?? []); event.target.value = ""; setError(""); setPreparingImages(true);
+          try { if (files.length + images.length > 3) throw new Error("사진은 요청당 3장까지 첨부할 수 있습니다."); const next: ProjectImage[] = []; for (const file of files) next.push(await prepareProjectImage(file, project)); setImages(current => [...current, ...next]); }
+          catch (e) { setError(e instanceof Error ? e.message : "사진을 준비하지 못했습니다."); } finally { setPreparingImages(false); }
+        }} /></label>
+      </div>
       <textarea id="project-agent-message" value={message} onChange={e => setMessage(e.target.value)} maxLength={8000} rows={2} placeholder="원하는 변경이나 질문을 적어주세요." disabled={project.setup?.status === "cancelled"} />
+      {(preparingImages || images.length > 0) && <div className={styles.projectAttachments}>
+
+        {preparingImages && <span role="status">사진 준비 중…</span>}
+        {images.map(image => <span key={image.document.id}>{image.document.name} <button type="button" className={styles.textButton} aria-label={`${image.document.name} 첨부 제거`} onClick={() => setImages(current => current.filter(item => item !== image))}>×</button></span>)}
+      </div>}
       <div className={styles.agentComposerActions}>
         {services.length > 1 && <label>대상 저장소<select aria-label="대상 저장소" value={service?.id ?? ""} onChange={e => setServiceId(e.target.value)}>{services.map(s => <option key={s.id} value={s.id}>{repositoryFor(s)}</option>)}</select></label>}
         {recent && <label>작업할 코드<select aria-label="작업할 코드" value={revision} onChange={e => setRevision({ serviceId: service!.id, value: e.target.value })}><option value="latest">저장된 PR 수정본 · 이어가기</option><option value="main">기본 브랜치 · 반영된 코드</option></select></label>}
         <label>요청 방식<select aria-label="요청 방식" value={mode} onChange={e => setMode(e.target.value as "ask" | "change")}><option value="change">수정 요청</option><option value="ask">질문하기</option></select></label>
         {mode === "change" && <label>반영 범위<select aria-label="반영 범위" value={publish} onChange={e => setPublish(e.target.value as "pr" | "merge")}><option value="merge">검증 후 병합·자동 배포</option><option value="pr">PR 작성 후 내가 검토</option></select></label>}
-        <button type="submit" className={styles.primaryButton} disabled={saving || project.setup?.status === "cancelled" || !message.trim()}>요청 보내기 <Icon name="arrow" size={16} /></button>
+        <button type="submit" className={styles.primaryButton} disabled={saving || preparingImages || project.setup?.status === "cancelled" || !message.trim()}>요청 보내기 <Icon name="arrow" size={16} /></button>
       </div>
       <p className={styles.detailFootnote}>{!service ? "요청을 보내면 개발 환경을 자동 준비한 뒤 이어서 실행합니다." : mode === "ask" ? "선택한 저장소를 읽고 답변합니다." : publish === "merge" ? "코드 수정 → 검증 통과 후 병합 · 기존 자동 배포 확인" : "코드 수정·검증 → PR 작성 · 병합은 직접 결정"}</p>
       {source && <p className={styles.detailFootnote}>최근 수정본 {source.result!.headSha!.slice(0, 8)}에서 이어갑니다. 실행기 2.4.0 이상이 필요합니다.</p>}

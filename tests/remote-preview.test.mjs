@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { verifyPreviewTicket, previewOrigin } from "../public/jarvis-preview-auth.mjs";
 import { randomUUID } from "node:crypto";
-import { fixture, ticket, publicKey, expected, viewer, enter, cookieOf } from "./support/remote-preview.mjs";
+import { fixture, ticket, publicKey, appOrigin, remoteUrl, expected, viewer, enter, cookieOf } from "./support/remote-preview.mjs";
 import { startQuickTunnel, tunnelFailure, waitForRemoteHealth, probeRemoteHealth, publishRemotePreview } from "../public/jarvis-remote-preview.mjs";
 import http from "node:http";
 import https from "node:https";
@@ -187,4 +187,55 @@ test("revocation, expiry, cross-site API requests and credential forwarding fail
   f.revoke(); f.advance(10_001);
   assert.equal((await f.request("/api", { headers: { cookie } })).status, 403);
   f.advance(120_000); assert.equal((await f.request("/", { headers: { cookie } })).status, 410);
+}));
+
+test('signed embedded views use a distinct partitioned cookie and permit only the Jarvis frame ancestor', async () => fixture(async f => {
+  const opened = await enter(f, f.ticket({ embed: true }));
+  assert.equal(opened.status,303);
+  assert.match(opened.headers['set-cookie'][0], /__Host-jarvis-embed=/);
+  assert.match(opened.headers['set-cookie'][0], /SameSite=None; Partitioned/);
+  const app=await f.request('/',{headers:{cookie:cookieOf(opened),'sec-fetch-site':'cross-site','sec-fetch-mode':'navigate','sec-fetch-dest':'iframe'}});
+  assert.equal(app.status,200);
+  assert(app.headers['content-security-policy'].includes(`frame-ancestors ${appOrigin}`));
+  assert(!f.forwarded().cookie?.includes('jarvis-embed'));
+  const copied=await f.request('/api',{headers:{cookie:cookieOf(opened),origin:'https://another.invalid','sec-fetch-site':'cross-site'}});
+  assert.equal(copied.status,403);
+}));
+
+test('authenticated WebSocket carries bidirectional bytes, hides credentials and denies other origins/revoked devices', async()=>fixture(async f=>{
+  const opened=await enter(f), cookie=cookieOf(opened);
+  const upgrade=(origin,cookie)=>new Promise((resolve,reject)=>{
+    const target=new URL(f.gate.localUrl), req=http.request({hostname:target.hostname,port:target.port,path:'/hmr',headers:{host:new URL(remoteUrl).host,origin,cookie,connection:'Upgrade',upgrade:'websocket','sec-websocket-version':'13','sec-websocket-key':'dGhlIHNhbXBsZSBub25jZQ=='} });
+    req.on('upgrade',(_res,socket)=>resolve({status:101,socket}));req.on('response',res=>{res.resume();resolve({status:res.statusCode});});req.on('error',reject);req.end();
+  });
+  const active=await upgrade(expected.origin,cookie);assert.equal(active.status,101);
+  try {
+    const received=new Promise(resolve=>active.socket.once('data',bytes=>resolve(bytes.toString())));active.socket.write('synthetic-hmr-payload');assert.equal(await received,'synthetic-hmr-payload');
+    assert(!f.forwarded().cookie?.includes('jarvis-preview'));assert.equal((await upgrade('https://another.invalid',cookie)).status,403);
+    f.revoke();f.advance(10001);assert.equal((await upgrade(expected.origin,cookie)).status,403);
+  } finally {active.socket.destroy();}
+}));
+test('remote HTTP delivers the first streaming chunk before the response ends',async()=>fixture(async f=>{
+  const cookie=cookieOf(await enter(f));
+  await new Promise((resolve,reject)=>{
+    const target=new URL(f.gate.localUrl),req=http.get({hostname:target.hostname,port:target.port,path:'/stream',headers:{host:new URL(remoteUrl).host,cookie,origin:expected.origin}},res=>{
+      let first=false,body='';res.on('data',chunk=>{body+=chunk; if(!first){first=true;assert(body.includes('first'));assert(!body.includes('last'));}});res.on('end',()=>{assert(body.includes('last'));resolve();});res.on('error',reject);
+    });req.on('error',reject);
+  });
+}));
+
+test('Quick Tunnel stream chunks use short JSON polls bound to the exact approved session and cancel cleanly',async()=>fixture(async f=>{
+ const owner=cookieOf(await enter(f)),other=cookieOf(await enter(f));
+ const response=await f.request('/stream',{headers:{cookie:owner,origin:expected.origin,'x-jarvis-stream':'poll-v1'}});
+ assert.equal(response.status,200);assert.equal(response.headers['x-jarvis-stream'],'poll-v1');assert.match(response.headers['content-type'],/application\/json/);
+ const meta=JSON.parse(response.body),path='/_jarvis/stream/'+meta.id;assert.equal(meta.status,200);
+ assert.equal((await f.request(path,{headers:{cookie:other,origin:expected.origin}})).status,404);
+ const first=JSON.parse((await f.request(path,{headers:{cookie:owner,origin:expected.origin}})).body);
+ assert.equal(Buffer.from(first.chunks[0],'base64').toString(),'data: first\n\n');assert.equal(first.done,false);
+ const chunks=[];let done=false;for(let attempt=0;attempt<4&&!done;attempt++){const batch=JSON.parse((await f.request(path,{headers:{cookie:owner,origin:expected.origin}})).body);chunks.push(...batch.chunks);done=batch.done;}
+ assert(chunks.some(chunk=>Buffer.from(chunk,'base64').toString().includes('last')));assert.equal(done,true);
+ assert.equal((await f.request(path,{headers:{cookie:owner,origin:expected.origin}})).status,404);
+ const another=JSON.parse((await f.request('/stream?slow=1',{headers:{cookie:owner,origin:expected.origin,'x-jarvis-stream':'poll-v1'}})).body);
+ assert.equal((await f.request('/_jarvis/stream/'+another.id,{method:'DELETE',headers:{cookie:owner,origin:expected.origin}})).status,200);
+ assert.equal((await f.request('/_jarvis/stream/'+another.id,{headers:{cookie:owner,origin:expected.origin}})).status,404);
 }));

@@ -9,9 +9,9 @@ import { executePlanning, VERSION } from '../../public/jarvis-runner.mjs';
 export async function runPlanningLifecycle({ base, browser, runner, approve, snapshot, recordCheck }) {
   assert.equal(base,'http://127.0.0.1:4317');
   const dir=await mkdtemp(join(tmpdir(),'jarvis-planning-lifecycle-'));
-  const context=await browser.newContext();let models=0;
+  const context=await browser.newContext();let models=0;const unexpected=[];
   try {
-    await context.route('**/*',route=>{assert.equal(new URL(route.request().url()).origin,base);return route.continue();});
+    await context.route('**/*',route=>{const origin=new URL(route.request().url()).origin;if(![base,'http://127.0.0.1:54321'].includes(origin)){unexpected.push(origin);return route.abort();}return route.continue();});
     const page=await context.newPage();await page.goto(base+'/settings');
     await page.getByText(/기기 확인 번호:/).waitFor();await approve(await(await context.request.get(base+'/api/account')).json());
     await page.getByRole('button',{name:'기기 연결 다시 확인',exact:true}).click();
@@ -60,6 +60,7 @@ export async function runPlanningLifecycle({ base, browser, runner, approve, sna
     await page.screenshot({path:'test-results/project-lifecycle-planning.png',fullPage:true});
     await page.getByRole('button',{name:'개발 시작',exact:true}).click();await expect.poll(async()=> (await current()).stage).toBe('development');
     const p=await current();assert.equal(p.setup.target,'mac');assert.equal(p.planning.document.content,'# 갱신 제안\n새 완료 기준');
+    assert.deepEqual(unexpected,[]);
     recordCheck('repository-free planning: browser creation -> real private claim/report -> versioned plan -> concurrent manual edit proposal -> reload -> development handoff; no external resources or paid model calls');
   } finally {await context.close();await rm(dir,{recursive:true,force:true});}
 }

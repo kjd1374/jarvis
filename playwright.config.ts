@@ -32,6 +32,12 @@ export default defineConfig({
       use: { ...devices["Pixel 7"] },
     },
     {
+      name: "safari",
+      testMatch: /automation\.spec\.ts/,
+      grep: /개발 작업 공간은 사진과 설명/,
+      use: { ...devices["iPhone 13"] },
+    },
+    {
       name: "storage",
       testMatch: /storage\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] },

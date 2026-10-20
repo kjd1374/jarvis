@@ -21,23 +21,24 @@ export function ProjectSetupPanel({ project }: { project: Project }) {
   const [error, setError] = useState("");
   const s = project.setup;
   const runner = data.services.filter(v => v.space === project.space && v.monitoring?.runnerConnection).map(v => v.monitoring!.runnerConnection!).sort((a, b) => b.seenAt.localeCompare(a.seenAt))[0];
-  const needsUpdate = runner?.version?.startsWith("2.") && Number(runner.version.split(".")[1]) < 6;
+  const native = !s || s.target === "mac", minimum = native ? "2.9.0" : "2.6.0";
+  const needsUpdate = !!runner && (native ? !runner.development : runner.version?.startsWith("2.") && Number(runner.version.split(".")[1]) < 6);
   async function act(action: "start" | "retry" | "cancel") {
     try {
-      await mutate(d => action === "start" ? { ...d, projects: d.projects.map(p => p.id === project.id && p.space === project.space ? { ...p, setup: newProjectSetup(now(), p.stage === "development" ? "mac" : "auto") } : p) } : changeSetup(d, project.space, project.id, action, now()));
+      await mutate(d => action === "start" ? { ...d, projects: d.projects.map(p => p.id === project.id && p.space === project.space ? { ...p, setup: newProjectSetup(now(), "mac") } : p) } : changeSetup(d, project.space, project.id, action, now()));
     } catch (e) { setError(e instanceof Error ? e.message : "준비 요청을 저장하지 못했습니다."); }
   }
   return <section className={styles.agentConnection} aria-label="프로젝트 자동 준비">
     <strong>{!s ? "프로젝트 자동 준비" : s.status === "ready" ? "개발 환경 준비 완료" : s.status === "running" ? s.phase : s.status === "queued" ? "저장소·실행 환경 자동 준비 대기" : s.status === "cancelled" ? "자동 준비 취소됨" : "자동 준비 확인 필요"}</strong>
     {!s && <><p>비공개 GitHub 저장소와 실행 환경을 준비합니다. 이미 연결한 저장소가 있으면 그대로 사용합니다.</p><button className={styles.secondaryButton} disabled={saving} onClick={() => void act("start")}>자동으로 개발 환경 준비</button></>}
-    {s?.status === "queued" && needsUpdate && <p role="status">마지막 확인한 실행기는 {runner?.version}입니다. 자동 준비를 시작하려면 이번 2.6.0 업데이트를 한 번 적용해야 합니다.</p>}
-    {s?.status === "queued" && <p>{account?.authenticated ? "연결된 실행기 2.6.0 이상이 자동으로 처리합니다. 준비 중에도 아래 대화에 개발 요청을 남길 수 있습니다." : "현재 브라우저에 저장됐습니다. 서버 연결과 실행기 2.6.0 이상이 있어야 자동 준비가 실행됩니다."}</p>}
+    {s?.status === "queued" && needsUpdate && <p role="status">마지막 확인한 실행기는 {runner?.version}입니다. 자동 준비를 시작하려면 이번 {minimum} 업데이트를 한 번 적용해야 합니다.</p>}
+    {s?.status === "queued" && <p>{account?.authenticated ? `연결된 실행기 ${minimum} 이상이 자동으로 처리합니다. 준비 중에도 아래 대화에 개발 요청을 남길 수 있습니다.` : `현재 브라우저에 저장됐습니다. 서버 연결과 실행기 ${minimum} 이상이 있어야 자동 준비가 실행됩니다.`}</p>}
     {s?.result && <><p>{s.result.target === "mac" ? "맥미니" : "Vercel"} · {s.result.database === "sqlite" ? "프로젝트 전용 SQLite" : s.result.database === "supabase" ? "Supabase" : "별도 데이터베이스 없음"}</p><p>{s.result.reason}</p><details><summary>준비한 환경과 확인 결과</summary><ul>{s.result.checks.map(c => <li key={c.name}>{c.name}: {c.detail}</li>)}</ul></details></>}
     {s?.error && <p role="status">{errors[s.error] ?? "환경 준비 중 연결 또는 실행 오류가 발생했습니다. 저장된 자원을 유지하고 이어서 준비할 수 있습니다."}</p>}
     {s && ["failed", "interrupted", "cancelled"].includes(s.status) && <button className={styles.secondaryButton} disabled={saving} onClick={() => void act("retry")}>이어서 준비</button>}
     {s && ["queued", "running", "failed", "interrupted"].includes(s.status) && <button className={styles.textButton} disabled={saving} onClick={() => void act("cancel")}>자동 준비 취소</button>}
     {s && s.status !== "ready" && s.requests.map(r => <p key={r.id}>개발 대기: {r.request}</p>)}
-    <ProjectProviders space={project.space} />
+    {s && s.target !== "mac" && <ProjectProviders space={project.space} />}
     {error && <p role="alert">{error}</p>}
   </section>;
 }

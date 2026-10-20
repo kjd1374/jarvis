@@ -53,6 +53,35 @@ function decode(value: unknown): WorkspaceData {
   return normalizeWorkspace(value);
 }
 
+// WebKit can fail Blob serialization without completing the transaction. Keep
+// bytes in the same v1 store/transaction; continue reading all legacy Blobs.
+type StoredFile = {
+  kind: "jarvis-file-v1";
+  bytes: ArrayBuffer;
+  type: string;
+  size: number;
+};
+async function encodeFile(blob: Blob): Promise<StoredFile> {
+  return {
+    kind: "jarvis-file-v1",
+    bytes: await blob.arrayBuffer(),
+    type: blob.type,
+    size: blob.size,
+  };
+}
+function decodeFile(value: unknown): Blob | undefined {
+  if (value instanceof Blob) return value;
+  if (!value || typeof value !== "object") return undefined;
+  const file = value as Partial<StoredFile>;
+  if (
+    file.kind !== "jarvis-file-v1" ||
+    !(file.bytes instanceof ArrayBuffer) ||
+    typeof file.type !== "string" ||
+    file.size !== file.bytes.byteLength
+  ) return undefined;
+  return new Blob([file.bytes], { type: file.type });
+}
+
 const checkpointKey = "last-confirmed";
 export type StorageRecovery = {
   current: "valid" | "missing" | "unreadable";
@@ -156,10 +185,11 @@ export async function readLegacyFile(id: string): Promise<Blob> {
   const db = await open("jarvis-workspace");
   return new Promise((resolve, reject) => {
     const read = db.transaction("files").objectStore("files").get(id);
-    read.onsuccess = () =>
-      read.result instanceof Blob
-        ? resolve(read.result)
-        : reject(new Error("이전 기록의 파일 원본을 찾지 못했습니다."));
+    read.onsuccess = () => {
+      const blob = decodeFile(read.result);
+      if (blob) resolve(blob);
+      else reject(new Error("이전 기록의 파일 원본을 찾지 못했습니다."));
+    };
     read.onerror = () => reject(new Error("이전 파일을 읽지 못했습니다."));
   });
 }
@@ -177,7 +207,15 @@ export async function commitWorkspace(
     ) => { data: WorkspaceData; sync: SyncState };
   },
 ): Promise<WorkspaceData> {
-  const db = await open(accountName(options?.accountId));
+  // Capture the owner before conversion: disconnecting or switching accounts
+  // while reading a file must never move the pending write to a different DB.
+  const databaseName = accountName(options?.accountId);
+  // Finish asynchronous conversion before opening the atomic transaction, then
+  // read its latest workspace so another tab's changes remain protected.
+  const storedFiles = await Promise.all(
+    files.map(async file => ({ ...file, value: await encodeFile(file.blob) })),
+  );
+  const db = await open(databaseName);
   return new Promise((resolve, reject) => {
     const tx = db.transaction(["workspace", "files"], "readwrite", {
       durability: "strict",
@@ -212,7 +250,7 @@ export async function commitWorkspace(
             { data: result, savedAt: new Date().toISOString() },
             checkpointKey,
           );
-          for (const file of files) {
+          for (const file of storedFiles) {
             const record = result.documents.find(
               (d) => d.id === file.id && !d.sourceUrl,
             );
@@ -221,8 +259,8 @@ export async function commitWorkspace(
                 "파일 원본과 저장 정보가 일치하지 않습니다. 기존 기록은 유지됩니다.",
               );
             const filesStore = tx.objectStore("files");
-            if (file.preventOverwrite) filesStore.add(file.blob, file.id);
-            else filesStore.put(file.blob, file.id);
+            if (file.preventOverwrite) filesStore.add(file.value, file.id);
+            else filesStore.put(file.value, file.id);
           }
         } catch (error) {
           failure = error;
@@ -342,15 +380,15 @@ export async function readFile(
   fileId: string,
   accountId?: string,
 ): Promise<Blob> {
-  const db = await open(accountName(accountId));
   const account = accountId ?? storageAccount;
+  const db = await open(accountName(accountId));
   const local = await new Promise<Blob | undefined>((resolve, reject) => {
     const request = db
       .transaction("files", "readonly")
       .objectStore("files")
       .get(fileId);
     request.onsuccess = () =>
-      resolve(request.result instanceof Blob ? request.result : undefined);
+      resolve(decodeFile(request.result));
     request.onerror = () => reject(new Error("파일을 읽을 수 없습니다."));
   });
   if (local) return local;
@@ -362,9 +400,10 @@ export async function readFile(
       const blob = await downloadCloudFile(record.space, fileId);
       if (blob.size !== record.size)
         throw new Error("서버 파일 크기가 기록과 다릅니다.");
+      const stored = await encodeFile(blob);
       await new Promise<void>((resolve, reject) => {
         const tx = db.transaction("files", "readwrite");
-        tx.objectStore("files").put(blob, fileId);
+        tx.objectStore("files").put(stored, fileId);
         tx.oncomplete = () => resolve();
         tx.onabort = () =>
           reject(new Error("파일을 이 기기에 보관하지 못했습니다."));

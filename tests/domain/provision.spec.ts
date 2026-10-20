@@ -42,3 +42,10 @@ test("백업에 클라우드 연결 정보를 내보내지 않고 가져온 자�
   expect(restored.data.projects[0].setup?.status).toBe("interrupted");
   expect(claimSetup(restored.data, scope, stamp).job).toBeNull();
 });
+
+
+test("명시적 맥 개발 환경은 구버전이 가져가지 않고 로컬 실행 역량을 기다린다", () => {
+  const data = initial(); data.projects[0].setup = newProjectSetup(stamp, "mac");
+  expect(claimSetup(data, scope, stamp).job).toBeNull();
+  expect(claimSetup(data, { ...scope, development: true }, stamp).job).toMatchObject({ target: "mac", kind: "provision" });
+});

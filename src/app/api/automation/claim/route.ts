@@ -39,12 +39,12 @@ export async function POST(request: Request) {
         if (document.job) return { data, result: { job: document.job } };
       }
       if (supportsWork && body.provisionVersion === 1) {
-        const setup = claimSetup(data, { space, projectIds: projects, deviceId }, stamp);
+        const setup = claimSetup(data, { space, projectIds: projects, deviceId, development: body.developmentVersion === 1 }, stamp);
         data = setup.data;
         if (setup.job) return { data, result: { job: { ...setup.job, credentials: credentialsFor(data, ownerId, space) } } };
       }
       if (supportsWork) {
-        const work = claimProjectWork(data, { space, projectIds: projects, deviceId, previews: body.previewVersion === 1, remoteWork: body.remoteWorkVersion === 1, previewCli: body.previewCliVersion === 1, previewLocal: body.previewLocalVersion === 1, managedWork: body.provisionVersion === 1 }, stamp);
+        const work = claimProjectWork(data, { space, projectIds: projects, deviceId, previews: body.previewVersion === 1, remoteWork: body.remoteWorkVersion === 1, previewCli: body.previewCliVersion === 1, previewLocal: body.previewLocalVersion === 1, managedWork: body.provisionVersion === 1, development: body.developmentVersion === 1 }, stamp);
         data = work.data;
         if (work.job) return { data, result: { job: work.job } };
       }

@@ -37,6 +37,8 @@ export async function ready(page: Page) {
   await expect(
     page.getByRole("button", { name: "회사", exact: true }),
   ).toBeEnabled();
+  const together = page.getByRole("navigation", { name: "개발 작업 보기" }).getByRole("button", { name: "함께 보기", exact: true });
+  if (await together.isVisible()) await together.click();
 }
 export async function state(page: Page): Promise<WorkspaceData | undefined> {
   return page.evaluate(
@@ -98,6 +100,10 @@ export async function seed(page: Page, data: WorkspaceData) {
       }),
     data,
   );
+  // WebKit reports aborted Next.js prefetches as page errors on a forced reload.
+  // Finish that fixture-only navigation before reloading seeded state.
+  if (page.context().browser()?.browserType().name() === "webkit")
+    await page.waitForLoadState("networkidle");
   await page.reload();
   await ready(page);
 }

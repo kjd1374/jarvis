@@ -24,6 +24,23 @@ export function attachPreviewCliAuthorization(url, authorize) {
   if (!bridge?.cliWorker) return false;
   bridge.cliWorker.setAuthorization(authorize); return true;
 }
+export function registerDevelopmentBridge(name, url, expiresAt, stop) {
+  let closed = false;
+  const item = { url, cleanups: new Set(), close() {
+    if (closed) return; closed = true; clearTimeout(timer); bridges.delete(name);
+    for (const cleanup of item.cleanups) cleanup(); item.cleanups.clear(); stop();
+  } };
+  const timer = setTimeout(() => item.close(), Math.max(1, Date.parse(expiresAt) - Date.now())); timer.unref();
+  bridges.set(name, item); return item;
+}
+export async function startDevelopmentPreview(options) {
+  const native = await import('./jarvis-development.mjs');
+  const ready = await native.startDevelopmentPreview(options);
+  return ready ?? { ...await startMacPreview(options), execution: 'docker' };
+}
+export async function controlDevelopmentServer(group, action, redact) {
+  return (await import('./jarvis-development.mjs')).developmentStatus(group, action, redact);
+}
 export function directProbe(url, { signal } = {}) {
   return new Promise((resolveResult, reject) => {
     const request = http.get(url, { signal }, response => {
@@ -87,7 +104,7 @@ export function previewPlan(files, pkg, lock) {
   const root = files.includes("index.html") ? "." : files.includes("public/index.html") ? "public" : null;
   return root ? { kind: "static", root, install: false, build: false } : null;
 }
-async function copyProject(cwd, files, app) {
+export async function copyProject(cwd, files, app) {
   await mkdir(app, { recursive: true, mode: 0o700 });
   const source = await realpath(cwd), copied = [];
   let total = 0;
@@ -115,6 +132,9 @@ export function projectTestPlan(files, pkg, lock) {
   return { commands, install: !!lock };
 }
 export async function runProjectTests({ cwd, files, stateDir, identity, run, signal, redact = value => value }) {
+  const native = await import('./jarvis-development.mjs');
+  const localChecks = await native.runDevelopmentTests({ cwd, files, stateDir, identity, run, signal, redact });
+  if (localChecks) return localChecks;
   const key = createHash("sha256").update(`${identity}:${randomUUID()}`).digest("hex").slice(0, 24);
   const name = `jarvis-test-${key}`, image = `${name}:app`, directory = join(stateDir, name), app = join(directory, "app");
   const checks = [], omitted = detail => [{ name: "자동 테스트", status: "not_run", detail }];
@@ -218,6 +238,16 @@ const server=http.createServer(async(req,res)=>{
     res.writeHead(response.statusCode,out);response.pipe(res);
   });upstream.on('error',()=>{if(!res.destroyed){if(!res.headersSent)res.writeHead(502);res.end('Preview starting');}});res.once('close',()=>upstream.destroy());req.pipe(upstream);
 });
+server.on('upgrade',(req,socket,head)=>{
+  if(req.headers.origin!=='http://'+req.headers.host || req.url.startsWith('/__jarvis')){socket.end('HTTP/1.1 403 Forbidden\r\n\r\n');return;}
+  const headers={...req.headers,host:'127.0.0.1:3000',origin:'http://127.0.0.1:3000'};
+  const request=http.request({hostname:'127.0.0.1',port:3000,path:req.url,headers});
+  request.on('upgrade',(response,peer,extra)=>{
+    socket.write('HTTP/1.1 101 Switching Protocols\r\n'+Object.entries(response.headers).map(([key,value])=>key+': '+value+'\r\n').join('')+'\r\n');
+    if(head.length)peer.write(head);if(extra.length)socket.write(extra);
+    socket.on('error',()=>peer.destroy());peer.on('error',()=>socket.destroy());socket.once('close',()=>peer.destroy());peer.once('close',()=>socket.destroy());socket.pipe(peer);peer.pipe(socket);
+  });request.on('error',()=>socket.destroy());request.on('response',response=>{response.resume();socket.destroy();});request.end();
+});
 server.listen(3001,'0.0.0.0');
 setTimeout(()=>process.exit(0),Number(process.env.JARVIS_PREVIEW_TTL)||7200000);
 process.on('SIGTERM',()=>{child?.kill('SIGTERM');server.close(()=>process.exit(0));});
@@ -245,7 +275,7 @@ export function previewFailure(sha, error, stage, remote = false) {
     module: "미리보기 실행 모듈을 불러오지 못했습니다. 실행기 설치 파일을 확인해야 합니다.",
     ai: "선택한 AI의 실제 응답을 확인하지 못했습니다. 연결 진단에 실패 원인과 응답 상태를 기록했습니다. 준비 완료로 처리하지 않았습니다.",
   };
-  const localMessages = { local_model_missing: "맥미니에 translategemma:4b 모델이 없습니다. 다른 모델이나 구독 CLI로 전환하지 않았습니다.", local_model_unavailable: "맥미니의 Ollama 응답을 확인하지 못했습니다. 로컬 모델 서버의 실행 상태를 확인해야 합니다.", local_model_timeout: "맥미니의 로컬 모델 응답 시간이 초과됐습니다. 준비 완료로 처리하지 않았습니다." };
+  const localMessages = { development_data_image_unavailable: "기존 데이터 이관용 공식 실행 이미지를 준비하지 못했습니다. 기존 볼륨은 유지했습니다. 연결 상태를 확인한 뒤 다시 준비해주세요.", development_data_migration_required: "이 프로젝트의 기존 Docker 데이터 이관이 필요합니다. 기존 볼륨은 보존했습니다. 이번 한 번은 Docker를 켜고 화면 준비를 다시 눌러주세요. 이후 로컬 서버는 Docker 없이 실행합니다.", development_data_migration_conflict: "기존 로컬 데이터와 Docker 데이터가 함께 있어 자동 덮어쓰기를 중단했습니다. 두 원본을 유지했습니다.", development_sandbox_unavailable: "macOS 격리 실행을 시작하지 못했습니다. 호스트에 직접 실행하지 않았습니다. 연결 진단과 실행기 로그를 확인해주세요.", local_model_missing: "맥미니에 translategemma:4b 모델이 없습니다. 다른 모델이나 구독 CLI로 전환하지 않았습니다.", local_model_unavailable: "맥미니의 Ollama 응답을 확인하지 못했습니다. 로컬 모델 서버의 실행 상태를 확인해야 합니다.", local_model_timeout: "맥미니의 로컬 모델 응답 시간이 초과됐습니다. 준비 완료로 처리하지 않았습니다." };
   const message = localMessages[code] ?? (code === "preview_cli_config_unavailable"
     ? "이 앱은 구독 CLI 미리보기 연결을 지원하지 않습니다. CLI를 호출하기 전에 준비를 중단했습니다. 화면만 확인하려면 미리보기 AI를 ‘연결 안 함’으로 선택해주세요." : messages[stage]);
   return unavailable(sha, message, "failed", remote ? "remote" : "mac", diagnostic);

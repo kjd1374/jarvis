@@ -252,3 +252,41 @@ test("로컬 LLM 요청은 전용 실행기 역량과 일치하는 실제 모델
   const observed=observeWorkRunner(data,scope,{runnerVersion:"2.7.0",previewVersion:1,previewLocalVersion:1},stamp);
   expect(normalizeWorkspace(observed).services[0].monitoring?.runnerConnection?.previewLocal).toBe(true);
 });
+
+test("사진 요청은 같은 영역·프로젝트의 원본을 고정하고 구버전 실행기에서 보존한다", () => {
+  const data = automationWorkspace();
+  const image = { id: "image-fixture", sha256: "a".repeat(64) };
+  data.documents.push({ id: image.id, space: "company", projectId: "auto-project", taskId: null, name: "synthetic.jpg", mime: "image/jpeg", size: 200, createdAt: stamp });
+  const queued = enqueueWork(data, "company", "auto-project", "auto-service", "사진처럼 수정", "change", "pr", stamp, uuid, undefined, undefined, false, { images: [image] });
+  expect(normalizeWorkspace(queued).projects[0].automation!.turns[0].images).toEqual([image]);
+  expect(claimProjectWork(queued, scope, stamp).job).toBeNull();
+  expect(claimProjectWork(queued, { ...scope, development: true }, stamp).job!.images).toEqual([image]);
+  for (const [space, projectId] of [["personal", "auto-project"], ["company", "another-project"]]) {
+    const changed = structuredClone(data); Object.assign(changed.documents[0], { space, projectId });
+    expect(() => enqueueWork(changed, "company", "auto-project", "auto-service", "사진 수정", "ask", "pr", stamp, uuid, undefined, undefined, false, { images: [image] })).toThrow();
+  }
+  expect(() => enqueueWork(data, "company", "auto-project", "auto-service", "사진 수정", "preview", "pr", stamp, uuid, undefined, undefined, false, { images: [image] })).toThrow();
+});
+test("서버 제어는 명시적 형식과 새 실행기 역량이 있어야 가져간다", () => {
+  const queued = enqueueWork(automationWorkspace(), "company", "auto-project", "auto-service", "서버 종료", "preview", "pr", stamp, uuid, undefined, undefined, false, { runtimeAction: "stop" });
+  expect(claimProjectWork(queued, { ...scope, previews: true, remoteWork: true }, stamp).job).toBeNull();
+  expect(claimProjectWork(queued, { ...scope, previews: true, development: true }, stamp).job!.runtimeAction).toBe("stop");
+});
+
+test("서버 종료 이후 로그 조회가 이전 화면을 되살리지 않고 새 준비 이후에만 열 수 있다", async () => {
+  const { currentPreviewTurn } = await import("../../src/lib/automation/work");
+  const project = automationWorkspace().projects[0], base = { id: uuid, serviceId: "auto-service", repository: "example/synthetic", request: "합성 화면", mode: "preview" as const, publish: "pr" as const, status: "completed" as const, phase: "reporting" as const, attempt: 1, createdAt: stamp, updatedAt: stamp };
+  const ready = { ...base, result: parseWorkResult({ ...result, outcome: "answered" as const, branch: null, prUrl: null, preview: { state: "ready" as const, kind: "remote" as const, remoteId: uuid, url: "https://synthetic-active.trycloudflare.com/", sha: "a".repeat(40), checkedAt: stamp, expiresAt: new Date(Date.parse(stamp)+3600000).toISOString(), message: "합성 준비" } }, base.repository, "preview") };
+  project.automation = { turns: [ready] }; expect(currentPreviewTurn(project, base.serviceId, base.repository)?.id).toBe(uuid);
+  project.automation.turns.push({ ...base, id: "22222222-2222-4222-8222-222222222222", runtimeAction: "stop" }, { ...base, id: "33333333-3333-4333-8333-333333333333", runtimeAction: "logs" });
+  expect(currentPreviewTurn(project, base.serviceId, base.repository)).toBeUndefined();
+  project.automation.turns.push({ ...ready, id: "44444444-4444-4444-8444-444444444444" });
+  expect(currentPreviewTurn(project, base.serviceId, base.repository)?.id).toBe("44444444-4444-4444-8444-444444444444");
+});
+
+
+test("새 개발 단계는 기존 저장소여도 새 실행기의 로컬 실행 역량을 기다린다", () => {
+  const data = queued(); data.projects[0].stage = "development";
+  expect(claimProjectWork(data, scope, stamp).job).toBeNull();
+  expect(claimProjectWork(data, { ...scope, development: true }, stamp).job!.context.project.stage).toBe("development");
+});

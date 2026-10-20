@@ -1,5 +1,6 @@
 import "server-only";
 import { authorize, CloudError, loadSpace, spaceParam } from "@/lib/cloud/server";
+import { currentPreviewTurn } from "@/lib/automation/work";
 import { repositoryFor } from "@/lib/automation/state";
 import { issuePreviewTicket, previewOrigin, ticketPublicKey } from "../../../public/jarvis-preview-auth.mjs";
 
@@ -19,7 +20,7 @@ export async function authorizedPreview(request: Request, input: Record<string, 
   const turn = project?.automation?.turns.find(t => t.id === input.turnId);
   const service = data.services.find(s => s.space === space && s.projectId === project?.id && s.id === turn?.serviceId);
   const preview = turn?.result?.preview;
-  const latest = [...(project?.automation?.turns ?? [])].reverse().find(t => t.serviceId === turn?.serviceId && t.repository === turn?.repository && t.result?.preview?.state === "ready");
+  const latest = project && turn && currentPreviewTurn(project, turn.serviceId, turn.repository);
   if (!project || !turn || !service || repositoryFor(service) !== turn.repository || turn.status !== "completed" ||
     latest?.id !== turn.id || preview?.kind !== "remote" || preview.state !== "ready" || !preview.remoteId || !previewOrigin(preview.url))
     throw new CloudError(404, "preview_unavailable", "현재 프로젝트의 미리보기를 다시 준비해주세요.");
@@ -28,11 +29,11 @@ export async function authorizedPreview(request: Request, input: Record<string, 
   return { auth, project, turn, preview, space };
 }
 
-export function viewerTicket(context: Awaited<ReturnType<typeof authorizedPreview>>) {
+export function viewerTicket(context: Awaited<ReturnType<typeof authorizedPreview>>, embed = false) {
   const { auth, project, turn, preview, space } = context;
   return issuePreviewTicket(previewSigningKey(), {
     iss: process.env.JARVIS_APP_ORIGIN,
     aud: preview.remoteId, origin: previewOrigin(preview.url), sub: auth.deviceId,
-    space, projectId: project.id, turnId: turn.id, sha: preview.sha,
+    space, projectId: project.id, turnId: turn.id, sha: preview.sha, ...(embed ? { embed: true } : {}),
   });
 }

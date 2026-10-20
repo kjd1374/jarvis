@@ -16,3 +16,31 @@ test("two browsers use real HTTPS redirects and host cookies: approved viewer in
     const unauthenticated = await other.newPage(); assert.equal((await unauthenticated.goto(remoteUrl)).status(), 403);
     f.revoke(); f.advance(10_001); assert.equal((await page.reload()).status(), 403);
 })));
+
+for(const engine of ['chromium','webkit'])test(`signed preview frame or top-level fallback in ${engine}, with no copied-link access`,async()=>fixture(async f=>withPreviewHttps(f,async browser=>{
+  const context=await browser.newContext({ignoreHTTPSErrors:true}),page=await context.newPage();
+  await page.goto(appOrigin);
+  const frame=page.frameLocator('iframe[title="Development app"]');
+  if(engine==='webkit') {
+    // WebKit blocks third-party cookies: the private app stays closed and the existing signed top-level path works.
+    await frame.getByRole('heading',{name:'Jarvis에서 화면을 다시 열어주세요'}).waitFor();
+    const popup=context.waitForEvent('page');await page.getByRole('link',{name:'Open top level'}).click();const app=await popup;
+    await app.waitForURL(remoteUrl);await app.getByRole('button',{name:'Save',exact:true}).click();await app.waitForFunction(()=>document.querySelector('output').textContent==='1');
+  } else {
+    await frame.getByRole('heading',{name:'Synthetic remote preview'}).waitFor();
+    await frame.getByRole('button',{name:'Save',exact:true}).click();await frame.locator('output').filter({hasText:'1'}).waitFor();
+    assert(!(await frame.locator('body').evaluate(()=>document.cookie)).includes('jarvis-embed'));
+  }
+  assert.equal(new URL(page.url()).origin,appOrigin);
+  const other=await browser.newContext({ignoreHTTPSErrors:true});assert.equal((await(await other.newPage()).goto(remoteUrl)).status(),403);await other.close();await context.close();
+},{embed:true,engine})));
+
+for(const engine of ['chromium','webkit'])test(`fetch and EventSource remain incremental through authenticated JSON transport in ${engine}`,async()=>fixture(async f=>withPreviewHttps(f,async browser=>{
+ const context=await browser.newContext({ignoreHTTPSErrors:true}),page=await context.newPage();await page.goto(appOrigin,{waitUntil:'commit'});await page.waitForURL(remoteUrl);
+ await page.waitForFunction(()=>window.__jarvisStreamTransport===true);
+ const first=await page.evaluate(async()=>{const res=await fetch('/stream?slow=1');window.fixtureReader=res.body.getReader();const next=await window.fixtureReader.read();return{type:res.headers.get('content-type'),text:new TextDecoder().decode(next.value)};});
+ assert(first.type.includes('text/event-stream'));assert(first.text.includes('first'));assert(!first.text.includes('last'));
+ const rest=await page.evaluate(async()=>{let text='';while(true){const next=await window.fixtureReader.read();if(next.done)return text;text+=new TextDecoder().decode(next.value);}});assert(rest.includes('last'));
+ const event=await page.evaluate(()=>new Promise((resolve,reject)=>{const source=new EventSource('/stream?slow=1');source.onmessage=e=>{source.close();resolve({data:e.data,state:source.readyState});};source.onerror=()=>{source.close();reject(Error('stream failed'));};}));
+ assert.deepEqual(event,{data:'first',state:2});await context.close();
+},{engine})));

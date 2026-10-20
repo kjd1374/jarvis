@@ -1,4 +1,6 @@
 export type WorkPreview = {
+  execution?: "native" | "docker";
+  reused?: boolean;
   dataPersistence?: "project";
   state: "ready" | "unavailable" | "failed";
   kind: "deployment" | "mac" | "remote";
@@ -28,7 +30,11 @@ export type WorkResult = {
   prUrl: string | null;
   deployment: { state: "not_configured" | "pending" | "success" | "failure"; url: string | null; sha: string | null };
 };
+export type WorkImage = { id: string; sha256: string };
+export type RuntimeAction = "restart" | "stop" | "logs";
 export type ProjectTurn = {
+  images?: WorkImage[];
+  runtimeAction?: RuntimeAction;
   id: string;
   serviceId: string;
   repository: string;

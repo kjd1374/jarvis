@@ -18,6 +18,7 @@ export function validateMonitoring(service: Service, data: WorkspaceData) {
     const c = m.runnerConnection;
     if (object(c) && c.projectScope !== undefined && c.projectScope !== "space" && c.projectScope !== "selected") invalid();
     if (!object(c) || !date(c.seenAt) || typeof c.remoteWork !== "boolean" || typeof c.previews !== "boolean" ||
+      c.development !== undefined && typeof c.development !== "boolean" ||
       c.previewLocal !== undefined && typeof c.previewLocal !== "boolean" ||
       c.previewCli !== undefined && typeof c.previewCli !== "boolean" ||
       c.version !== undefined && (typeof c.version !== "string" || !/^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(c.version))) invalid();
