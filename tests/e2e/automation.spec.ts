@@ -585,7 +585,9 @@ test("개발 작업 공간은 실패를 한 곳에 표시하고 로그 조회를
   data = reportProjectWork(logs.data, "company", { projectId: logJob.projectId, jobId: logJob.id, leaseToken: logJob.leaseToken, phase: "result", result: { ...base, reply: "Synthetic runtime log: library denied", summary: "서버 로그 확인", checks: [{ name: "서버 로그", status: "passed", detail: "Synthetic runtime log: library denied" }], outcome: "answered" } }, "runner", stamp);
   data = observeWorkRunner(data, scope, { runnerVersion: "2.9.2", remoteWorkVersion: 1, previewVersion: 1, previewLocalVersion: 1, developmentVersion: 1 }, stamp);
   if (!isMobile) await page.setViewportSize({ width: 1920, height: 1080 });
-  await seed(page, data); await page.goto("/projects/auto-project"); await ready(page);
+  await seed(page, data);
+  if (page.context().browser()?.browserType().name() === "webkit") await page.waitForLoadState("networkidle");
+  await page.goto("/projects/auto-project"); await ready(page);
   const screen = page.getByRole("region", { name: "수정된 화면 확인", exact: true }), agent = page.getByRole("region", { name: "프로젝트 AI 작업실", exact: true });
   const nav = page.getByRole("navigation", { name: "개발 작업 보기" }); if (isMobile) await nav.getByRole("button", { name: "화면", exact: true }).click();
   await expect(screen.getByLabel("미리보기 AI", { exact: true })).not.toBeVisible();
