@@ -520,9 +520,11 @@ test("개발 작업 공간은 사진과 설명을 같은 요청에 저장하고 
   expect(turn.images).toHaveLength(1); const doc = saved.documents.find(doc => doc.id === turn.images![0].id)!;
   expect(doc).toMatchObject({ projectId: "auto-project", space: "company", mime: "image/jpeg" }); expect(doc.size).toBeGreaterThan(10); expect(turn.images![0].sha256).toMatch(/^[a-f0-9]{64}$/);
   expect(await page.evaluate(async fileId => { const db = await new Promise<IDBDatabase>(resolve => { const request = indexedDB.open("jarvis-workspace", 1); request.onsuccess = () => resolve(request.result); }); const blob = await new Promise<Blob>(resolve => { const request = db.transaction("files").objectStore("files").get(fileId); request.onsuccess = () => resolve(request.result); }); db.close(); return blob.size; }, doc.id)).toBe(doc.size);
+  if (page.context().browser()?.browserType().name() === "webkit") await page.waitForLoadState("networkidle");
   await page.reload(); await ready(page); await expect(agent).toContainText("첨부 사진 1장");
   if (isMobile) { await nav.getByRole("button", { name: "검사 결과", exact: true }).click(); await expect(page.getByRole("region", { name: "개발 검사 결과" })).toBeVisible(); await expect(agent).not.toBeVisible(); }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  if (page.context().browser()?.browserType().name() === "webkit") await page.waitForLoadState("networkidle");
   await page.goto("/library"); await ready(page);
   const downloading = page.waitForEvent("download");
   await page.getByRole("button", { name: "synthetic-screen.jpg 다운로드", exact: true }).click();
