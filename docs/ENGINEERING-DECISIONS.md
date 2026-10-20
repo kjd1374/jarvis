@@ -472,3 +472,13 @@ Cloudflare의 현행 공식 문서 `cloudflare/cloudflare-docs/production/src/co
 서버 재사용은 SHA·AI뿐 아니라 영속 데이터 사용 설정도 같을 때만 허용한다. 임시 실행은 프로젝트 영속 데이터 폴더를 읽도록 허용하지 않는다. 영속 데이터에 쓰는 두 앱 버전이 동시에 실행되지 않도록 의존성/빌드를 먼저 준비한 뒤 이전 서버를 종료하고 새 서버를 시작한다. 빌드 실패 시에는 이전 서버를 유지하며 데이터 폴더는 어떤 종료 경로에서도 지우지 않는다.
 
 WebKit 브라우저 회귀에서 Blob 원본을 IndexedDB에 직접 쓰면 오류 뒤 저장 트랜잭션 완료가 오지 않는 현상을 실제로 재현했다. 파일 바이트 변환을 트랜잭션 전에 마치고 기존 v1 files 저장소에 ArrayBuffer/type/size를 원자 저장한다. 기존 Blob은 그대로 읽고 새 바이트도 Blob으로 복원한다. DB 초기화나 스키마 이관은 없으며 기존 백업·동시 저장·롤백 검사를 유지한다. 사진 첨부→저장→새로고침 회귀를 WebKit 휴대폰 프로젝트로 CI에 추가했다.
+
+## 2026-10-20 맥미니 없는 운영 전환 (Issue #74)
+
+공식 GitHub의 `actions/runner`(MIT), `vercel/workflow`(Apache-2.0), `temporalio/sdk-typescript`(MIT)의 라이선스·현행 유지보수를 확인했다. 이미 사용하는 GitHub Actions/표준 Ubuntu/Node 24를 채택해 장기 연결과 새 유료 서비스를 추가하지 않는다. Vercel Workflow SDK는 추가 플랫폼 설정·의존성과 인증 연결, Temporal은 별도 워커/운영 계층이 필요해 이번 범위에서 보류한다. 앱 코드를 실행하는 CI와 승인된 제공자 API를 호출하는 배포 워커를 구분한다. 워커는 관리 토큰 없이 암호화된 단기 단일 작업 grant로 서버의 현재 기기/영역/프로젝트/nonce/lease를 재확인한다.
+
+설치된 Next 16.4 Route Handler 문서, GitHub 공식 REST OpenAPI의 workflow dispatch(ref/inputs/return_run_details, API 2022-11-28), Vercel 공식 `https://openapi.vercel.sh`의 v11 프로젝트와 v13 배포(gitSource SHA·Express enum·환경변수·alias)를 확인했다. 새 npm 의존성·호스팅 계정·과금 전환 없이 기존 사설 저장소와 provider vault를 확장했다. GitHub 인증은 앱에서 영역별로 한 번 연결하며 클라우드 개발 환경의 인증을 서비스로 복사하지 않는다.
+
+고정 SHA와 GitHub 검사, 무료 계정의 실제 accountId/조직/저장소 바인딩을 확인한다. 기존 운영 환경을 자동 발견하되 DB 정체가 불명확하면 새 빈 DB로 바꾸지 않는다. 새 DB에 한해서 불변 마이그레이션을 트랜잭션/잠금/hash 이력으로 적용하고 기존 DB 자료와 스키마는 보존한다. 관리 키는 코드/워크플로/브라우저에 주입하지 않는다. 생성 의도를 먼저 저장하고 응답이 불명확하면 정체 조회 후 복구하며 중복 생성으로 덮지 않는다. 일반 클라이언트 저장은 배포 상태를 작성할 수 없다. 전체 계약과 검증 경계는 PROJECT-OPERATIONS.md를 따른다.
+
+공개 Actions 입력은 계정 권한으로 취급하지 않는다. GitHub 공식 OIDC discovery 문서에서 RS256, 고정 issuer/JWKS와 workflow_ref/ref/repository/run_id/aud/exp/nbf 계약을 확인하고, 워커 호출에 해당 main workflow 실행의 OIDC 서명을 추가 검증한다. grant는 이벤트 파일에서 읽어 Actions의 env 출력에 노출하지 않으며, 원본 기기 승인과 작업 nonce/임대도 계속 검사한다.

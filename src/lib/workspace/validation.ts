@@ -1,3 +1,4 @@
+import { validateRelease } from "../releases/state";
 import { validateSetup } from "../automation/provision";
 import { validateProjectAutomation } from "../automation/work";
 import { validatePlanning } from "../projects/planning";
@@ -70,7 +71,7 @@ export function normalizeWorkspace(value: unknown): WorkspaceData {
     for (const [space, connections] of Object.entries(data.providerConnections)) {
       if (!validSpace(space) || !object(connections)) throw new Error("서비스 연결 영역을 확인해주세요.");
       for (const [provider, value] of Object.entries(connections)) {
-        if (!["vercel", "supabase"].includes(provider) || !object(value) || !text(value.sealed, 10000) || !/^[a-zA-Z0-9_-]+$/.test(value.sealed) || !text(value.label, 100) || !timestamp(value.updatedAt)) throw new Error("암호화된 서비스 연결을 확인해주세요.");
+        if (!["vercel", "supabase", "github"].includes(provider) || !object(value) || !text(value.sealed, 10000) || !/^[a-zA-Z0-9_-]+$/.test(value.sealed) || !text(value.label, 100) || !timestamp(value.updatedAt)) throw new Error("암호화된 서비스 연결을 확인해주세요.");
       }
     }
   }
@@ -257,7 +258,7 @@ export function normalizeWorkspace(value: unknown): WorkspaceData {
     }
   }
   for (const service of data.services) validateMonitoring(service, data);
-  for (const project of data.projects) { validateProjectAutomation(project, data); validateSetup(project); validatePlanning(project); }
+  for (const project of data.projects) { validateProjectAutomation(project, data); validateSetup(project); validatePlanning(project); validateRelease(project); }
   const sourceIds = new Set<string>();
   for (const row of data.sourceRecords) {
     const identity = JSON.stringify([row.serviceId, row.externalId]);

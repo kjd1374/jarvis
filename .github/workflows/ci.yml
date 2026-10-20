@@ -21,6 +21,7 @@ jobs:
       - run: npm run test:deploy
       - run: npm run test:devices
       - run: npm run test:automation
+      - run: npm run test:release
       - run: npm run test:domain
       - run: npm run check
         env:
@@ -35,7 +36,8 @@ jobs:
         with:
           node-version-file: .node-version
       # No user credentials, paid AI or provider access; real Seatbelt + synthetic app.
-      - run: node --test tests/development-runtime.test.mjs
+      # Always report completed assertions even if a failed synthetic child kept a pipe open.
+      - run: node --test --test-force-exit tests/development-runtime.test.mjs
 
   browser-tests:
     runs-on: ubuntu-latest

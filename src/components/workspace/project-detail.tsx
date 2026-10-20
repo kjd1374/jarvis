@@ -1,4 +1,5 @@
 "use client";
+import { ProjectReleasePanel } from "./project-release";
 import { ProjectDevelopment } from "./project-development";
 import { ProjectPlanning, ProjectService, ProjectStageControl } from "./project-planning";
 import { projectStage, stageLabels } from "@/lib/projects/lifecycle";
@@ -205,6 +206,7 @@ function ProjectView({ project }: { project: Project }) {
         </p>
       )}
       <ProjectDevelopment key={`${project.space}:${project.id}`} project={project} />
+      <ProjectReleasePanel project={project} />
       <ProjectAutomaticResults project={project} />
       <details className={styles.projectDisclosure}>
         <summary>프로젝트 정보·연결 <span>목표와 서비스 관리</span></summary>

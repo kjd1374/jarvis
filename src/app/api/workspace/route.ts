@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   authorize,
   checkOrigin,
@@ -43,6 +44,15 @@ export async function PUT(request: Request) {
     const auth = await authorize(request);
     const current = await loadSpace(auth, space);
     value.providerConnections = current.data.providerConnections;
+    // Release leases, resource IDs and verification are server-authored. A stale
+    // browser save/import cannot replay a deployment or forge its completion.
+    value.projects = value.projects.map(p => {
+      const release = current.data.projects.find(r => r.id === p.id)?.release;
+      const imported = p.release?.status === "interrupted" && p.release.error === "imported_request_review";
+      return { ...p, release: imported && release && ["queued", "running"].includes(release.status) ? {
+        ...release, status: "interrupted" as const, error: "imported_request_review", executionId: randomUUID(), leaseToken: undefined, leaseUntil: undefined, updatedAt: new Date().toISOString(),
+      } : release };
+    });
     return reply({
       revision: await saveSpace(auth, space, value, Number(body.revision)),
     });

@@ -1,0 +1,29 @@
+name: Project cloud release
+run-name: release-${{ inputs.job_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        required: true
+        type: string
+      ticket:
+        required: true
+        type: string
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - name: Continue the approved release
+        run: node scripts/cloud-release-worker.mjs
+        env:
+          JARVIS_APP_ORIGIN: https://jarvis-zeta-three-77.vercel.app

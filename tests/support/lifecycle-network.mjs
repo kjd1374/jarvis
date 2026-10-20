@@ -8,16 +8,25 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { releaseProvider } from "./release-provider.mjs";
 
 export const lifecycleRemote = "https://project-lifecycle.trycloudflare.com/";
 export async function createLifecycleNetwork() {
+  const release = releaseProvider();
   const directory = await mkdtemp(join(tmpdir(), "jarvis-lifecycle-"));
   const host = new URL(lifecycleRemote).hostname, ca = join(directory, "ca.pem"), key = join(directory, "key.pem");
-  execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", key, "-out", ca, "-days", "1", "-subj", `/CN=${host}`, "-addext", `subjectAltName=DNS:${host}`], { stdio: "ignore" });
+  execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", key, "-out", ca, "-days", "1", "-subj", `/CN=${host}`, "-addext", `subjectAltName=DNS:${host},DNS:api.github.com,DNS:api.vercel.com,DNS:api.supabase.com,DNS:synthetic-release.vercel.app,DNS:token.actions.githubusercontent.com`], { stdio: "ignore" });
   const certificate = await readFile(ca), sockets = new Set();
   let target = null;
   const track = server => server.on("connection", socket => { sockets.add(socket); socket.on("close", () => sockets.delete(socket)); });
-  const web = https.createServer({ key: await readFile(key), cert: await readFile(ca) }, (req, res) => {
+  const web = https.createServer({ key: await readFile(key), cert: await readFile(ca) }, async (req, res) => {
+    if (["api.github.com","api.vercel.com","api.supabase.com","synthetic-release.vercel.app","token.actions.githubusercontent.com"].includes(req.headers.host)) {
+      try {
+        let raw=""; for await (const part of req) { raw+=part; if(raw.length>1_000_000)throw Error("fixture_body_large"); }
+        const result=await release.handle("https://"+req.headers.host+req.url,req.method,raw?JSON.parse(raw):undefined,req.headers);
+        res.writeHead(result.status??200,{"Content-Type":result.html?"text/html":"application/json"});res.end(result.html?result.body:JSON.stringify(result.body));
+      } catch {res.writeHead(500);res.end('{"error":"synthetic_provider_failure"}');} return;
+    }
     if (req.headers.host !== host || !target) { res.writeHead(503); res.end(); return; }
     const upstream = http.request({ hostname: "127.0.0.1", port: target.port, path: req.url, method: req.method, headers: req.headers }, response => {
       res.writeHead(response.statusCode, response.headers); response.pipe(res);
@@ -37,7 +46,7 @@ export async function createLifecycleNetwork() {
   const proxy = http.createServer((_req, res) => { res.writeHead(403); res.end(); });
   for (const server of [web, control, proxy]) { track(server); await new Promise(resolve => server.listen(0, "127.0.0.1", resolve)); }
   proxy.on("connect", (req, socket, head) => {
-    if (req.url !== `${host}:443`) { socket.destroy(); return; }
+    if (![`${host}:443`,"api.github.com:443","api.vercel.com:443","api.supabase.com:443","synthetic-release.vercel.app:443","token.actions.githubusercontent.com:443"].includes(req.url)) { socket.destroy(); return; }
     const upstream = net.connect(web.address().port, "127.0.0.1", () => {
       socket.write("HTTP/1.1 200 Connection Established\r\n\r\n"); if (head.length) upstream.write(head);
       socket.pipe(upstream); upstream.pipe(socket);
@@ -56,7 +65,7 @@ const request=http.request({hostname:'127.0.0.1',port:${control.address().port},
 setInterval(()=>{},30000);process.on('SIGTERM',()=>process.exit(0));
 `, { mode: 0o700 });
   return {
-    ca, directory, binary, tlsPort: web.address().port, proxy: `http://127.0.0.1:${proxy.address().port}`,
+    release, ca, directory, binary, tlsPort: web.address().port, proxy: `http://127.0.0.1:${proxy.address().port}`,
     disconnect() { const previous = target; target = null; return () => { target = previous; }; },
     async fetch(url, options = {}) {
       assert.equal(new URL(url).origin, new URL(lifecycleRemote).origin);
