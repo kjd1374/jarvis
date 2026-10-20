@@ -47,3 +47,21 @@ test('운영 호환성 오류는 수정 요청 초안으로 전달하고 자동 
  const f=await cloud(page);await page.route('**/api/projects/release',r=>r.fulfill({status:409,json:{error:'runtime_conversion_required',code:'release_rejected'}}));
  await page.goto('/projects/auto-project');const panel=page.getByRole('group',{name:'프로젝트 운영 전환',exact:true});await panel.locator(':scope > summary').click();await panel.getByRole('button',{name:'운영 구성 검사',exact:true}).click();await panel.getByRole('button',{name:'필요한 수정을 개발 대화에 작성',exact:true}).click();await expect(page.getByLabel('AI에게 요청',{exact:true})).toHaveValue(/상시 서버/);expect(f.remote.company.data.projects[0].automation?.turns??[]).toHaveLength(0);
 });
+
+test('같은 운영 관리 화면에서 재배포하면 이전 기능 확인을 재사용하지 않는다',async({page})=>{
+ const f=await cloud(page),url='https://synthetic-release.vercel.app';
+ Object.assign(f.remote.company.data.projects[0],{stage:'live',launchUrl:url,release:{...release(),status:'deployed',phase:'done',url,healthStatus:200,deploymentId:'dpl_previous',executionId:randomUUID()}});
+ await page.route('**/api/projects/release',async route=>{
+  if(route.request().postDataJSON().action!=='status')return route.fallback();
+  const p=f.remote.company.data.projects[0];p.release={...p.release!,status:'deployed',phase:'done',url,healthStatus:200,deploymentId:'dpl_new'};f.remote.company.revision++;
+  await route.fulfill({json:{release:p.release}});
+ });
+ await page.goto('/projects/auto-project');const panel=page.getByRole('group',{name:'프로젝트 운영 전환',exact:true});
+ await panel.getByRole('checkbox',{name:/운영 화면에서 주요 기능/}).check();await panel.getByRole('button',{name:'개발 완료 · 사용 중으로 전환',exact:true}).click();
+ await expect(panel).toContainText('운영 중 · 기능 직접 확인 완료');
+ await panel.getByRole('button',{name:'운영 구성 검사',exact:true}).click();await expect(panel.getByRole('checkbox',{name:/고정 코드·무료 계정/})).not.toBeChecked();
+ await panel.getByRole('checkbox',{name:/고정 코드·무료 계정/}).check();await panel.getByRole('button',{name:'클라우드에서 배포 시작',exact:true}).click();
+ await expect(panel.getByRole('checkbox',{name:/운영 화면에서 주요 기능/})).not.toBeChecked();
+ await expect(panel.getByRole('button',{name:'개발 완료 · 사용 중으로 전환',exact:true})).toBeDisabled();
+ expect(f.requests.filter(b=>b.action==='complete')).toHaveLength(1);
+});

@@ -49,9 +49,12 @@ export function ProjectReleasePanel({project,live=false}:{project:Project;live?:
   const [localRelease,setRelease]=useState<ProjectRelease|undefined>(project.release),[busy,setBusy]=useState(false),[error,setError]=useState("");
   const [database,setDatabase]=useState(project.release?.databaseId?"existing":"auto"),[databaseId,setDatabaseId]=useState(project.release?.databaseId??""),[vercelId,setVercelId]=useState(project.release?.vercelId??"");
   const repos=[...new Set(data.services.filter(s=>s.space===project.space&&s.projectId===project.id).map(repositoryFor).filter(Boolean))];
-  const [repository,setRepository]=useState(repos[0]??""),[reviewed,setReviewed]=useState(false),[functional,setFunctional]=useState(false);
+  const [repository,setRepository]=useState(repos[0]??""),[reviewKey,setReviewKey]=useState(""),[functionKey,setFunctionKey]=useState("");
   const lock=useRef(false);
   const release=localRelease&&(!project.release||localRelease.updatedAt>=project.release.updatedAt)?localRelease:project.release;
+  const reviewed=!!release&&reviewKey===release.id;
+  const functionalKey=release?`${release.id}:${release.executionId??""}:${release.deploymentId??""}`:"";
+  const functional=!!functionalKey&&functionKey===functionalKey;
   const polling=releaseBusy(release);
   const releaseLabel=release?.status==="deployed"&&release.confirmedAt?"운영 중 · 기능 직접 확인 완료":release?statusLabels[release.status]:"";
   useEffect(()=>{
@@ -65,7 +68,7 @@ export function ProjectReleasePanel({project,live=false}:{project:Project;live?:
       await retryCloud();
       const response=await fetch('/api/projects/release',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({space:project.space,projectId:project.id,action,jobId:release?.id,repository,database,...(databaseId?{databaseId}:{}),...(vercelId?{vercelId}:{}),reviewed,functionalChecked:functional})});
       const result=await response.json();if(!response.ok)throw Error(result.error??'release_request_failed');
-      setRelease(result.release??undefined);if(action==='plan')setReviewed(false);
+      setRelease(result.release??undefined);if(action==='plan'){setReviewKey("");setFunctionKey("");}
       await retryCloud();
     }catch(e){const code=e instanceof Error?e.message:'';setError(errors[code]??`운영 전환을 처리하지 못했습니다. ${/^[a-z_]{1,100}$/.test(code)?code:'연결 상태를 확인해주세요.'}`);}
     finally{lock.current=false;setBusy(false);}
@@ -97,9 +100,9 @@ export function ProjectReleasePanel({project,live=false}:{project:Project;live?:
       {release.error&&!(release.error==="deployment_access_review"&&release.confirmedAt)&&<p role="alert">{errors[release.error]??`진행을 멈췄습니다. ${release.error}`}</p>}
       {release.url&&<p><a className={styles.primaryButton} href={release.url} target="_blank" rel="noopener noreferrer">운영 화면 확인 ↗</a></p>}
       {release.workflowUrl&&<p><a href={release.workflowUrl} target="_blank" rel="noopener noreferrer">클라우드 배포 진행 기록 ↗</a></p>}
-      {['planned','failed','cancelled','interrupted'].includes(release.status)&&<><label className={css.check}><input type="checkbox" checked={reviewed} onChange={e=>setReviewed(e.target.checked)}/>고정 코드·무료 계정·DB 적용 범위를 확인했습니다. 기존 로컬 자료는 보존하고 별도 운영환경을 시작합니다.</label><button className={styles.primaryButton} disabled={disabled||!reviewed} onClick={()=>void act(release.status==='planned'?'start':'retry')}>{release.status==='planned'?'클라우드에서 배포 시작':'기존 자원으로 이어서 확인'}</button></>}
+      {['planned','failed','cancelled','interrupted'].includes(release.status)&&<><label className={css.check}><input type="checkbox" checked={reviewed} onChange={e=>setReviewKey(e.target.checked?release.id:"")}/>고정 코드·무료 계정·DB 적용 범위를 확인했습니다. 기존 로컬 자료는 보존하고 별도 운영환경을 시작합니다.</label><button className={styles.primaryButton} disabled={disabled||!reviewed} onClick={()=>void act(release.status==='planned'?'start':'retry')}>{release.status==='planned'?'클라우드에서 배포 시작':'기존 자원으로 이어서 확인'}</button></>}
       {running&&<><p>브라우저를 닫아도 GitHub에서 계속 처리합니다. 취소 시 이미 만든 외부 자원은 유지됩니다.</p><button disabled={disabled} className={styles.secondaryButton} onClick={()=>void act('cancel')}>배포 작업 취소</button></>}
-      {release.status==='deployed'&&(!live||!release.confirmedAt)&&<><label className={css.check}><input type="checkbox" checked={functional} onChange={e=>setFunctional(e.target.checked)}/>운영 화면에서 주요 기능과 필요한 데이터 저장을 직접 확인했습니다.</label><button className={styles.primaryButton} disabled={disabled||!functional} onClick={()=>void act('complete')}>개발 완료 · 사용 중으로 전환</button></>}
+      {release.status==='deployed'&&(!live||!release.confirmedAt)&&<><label className={css.check}><input type="checkbox" checked={functional} onChange={e=>setFunctionKey(e.target.checked?functionalKey:"")}/>운영 화면에서 주요 기능과 필요한 데이터 저장을 직접 확인했습니다.</label><button className={styles.primaryButton} disabled={disabled||!functional} onClick={()=>void act('complete')}>개발 완료 · 사용 중으로 전환</button></>}
       {release.history.length>0&&<details><summary>이전 운영 전환 {release.history.length}건</summary>{release.history.slice().reverse().map(h=><p key={h.id}>{h.sha.slice(0,8)} · {h.status} · {dateLabel(h.at)} {h.url&&<a href={h.url} target="_blank" rel="noopener noreferrer">기록된 운영 주소 ↗</a>}</p>)}</details>}
     </div>}
     {live&&<button disabled={busy||saving||running} className={styles.secondaryButton} onClick={()=>void mutate(d=>({...d,projects:d.projects.map(p=>p.id===project.id&&p.space===project.space?{...p,stage:"development"}:p)})).catch(e=>setError(e.message))}>수정 개발로 돌아가기</button>}
