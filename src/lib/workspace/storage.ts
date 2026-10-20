@@ -207,12 +207,15 @@ export async function commitWorkspace(
     ) => { data: WorkspaceData; sync: SyncState };
   },
 ): Promise<WorkspaceData> {
+  // Capture the owner before conversion: disconnecting or switching accounts
+  // while reading a file must never move the pending write to a different DB.
+  const databaseName = accountName(options?.accountId);
   // Finish asynchronous conversion before opening the atomic transaction, then
   // read its latest workspace so another tab's changes remain protected.
   const storedFiles = await Promise.all(
     files.map(async file => ({ ...file, value: await encodeFile(file.blob) })),
   );
-  const db = await open(accountName(options?.accountId));
+  const db = await open(databaseName);
   return new Promise((resolve, reject) => {
     const tx = db.transaction(["workspace", "files"], "readwrite", {
       durability: "strict",
@@ -377,8 +380,8 @@ export async function readFile(
   fileId: string,
   accountId?: string,
 ): Promise<Blob> {
-  const db = await open(accountName(accountId));
   const account = accountId ?? storageAccount;
+  const db = await open(accountName(accountId));
   const local = await new Promise<Blob | undefined>((resolve, reject) => {
     const request = db
       .transaction("files", "readonly")
