@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { chromium } from "@playwright/test";
 import { runCommand } from "../public/jarvis-runner.mjs";
+import { migrateDevelopmentData } from "../public/jarvis-development.mjs";
 import { startMacPreview, createPreviewBridge, runProjectTests, attachPreviewCliAuthorization } from "../public/jarvis-preview.mjs";
 import { createRemoteGate } from "../public/jarvis-remote-preview.mjs";
 import { appOrigin, remoteUrl, publicKey, remoteId, scope, viewer, ticket } from "../tests/support/remote-preview.mjs";
@@ -236,6 +237,20 @@ http.createServer(async(req,res)=>{
   assert.equal(unavailable.diagnostic.code, "cli_login_required"); assert.equal(failedCalls, 1);
   assert(!JSON.stringify(unavailable).includes('private login evidence'));
   console.log("PASS MODEL MOCK: explicit CLI inference probe, app API through authenticated HTTPS, credentials excluded, private controls hidden, revocation blocks model calls, login failure cannot become ready. No real subscription/model used in CI.");
+  const migrationKey = createHash("sha256").update(randomUUID()).digest("hex").slice(0,24), migrationVolume = `jarvis-data-${migrationKey}`, migrationData = join(dir,"migrated-data");
+  await mkdir(migrationData);
+  try {
+    assert.equal((await runCommand("docker",["volume","create",migrationVolume])).code,0);
+    const seeded = await runCommand("docker",["run","--rm","--pull=never","--network","none","--mount",`type=volume,src=${migrationVolume},dst=/source`,"node:24.19.0-bookworm-slim","node","-e","const fs=require('node:fs');fs.mkdirSync('/source/nested');fs.writeFileSync('/source/nested/record.json',JSON.stringify({count:7}),{mode:0o600});"]);
+    assert.equal(seeded.code,0,seeded.err);
+    await migrateDevelopmentData({data:migrationData,key:migrationKey,run:runCommand,legacyDockerData:true});
+    assert.deepEqual(JSON.parse(await readFile(join(migrationData,"nested/record.json"),"utf8")),{count:7});
+    await writeFile(join(migrationData,"nested/record.json"),JSON.stringify({count:8}));
+    await migrateDevelopmentData({data:migrationData,key:migrationKey,run:()=>assert.fail("completed migration must not access Docker"),legacyDockerData:true});
+    const original=await runCommand("docker",["run","--rm","--pull=never","--network","none","--read-only","--mount",`type=volume,src=${migrationVolume},dst=/source,readonly`,"node:24.19.0-bookworm-slim","node","-e","process.stdout.write(require('node:fs').readFileSync('/source/nested/record.json','utf8'))"]);
+    assert.equal(JSON.parse(original.out).count,7);assert.equal(JSON.parse(await readFile(join(migrationData,"nested/record.json"),"utf8")).count,8);
+    console.log("PASS: existing Docker data copies privately with writable host ownership; original volume remains unchanged and repeat migration preserves native writes.");
+  } finally {await runCommand("docker",["volume","rm",migrationVolume]);}
 } finally {
   await browser?.close(); activeBridge?.close();
   await runCommand("docker", ["rm", "-f", name]).catch(() => {});

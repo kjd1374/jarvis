@@ -521,7 +521,7 @@ test("개발 화면은 기존 서버를 새 요청 없이 열고 제한된 ifram
   const url = "https://synthetic-development.trycloudflare.com/";
   const data = reportProjectWork(first.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: { reply: "로컬 서버 실행", summary: "준비", currentStatus: "", nextAction: "", changes: [], checks: [], followUps: [], outcome: "answered", branch: null, baseSha: "a".repeat(40), headSha: null, prUrl: null, deployment: { state: "not_configured", url: null, sha: null }, preview: { state: "ready", kind: "remote", execution: "native", reused: true, remoteId: job.id, url, sha: "a".repeat(40), checkedAt: stamp, expiresAt: new Date(Date.now()+3600000).toISOString(), message: "기존 서버 재사용" } } }, "runner", stamp);
   await seed(page, data);
-  await page.route("**/api/preview/open?**", route => route.fulfill({ status: 303, headers: { location: url } }));
+  await page.route("**/api/preview/open?**", route => route.fulfill({ contentType: "text/html", body: `<script>location.replace(${JSON.stringify(url)})</script>` }));
   await page.route(url + "**", route => route.fulfill({ contentType: "text/html", body: `<h1>Private fixture</h1><script>if(parent!==window)parent.postMessage({type:'jarvis-preview-open-tab'},'http://127.0.0.1:4317')</script>` }));
   await page.goto("/projects/auto-project"); await ready(page);
   const screen = page.getByRole("region", { name: "수정된 화면 확인", exact: true });

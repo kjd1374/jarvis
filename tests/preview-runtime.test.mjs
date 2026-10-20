@@ -46,7 +46,7 @@ test("installer and runner start through directory/file symlinks and remain iner
 test("published runtime manifest matches all shipped executables", async () => {
   const manifest = JSON.parse(await readFile(new URL("../public/jarvis-runtime.json", import.meta.url), "utf8"));
   assert.equal(manifest.version, VERSION);
-  for (const name of ["jarvis-runner.mjs", "jarvis-preview.mjs", "jarvis-remote-preview.mjs", "jarvis-preview-auth.mjs", "jarvis-preview-cli.mjs", "jarvis-provision.mjs", "jarvis-supervisor.mjs", "jarvis-mac.mjs"]) {
+  for (const name of ["jarvis-runner.mjs", "jarvis-preview.mjs", "jarvis-development.mjs", "jarvis-remote-preview.mjs", "jarvis-preview-auth.mjs", "jarvis-preview-cli.mjs", "jarvis-provision.mjs", "jarvis-supervisor.mjs", "jarvis-mac.mjs"]) {
     assert.equal(manifest.files[name], createHash("sha256").update(await readFile(new URL(`../public/${name}`, import.meta.url))).digest("hex"));
   }
 });
@@ -158,7 +158,7 @@ test("Mac runtime download verifies every hash before writing any executable", a
   const dir = await mkdtemp(join(tmpdir(), "jarvis-install-test-"));
   try {
     const bytes = "// synthetic source", hash = createHash("sha256").update(bytes).digest("hex");
-    const manifest = { version: "2.3.0", files: Object.fromEntries(["jarvis-runner.mjs", "jarvis-preview.mjs", "jarvis-remote-preview.mjs", "jarvis-preview-auth.mjs", "jarvis-preview-cli.mjs", "jarvis-provision.mjs", "jarvis-supervisor.mjs", "jarvis-mac.mjs"].map(name => [name, hash])) };
+    const manifest = { version: "2.3.0", files: Object.fromEntries(["jarvis-runner.mjs", "jarvis-preview.mjs", "jarvis-development.mjs", "jarvis-remote-preview.mjs", "jarvis-preview-auth.mjs", "jarvis-preview-cli.mjs", "jarvis-provision.mjs", "jarvis-supervisor.mjs", "jarvis-mac.mjs"].map(name => [name, hash])) };
     const transport = async (url, opts) => { assert.equal(opts.redirect, "error"); return new Response(url.endsWith(".json") ? JSON.stringify(manifest) : bytes); };
     await downloadRuntime("https://synthetic.example", join(dir, "good"), transport);
     assert.equal(await readFile(join(dir, "good/jarvis-runner.mjs"), "utf8"), bytes);

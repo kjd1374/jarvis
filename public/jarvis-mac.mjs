@@ -68,7 +68,7 @@ export async function downloadRuntime(origin, destination, transport = fetch) {
   };
   const manifest = JSON.parse(new TextDecoder().decode(await get("jarvis-runtime.json")));
   if (!/^2\.\d+\.\d+$/.test(manifest.version ?? "")) throw new Error("실행기 버전을 확인하지 못했습니다.");
-  const required = ["jarvis-runner.mjs", "jarvis-preview.mjs", "jarvis-remote-preview.mjs", "jarvis-preview-auth.mjs", "jarvis-preview-cli.mjs", "jarvis-provision.mjs", "jarvis-supervisor.mjs", "jarvis-mac.mjs"];
+  const required = ["jarvis-runner.mjs", "jarvis-preview.mjs", "jarvis-development.mjs", "jarvis-remote-preview.mjs", "jarvis-preview-auth.mjs", "jarvis-preview-cli.mjs", "jarvis-provision.mjs", "jarvis-supervisor.mjs", "jarvis-mac.mjs"];
   const files = Object.keys(manifest.files ?? {});
   if (files.length > 24 || required.some(name => !files.includes(name)) || files.some(name => !/^jarvis-[a-z0-9-]+\.mjs$/.test(name))) throw new Error("실행기 파일 목록을 확인하지 못했습니다. 기존 실행기는 유지됩니다.");
   const downloaded = [];

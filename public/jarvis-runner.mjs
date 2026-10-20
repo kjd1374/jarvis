@@ -599,6 +599,7 @@ export async function executeProjectWork(client, job, { stateDir, run = runComma
             const path = join(imageDir, `${index}.${image.mime.split("/")[1]}`); await writeFile(path, bytes, { mode: 0o600 }); imagePaths.push(path);
           }
         }
+        await pulse();
         journal.model = validModelWork(await model(modelJob, cwd, directory, { run, signal: abort.signal, imagePaths }));
       }
       await save();
@@ -856,7 +857,7 @@ export async function executeDocumentQuestion(client, job, { stateDir, model = a
 }
 
 export async function main(argv = process.argv.slice(2)) {
-  if (argv.includes("--self-check")) { await Promise.all(["./jarvis-provision.mjs", "./jarvis-preview.mjs", "./jarvis-remote-preview.mjs", "./jarvis-supervisor.mjs"].map(path => import(path))); return; }
+  if (argv.includes("--self-check")) { await Promise.all(["./jarvis-provision.mjs", "./jarvis-development.mjs", "./jarvis-preview.mjs", "./jarvis-remote-preview.mjs", "./jarvis-supervisor.mjs"].map(path => import(path))); return; }
   if (argv.includes("--version")) { console.log(VERSION); return; }
   if (argv.includes("--help")) {
     console.log("Jarvis private CLI runner\nnode jarvis-runner.mjs --config /path/to/jarvis-runner.json [--once]\nNode 24+, gh auth login, codex login(ChatGPT) 필요. 기기 확인 번호는 비밀값이 아닙니다.\n프로젝트 요청에 따라 격리된 코드 수정·검증·PR/선택한 병합을 수행합니다. API 키 과금 자동 전환 없음. 중단은 Ctrl+C."); return;
