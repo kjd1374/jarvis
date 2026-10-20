@@ -3,7 +3,7 @@ import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash, randomUUID, randomInt } from 'node:crypto';
 import { mkdir, readFile, writeFile, rm, cp, realpath, open } from 'node:fs/promises';
-import { dirname, join, isAbsolute } from 'node:path';
+import { dirname, basename, join, isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import net from 'node:net';
 import { constants as osConstants } from 'node:os';
@@ -50,10 +50,19 @@ export async function developmentRuntimeLibraries(objects) {
   }
   return [...libraries].sort();
 }
-export function developmentSandbox(root, data, ports, executable = process.execPath, libraries = []) {
+export async function developmentRuntimeTools(executable = process.execPath) {
+  try {
+    const npm = await realpath(join(dirname(executable), 'npm'));
+    if (basename(npm) !== 'npm-cli.js' || basename(dirname(npm)) !== 'bin') return [];
+    const root = dirname(dirname(npm));
+    const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+    return manifest.name === 'npm' && manifest.bin?.npm === 'bin/npm-cli.js' ? [root] : [];
+  } catch { return []; }
+}
+export function developmentSandbox(root, data, ports, executable = process.execPath, libraries = [], tools = []) {
   // No blanket home, /private/var, /Library or outbound-network permission.
   const runtime = dirname(dirname(executable));
-  return `(version 1)\n(deny default)\n(allow process-fork process-exec sysctl-read mach-lookup)\n(allow file-read-metadata)\n(allow file-map-executable)\n(allow signal (target self))\n(allow file-read* (literal "/") (subpath "/System") (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/Library/Apple") (subpath ${quote(runtime)}) (subpath ${quote(root)}) (subpath ${quote(data)}) ${libraries.filter(p=>typeof p==='string'&&isAbsolute(p)&&!p.includes('\0')).map(p=>`(literal ${quote(p)})`).join(' ')} (literal "/dev/null") (literal "/dev/random") (literal "/dev/urandom") (literal "/private/etc/localtime") (literal "/private/etc/hosts"))\n(allow file-write* (subpath ${quote(root)}) (subpath ${quote(data)}) (literal "/dev/null"))\n${ports.map(p => `(allow network-bind network-inbound (local tcp "localhost:${p}"))\n(allow network-outbound (remote tcp "localhost:${p}"))`).join('\n')}\n`;
+  return `(version 1)\n(deny default)\n(allow process-fork process-exec sysctl-read mach-lookup)\n(allow file-read-metadata)\n(allow file-map-executable)\n(allow signal (target self))\n(allow file-read* (literal "/") (subpath "/System") (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/Library/Apple") (subpath ${quote(runtime)}) (subpath ${quote(root)}) (subpath ${quote(data)}) ${libraries.filter(p=>typeof p==='string'&&isAbsolute(p)&&!p.includes('\0')).map(p=>`(literal ${quote(p)})`).join(' ')} ${tools.filter(p=>typeof p==='string'&&isAbsolute(p)&&!p.includes('\0')).map(p=>`(subpath ${quote(p)})`).join(' ')} (literal "/dev/null") (literal "/dev/random") (literal "/dev/urandom") (literal "/private/etc/localtime") (literal "/private/etc/hosts"))\n(allow file-write* (subpath ${quote(root)}) (subpath ${quote(data)}) (literal "/dev/null"))\n${ports.map(p => `(allow network-bind network-inbound (local tcp "localhost:${p}"))\n(allow network-outbound (remote tcp "localhost:${p}"))`).join('\n')}\n`;
 }
 async function freePort() {
   // Keep app listeners out of macOS's ephemeral client-port range. Health
@@ -119,9 +128,9 @@ export async function startDevelopmentPreview(options, { platform = process.plat
     const env = developmentEnvironment(directory, ports[0]);
     const executable = await realpath(process.execPath);
     const profile = join(directory, 'sandbox.sb');
-    const libraries = await developmentRuntimeLibraries();
+    const [libraries, tools] = await Promise.all([developmentRuntimeLibraries(), developmentRuntimeTools()]);
     appLog = `Runtime preflight ${new Date().toISOString()} · Node ${process.version} · ${libraries.length} runtime libraries\n`;
-    await writeFile(profile, developmentSandbox(directory, persistent ? data : join(directory, 'tmp', 'app-data'), ports, executable, libraries), { mode: 0o600 });
+    await writeFile(profile, developmentSandbox(directory, persistent ? data : join(directory, 'tmp', 'app-data'), ports, executable, libraries, tools), { mode: 0o600 });
     // Fail closed if the installed macOS sandbox cannot run. Never silently execute on the host.
     const supported = await command('/usr/bin/sandbox-exec', ['-f', profile, executable, '-e', 'process.stdout.write("sandbox-ready")'], { cwd: app, env, signal, timeout: 10_000 });
     if (supported.code !== 0 || supported.out !== 'sandbox-ready') {
@@ -201,7 +210,7 @@ export async function runDevelopmentTests({ cwd, files, stateDir, identity, run,
     const preload = join(directory, 'test-loopback.mjs');
     await writeFile(preload, `import net from 'node:net';import fs from 'node:fs';const ports=${JSON.stringify(ports)},locks=${JSON.stringify(locks)},listen=net.Server.prototype.listen;
 net.Server.prototype.listen=function(...args){const options=args[0],ephemeral=options===0||options&&typeof options==='object'&&options.port===0;if(!ephemeral)return listen.apply(this,args);let chosen;for(const port of ports){try{fs.mkdirSync(locks+'/'+port);chosen=port;break;}catch(error){if(error.code!=='EEXIST')throw error;}}if(!chosen)throw Error('test_loopback_capacity');let released=false;const release=()=>{if(released)return;released=true;try{fs.rmdirSync(locks+'/'+chosen)}catch{}};this.once('close',release);this.once('error',release);if(options===0){args[0]=chosen;if(typeof args[1]!=='string')args.splice(1,0,'127.0.0.1');}else args[0]={...options,port:chosen,host:options.host??'127.0.0.1'};try{return listen.apply(this,args)}catch(error){release();throw error;}};`, {mode:0o600});
-    await writeFile(profile, developmentSandbox(directory, join(directory, 'data'), ports, executable, await developmentRuntimeLibraries()), { mode: 0o600 });
+    await writeFile(profile, developmentSandbox(directory, join(directory, 'data'), ports, executable, await developmentRuntimeLibraries(), await developmentRuntimeTools()), { mode: 0o600 });
     env.NODE_OPTIONS = `--import=${pathToFileURL(preload).href}`;
     if (plan.install) await prepareDependencies({ app, directory, root, key: keyOf(identity.replace(/:checks$/, '')), run, signal });
     const checks = [];
