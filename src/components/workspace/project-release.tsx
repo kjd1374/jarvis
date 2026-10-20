@@ -27,6 +27,7 @@ const errors:Record<string,string>={
   database_schema_required:"새 DB에 적용할 supabase/migrations의 SQL이 없습니다. 개발 대화에서 저장 구조와 RLS를 준비해주세요.",
   development_busy:"진행 중인 개발·환경 준비가 끝난 뒤 운영 전환을 시작해주세요.",
   release_source_changed:"검토한 뒤 기본 브랜치 코드가 바뀌었습니다. 운영 구성을 다시 검사해주세요.",
+  release_changed:"다른 기기에서 배포 기록이 변경됐습니다. 최신 운영 화면을 다시 확인해주세요.",
   deployment_access_review:"배포를 확인했지만 접근 보호 또는 이동 응답으로 앱 기능을 자동 확인하지 못했습니다. 접근 정책은 유지합니다. 운영 화면을 열어 주요 기능을 직접 확인해주세요.",
   deployment_health_failed:"운영 주소가 정상 응답하지 않았습니다. 배포 로그와 앱 설정을 확인해주세요.",
   deployment_build_failed:"Vercel 빌드가 실패했습니다. 배포 로그를 확인하고 개발 대화에서 수정해주세요.",
@@ -66,7 +67,7 @@ export function ProjectReleasePanel({project,live=false}:{project:Project;live?:
     if(lock.current)return;lock.current=true;setBusy(true);setError("");
     try{
       await retryCloud();
-      const response=await fetch('/api/projects/release',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({space:project.space,projectId:project.id,action,jobId:release?.id,repository,database,...(databaseId?{databaseId}:{}),...(vercelId?{vercelId}:{}),reviewed,functionalChecked:functional})});
+      const response=await fetch('/api/projects/release',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({space:project.space,projectId:project.id,action,jobId:release?.id,executionId:release?.executionId,deploymentId:release?.deploymentId,repository,database,...(databaseId?{databaseId}:{}),...(vercelId?{vercelId}:{}),reviewed,functionalChecked:functional})});
       const result=await response.json();if(!response.ok)throw Error(result.error??'release_request_failed');
       setRelease(result.release??undefined);if(action==='plan'){setReviewKey("");setFunctionKey("");}
       await retryCloud();

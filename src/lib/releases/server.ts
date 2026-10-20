@@ -69,11 +69,16 @@ export async function releaseAction(request: Request, auth: Auth, space: Space, 
     if (body.functionalChecked !== true) throw releaseError("functional_check_required");
     const r = project.release;
     if (!r || r.id !== body.jobId || r.status !== "deployed") throw releaseError("release_not_verified");
+    if (!r.executionId || !r.deploymentId || body.executionId !== r.executionId || body.deploymentId !== r.deploymentId) throw releaseError("release_changed");
     const c = ownedCredentials(data, auth, space), api = cloudApi(c);
     const deployment = await api("vercel", `/v13/deployments/${r.deploymentId}`);
     const alias = await api("vercel", `/v4/aliases/${new URL(r.url!).hostname}`);
     if (deployment?.projectId !== r.vercelId || deployment?.meta?.githubCommitSha !== r.plan.sha || deployment?.readyState !== "READY" || alias?.deployment?.id !== r.deploymentId) throw releaseError("deployment_source_mismatch");
-    data = await releaseEdit(auth, space, d => finishRelease(d,space,projectId,body.jobId,stamp));
+    data = await releaseEdit(auth, space, d => {
+      const current=projectForRelease(d,space,projectId).release;
+      if (!current || current.executionId!==r.executionId || current.deploymentId!==r.deploymentId || current.plan.sha!==r.plan.sha) throw releaseError("release_changed");
+      return finishRelease(d,space,projectId,body.jobId,stamp);
+    });
     return projectForRelease(data,space,projectId).release;
   }
   const c = ownedCredentials(data, auth, space), api = cloudApi(c);
