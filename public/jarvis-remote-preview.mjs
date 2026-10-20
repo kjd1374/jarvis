@@ -10,17 +10,18 @@ import { join } from "node:path";
 import { previewOrigin, verifyPreviewTicket } from "./jarvis-preview-auth.mjs";
 
 const cookieName = "__Host-jarvis-preview";
+const embedCookie = "__Host-jarvis-embed";
 const runningTunnels = new Set();
 let signalHandlers = false;
 const digest = value => createHash("sha256").update(value).digest("hex");
 const errorPage = "<!doctype html><html lang=ko><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>Jarvis 미리보기</title><style>body{background:#111;color:#eee;font:16px/1.7 system-ui,sans-serif;max-width:38rem;margin:12vh auto;padding:24px}h1{font-size:24px}</style><h1>Jarvis에서 화면을 다시 열어주세요</h1><p>승인된 기기의 프로젝트 화면에서 ‘이 PC에서 화면 열기’를 눌러주세요. 만료됐거나 맥미니가 꺼졌다면 화면을 다시 준비해주세요.</p></html>";
 const policy = "default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; connect-src 'self'; worker-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
-function protectedHeaders(response) {
+function protectedHeaders(response, appOrigin) {
   response.setHeader("Cache-Control", "private, no-store");
   response.setHeader("Referrer-Policy", "no-referrer");
   response.setHeader("X-Content-Type-Options", "nosniff");
-  response.setHeader("Content-Security-Policy", policy);
-  response.setHeader("X-Frame-Options", "DENY");
+  response.setHeader("Content-Security-Policy", policy.replace("frame-ancestors 'none'", `frame-ancestors ${appOrigin}`));
+  response.setHeader("Permissions-Policy", `microphone=(self "${appOrigin}"), camera=(self "${appOrigin}")`);
 }
 async function bodyOf(request, limit) {
   if (Number(request.headers["content-length"] ?? 0) > limit) throw new Error("body_too_large");
@@ -56,7 +57,7 @@ export async function createRemoteGate({ localUrl, appOrigin, publicKey, remoteI
     return session.checking;
   };
   const server = http.createServer({ maxHeaderSize: 16_384, requestTimeout: 30_000 }, async (req, res) => {
-    protectedHeaders(res);
+    protectedHeaders(res, appOrigin);
     const deny = (status = 403) => { res.statusCode = status; res.setHeader("Content-Type", "text/html; charset=utf-8"); res.end(errorPage); };
     if (closed || clock() >= Date.parse(expiresAt)) { deny(410); return; }
     if (!origin || req.headers.host !== new URL(origin).host || !req.url?.startsWith("/") || req.url.startsWith("//")) { deny(); return; }
@@ -74,18 +75,18 @@ export async function createRemoteGate({ localUrl, appOrigin, publicKey, remoteI
         if (used.has(claims.jti) || used.size >= 100 || sessions.size >= 50) { deny(); return; }
         // Reserve before awaiting authorization: concurrent redemption cannot replay a ticket.
         used.set(claims.jti, claims.exp * 1000);
-        const session = { deviceId: claims.sub, until: Date.parse(expiresAt), checkedUntil: 0, allowed: false, checking: null };
+        const session = { embed: claims.embed === true, deviceId: claims.sub, until: Date.parse(expiresAt), checkedUntil: 0, allowed: false, checking: null };
         if (!await allowed(session)) { deny(); return; }
         const token = randomBytes(32).toString("base64url"); sessions.set(digest(token), session);
-        res.setHeader("Set-Cookie", `${cookieName}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${Math.max(0, Math.floor((session.until - clock()) / 1000))}`);
+        res.setHeader("Set-Cookie", `${session.embed ? embedCookie : cookieName}=${token}; Path=/; HttpOnly; Secure; SameSite=${session.embed ? "None; Partitioned" : "Lax"}; Max-Age=${Math.max(0, Math.floor((session.until - clock()) / 1000))}`);
         res.writeHead(303, { Location: "/" }); res.end(); return;
       }
       if (req.url.startsWith("/_jarvis/")) { deny(404); return; }
-      const cookie = (req.headers.cookie ?? "").split(";").map(s => s.trim()).find(s => s.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
+      const cookie = (req.headers.cookie ?? "").split(";").map(s => s.trim()).find(s => (s.startsWith(`${embedCookie}=`) || s.startsWith(`${cookieName}=`)))?.split("=")[1];
       const session = cookie && sessions.get(digest(cookie));
       if (!session || !await allowed(session)) { deny(); return; }
       session.seenAt = clock();
-      const entry = req.method === "GET" && req.url === "/" && req.headers["sec-fetch-mode"] === "navigate" && req.headers["sec-fetch-dest"] === "document";
+      const entry = req.method === "GET" && req.url === "/" && req.headers["sec-fetch-mode"] === "navigate" && (req.headers["sec-fetch-dest"] === "document" || session.embed && req.headers["sec-fetch-dest"] === "iframe");
       if (req.headers.origin && req.headers.origin !== origin || ["cross-site", "same-site"].includes(req.headers["sec-fetch-site"]) && !entry) { deny(); return; }
       if (!["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"].includes(req.method)) { deny(405); return; }
       const body = await bodyOf(req, 4_000_000);
@@ -95,7 +96,7 @@ export async function createRemoteGate({ localUrl, appOrigin, publicKey, remoteI
         if (req.headers[key]) headers[key] = req.headers[key];
       }
       // Only preview-owned cookies reach the app, never the gateway credential.
-      const appCookies = (req.headers.cookie ?? "").split(";").map(s => s.trim()).filter(s => s && !s.startsWith(`${cookieName}=`));
+      const appCookies = (req.headers.cookie ?? "").split(";").map(s => s.trim()).filter(s => s && !s.startsWith(`${cookieName}=`) && !s.startsWith(`${embedCookie}=`));
       if (appCookies.length) headers.cookie = appCookies.join("; ");
       if (req.headers.origin) headers.origin = upstream.origin;
       headers["sec-fetch-site"] = entry ? "none" : "same-origin";
@@ -110,7 +111,7 @@ export async function createRemoteGate({ localUrl, appOrigin, publicKey, remoteI
           if (destination.origin !== upstream.origin) { response.resume(); deny(502); return; }
           res.setHeader("Location", destination.pathname + destination.search + destination.hash);
         }
-        const cookies = (response.headers["set-cookie"] ?? []).filter(c => !c.trimStart().toLowerCase().startsWith(cookieName.toLowerCase() + "=")).map(c => c.replace(/;\s*domain=[^;]*/ig, ""));
+        const cookies = (response.headers["set-cookie"] ?? []).filter(c => !c.trimStart().toLowerCase().startsWith(cookieName.toLowerCase() + "=") && !c.trimStart().toLowerCase().startsWith(embedCookie.toLowerCase() + "=")).map(c => c.replace(/;\s*domain=[^;]*/ig, ""));
         if (cookies.length) res.setHeader("Set-Cookie", cookies);
         let bytes = 0;
         response.on("data", chunk => { bytes += chunk.length; if (bytes > 32_000_000) { response.destroy(); res.destroy(); } });
@@ -123,7 +124,32 @@ export async function createRemoteGate({ localUrl, appOrigin, publicKey, remoteI
     } catch { if (!res.headersSent) deny(); else res.destroy(); }
   });
   server.on("connection", socket => { sockets.add(socket); socket.on("close", () => sockets.delete(socket)); });
-  server.on("upgrade", (_request, socket) => socket.end("HTTP/1.1 426 Upgrade Required\r\nConnection: close\r\n\r\n"));
+  server.on("upgrade", async (req, socket, head) => {
+    const deny = () => socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+    let request, timer;
+    try {
+      if (closed || !origin || clock() >= Date.parse(expiresAt) || req.method !== "GET" || req.headers.host !== new URL(origin).host || req.headers.origin !== origin || !req.url?.startsWith("/") || req.url.startsWith("//") || req.url.startsWith("/_jarvis/") || req.url.startsWith("/__jarvis_cli/")) return deny();
+      const cookie = (req.headers.cookie ?? "").split(";").map(s => s.trim()).find(s => s.startsWith(`${embedCookie}=`) || s.startsWith(`${cookieName}=`))?.split("=")[1];
+      const session = cookie && sessions.get(digest(cookie));
+      if (!session || !await allowed(session) || active >= 32) return deny();
+      active++; let released = false;
+      socket.once("close", () => { if (!released) { released = true; active--; } clearInterval(timer); request?.destroy(); });
+      const headers = { host: upstream.host, origin: upstream.origin, connection: "Upgrade", upgrade: "websocket" };
+      for (const key of ["sec-websocket-key", "sec-websocket-version", "sec-websocket-protocol", "sec-websocket-extensions"]) if (req.headers[key]) headers[key] = req.headers[key];
+      const appCookies = (req.headers.cookie ?? "").split(";").map(s => s.trim()).filter(s => s && !s.startsWith(`${cookieName}=`) && !s.startsWith(`${embedCookie}=`));
+      if (appCookies.length) headers.cookie = appCookies.join("; ");
+      request = http.request({ hostname: "127.0.0.1", port: upstream.port, method: "GET", path: req.url, headers });
+      request.on("upgrade", (response, peer, extra) => {
+        socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n${["sec-websocket-accept", "sec-websocket-protocol", "sec-websocket-extensions"].filter(key => response.headers[key]).map(key => `${key}: ${response.headers[key]}\r\n`).join("")}\r\n`);
+        if (head.length) peer.write(head); if (extra.length) socket.write(extra);
+        peer.on("error", () => socket.destroy()); socket.on("error", () => peer.destroy());
+        socket.once("close", () => peer.destroy()); peer.once("close", () => socket.destroy());
+        socket.pipe(peer); peer.pipe(socket);
+      });
+      request.on("response", response => { response.resume(); deny(); }); request.on("error", () => socket.destroy()); request.setTimeout(10_000, () => request.destroy()); request.end();
+      timer = setInterval(async () => { if (closed || clock() >= Date.parse(expiresAt) || !await allowed(session)) socket.destroy(); else session.seenAt = clock(); }, 10_000); timer.unref();
+    } catch { clearInterval(timer); request?.destroy(); deny(); }
+  });
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   const close = () => { if (closed) return; closed = true; clearTimeout(timer); server.close(); for (const socket of sockets) socket.destroy(); sessions.clear(); used.clear(); };
   const timer = setTimeout(close, Math.max(1, Date.parse(expiresAt) - clock())); timer.unref();

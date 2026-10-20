@@ -1,5 +1,5 @@
 "use client";
-import { ProjectScreen } from "./project-screen";
+import { ProjectDevelopment } from "./project-development";
 import { ProjectPlanning, ProjectService, ProjectStageControl } from "./project-planning";
 import { projectStage, stageLabels } from "@/lib/projects/lifecycle";
 
@@ -19,7 +19,7 @@ import { githubConnectionUrl, repositoryKey, projectQuickLinks } from "@/lib/wor
 import { ContextEditor, Modal, WorkspaceControls } from "./workspace-controls";
 import { useWorkspace } from "./workspace-provider";
 import { Icon } from "./icon";
-import { ProjectAgent, ProjectAutomaticResults } from "./project-agent";
+import { ProjectAutomaticResults } from "./project-agent";
 import { NotesPanel } from "./notes-panel";
 import { ServiceRegistrationButton, ServicesPanel } from "./services-panel";
 import { RequestsPanel } from "./requests-panel";
@@ -204,8 +204,7 @@ function ProjectView({ project }: { project: Project }) {
           {notice}
         </p>
       )}
-      <ProjectScreen project={project} />
-      <ProjectAgent project={project} />
+      <ProjectDevelopment key={`${project.space}:${project.id}`} project={project} />
       <ProjectAutomaticResults project={project} />
       <details className={styles.projectDisclosure}>
         <summary>프로젝트 정보·연결 <span>목표와 서비스 관리</span></summary>

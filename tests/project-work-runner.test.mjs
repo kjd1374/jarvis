@@ -1,12 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { executeProjectWork, runCodexWork, runCommand, allowedWorkPath } from "../public/jarvis-runner.mjs";
 const modelResult = { blocked: false, reply: "합성 화면 수정", summary: "합성 결과", currentStatus: "검증 준비", nextAction: "확인", followUps: [] };
 const job = { id: "11111111-1111-4111-8111-111111111111", repository: "example/synthetic", projectId: "project", space: "personal", mode: "change", publish: "pr", request: "PRIVATE REQUEST NEVER PUBLISH", leaseToken: "test-lease", attempt: 1 };
-async function fixture({ ci = "success", deliveryFails = false, publish = "pr", failPush = false, blocked = false, cancelAtPublish = false, npmProject = false, npmFailure = false, previewOnly = false, previewEnabled = false, testStatus = "passed" } = {}) {
+async function fixture({ ci = "success", deliveryFails = false, publish = "pr", failPush = false, blocked = false, cancelAtPublish = false, npmProject = false, npmFailure = false, previewOnly = false, previewEnabled = false, testStatus = "passed", imagePayload } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "jarvis-work-test-")), source = join(dir, "source"), remote = join(dir, "remote.git");
   await mkdir(source); await runCommand("git", ["init", "-b", "main", source]);
   await writeFile(join(source, "page.js"), "export const title = 'before';\n");
@@ -54,9 +55,10 @@ async function fixture({ ci = "success", deliveryFails = false, publish = "pr", 
     }
     assert(args.includes("PUT")); assert(args.includes(`sha=${headSha}`)); merged = true; return { code: 0, out: "{}", err: "" };
   };
-  const model = async (_job, cwd) => { modelCalls++; modelJobs.push(_job); modelContents.push(await readFile(join(cwd, "page.js"), "utf8")); await assert.rejects(readFile(join(cwd, ".env.local")), /ENOENT/); await writeFile(join(cwd, "page.js"), `export const title = 'after ${modelCalls}';\n`); return { ...modelResult, blocked }; };
+  const model = async (_job, cwd, _control, options) => { if (_job.images?.length) { assert.equal(await readFile(options.imagePaths[0], "utf8"), "synthetic-image-bytes"); } modelCalls++; modelJobs.push(_job); modelContents.push(await readFile(join(cwd, "page.js"), "utf8")); await assert.rejects(readFile(join(cwd, ".env.local")), /ENOENT/); await writeFile(join(cwd, "page.js"), `export const title = 'after ${modelCalls}';\n`); return { ...modelResult, blocked }; };
   const client = { request: async (path, body) => {
     assert.equal(path, "/api/automation/work"); reports.push(body);
+    if (body.phase === "images") return { images: imagePayload };
     if (cancelAtPublish && body.phase === "heartbeat" && body.progress === "publishing") throw Object.assign(new Error("cancelled"), { code: "stale_job" });
     if (body.phase === "result" && ++deliveries === 1 && deliveryFails) throw new Error("synthetic lost response");
     return { accepted: true };
@@ -196,4 +198,22 @@ test("a selected unmerged change is previewed and continued in its existing PR, 
     await f.execute({ id: "44444444-4444-4444-8444-444444444444", mode: "test", source });
     assert.equal(f.reports.at(-1).code, "work_source_changed");
   } finally { await rm(f.dir, { recursive: true, force: true }); }
+});
+
+test("attached screenshots reach the actual Codex image argument outside Git and are removed afterwards", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "jarvis-image-cli-"));
+  try {
+    const image = join(dir, "reference.jpg"); await writeFile(image, "synthetic-image-bytes");
+    await runCodexWork(job, dir, dir, { imagePaths: [image], run: async (_bin, args) => {
+      if (args[0] === "login") return { code:0,out:"Logged in using ChatGPT",err:"" };
+      if (args[1] === "--help") return { code:0,out:"--ignore-user-config --ignore-rules --ephemeral --output-schema --image",err:"" };
+      assert.equal(args[args.indexOf("--image")+1], image); assert.equal(await readFile(image,"utf8"),"synthetic-image-bytes");
+      await writeFile(args[args.indexOf("--output-last-message")+1],JSON.stringify(modelResult)); return {code:0,out:"",err:""};
+    }});
+  } finally { await rm(dir,{recursive:true,force:true}); }
+  const bytes = Buffer.from("synthetic-image-bytes"), sha256=createHash("sha256").update(bytes).digest("hex");
+  const imagePayload=[{id:"synthetic-image",sha256,mime:"image/jpeg",bytes:bytes.toString("base64")}], f=await fixture({imagePayload});
+  try { await f.execute({images:[{id:"synthetic-image",sha256}]}); assert.equal(f.counts().modelCalls,1); assert.equal(f.reports.at(-1).phase,"result");
+    const result=f.reports.at(-1).result; assert.deepEqual(result.changes,["page.js"]);
+  } finally {await rm(f.dir,{recursive:true,force:true});}
 });

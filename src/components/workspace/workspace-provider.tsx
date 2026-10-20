@@ -215,7 +215,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     if (!account?.authenticated || !monitoringActive) return;
     const timer = setInterval(() => {
       if (document.visibilityState === "visible" && !conflictRef.current) setLoadAttempt(n => n + 1);
-    }, documentPending || planningPending ? 5_000 : 30_000);
+    }, documentPending || planningPending || data.projects.some(project => project.automation?.turns.some(turn => ["queued", "running"].includes(turn.status))) ? 5_000 : 30_000);
     return () => clearInterval(timer);
   }, [account?.authenticated, monitoringActive, documentPending, planningPending]);
 

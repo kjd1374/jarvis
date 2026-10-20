@@ -5,7 +5,7 @@ import { enqueueWork, latestWorkSource, preferredWorkRevision } from "@/lib/auto
 import { repositoryFor } from "@/lib/automation/state";
 import { queuedWorkMessage } from "@/lib/automation/runner-status";
 import { dateLabel, id, now, type Project } from "@/lib/workspace/types";
-import type { WorkPreview } from "@/lib/automation/work-types";
+import type { WorkPreview, RuntimeAction } from "@/lib/automation/work-types";
 import { useWorkspace } from "./workspace-provider";
 import { useWorkspaceClock } from "./use-workspace-clock";
 import styles from "./studio.module.css";
@@ -27,6 +27,7 @@ export function PreviewResult({ preview, project, turnId }: { preview: WorkPrevi
       {preview.kind === "mac" ? "맥미니에서만 열기 ↗" : preview.kind === "remote" ? "이 PC에서 화면 열기 ↗" : "이 버전의 웹 화면 열기 ↗"}
     </a>}
     <p>{expired ? "화면 준비를 다시 누르면 현재 코드로 새 미리보기를 준비합니다." : previewMessage(preview)}</p>
+    {preview.execution && <small>{preview.execution === "native" ? "맥미니 로컬 서버" : "Docker 호환 실행"}{preview.reused ? " · 실행 중인 서버 재사용" : ""}</small>}
     {preview.ai && <p>{preview.ai.provider === "ollama" ? "로컬 LLM 실제 응답 확인 · TranslateGemma" : "구독 CLI 실제 응답 확인"} · 안녕하세요 → {preview.ai.sample} · {dateLabel(preview.ai.verifiedAt)}</p>}
     {preview.diagnostic && <details className={styles.compactDisclosure}><summary>연결 진단</summary>
       <p>{previewStages[preview.diagnostic.stage]} · {preview.diagnostic.code}{preview.diagnostic.statusCode ? ` · HTTP ${preview.diagnostic.statusCode}` : ""}{preview.diagnostic.exitCode !== undefined ? ` · 종료 코드 ${preview.diagnostic.exitCode}` : ""}</p>
@@ -48,21 +49,27 @@ export function ProjectScreen({ project }: { project: Project }) {
   const [previewAI, setPreviewAI] = useState<"none" | "codex" | "ollama">([...project.automation?.turns ?? []].reverse().find(t => t.mode === "preview")?.previewAI ?? "none");
   const recent = service && latestWorkSource(project, service.id, repositoryFor(service)!);
   const source = revision === "latest" ? recent : undefined;
+  const nativeReady = turnsNative(project, service?.id);
+  const [embedded, setEmbedded] = useState(false);
   const pending = useRef(false), requestId = useRef(id());
   const turns = (project.automation?.turns ?? []).filter(t => t.serviceId === service?.id && t.repository === (service && repositoryFor(service)));
   const latest = [...turns].reverse().find(t => t.result?.preview && (t.previewAI ?? "none") === previewAI && (source ? t.id === source.id || t.sourceTurnId === source.id : !t.sourceTurnId && t.result.outcome !== "pr_open"));
   const waiting = turns.find(t => t.mode === "preview" && ["queued", "running"].includes(t.status));
   const testing = turns.find(t => t.mode === "test" && ["queued", "running"].includes(t.status));
   const sourceChanged = source && turns.some(t => t.sourceTurnId === source.id && t.error === "work_source_changed");
-  async function prepare(mode: "preview" | "test", chosenAI = previewAI, chosenRevision = revision) {
+  async function prepare(mode: "preview" | "test", chosenAI = previewAI, chosenRevision = revision, runtimeAction?: RuntimeAction) {
     if (!service || pending.current || saving || (mode === "preview" ? waiting : testing)) return;
     pending.current = true; setError("");
     try {
-      await mutate(d => enqueueWork(d, project.space, project.id, service.id, mode === "test" ? "선택한 코드의 자동 테스트를 실행해주세요." : "선택한 코드의 웹 화면을 준비해주세요.", mode, "pr", now(), requestId.current, chosenRevision === "latest" ? recent?.id : undefined, mode === "preview" && chosenAI !== "none" ? chosenAI : undefined));
+      await mutate(d => enqueueWork(d, project.space, project.id, service.id, runtimeAction === "stop" ? "프로젝트 로컬 서버를 종료해주세요." : runtimeAction === "logs" ? "프로젝트 로컬 서버 로그를 확인해주세요." : runtimeAction === "restart" ? "프로젝트 로컬 서버를 재시작해주세요." : mode === "test" ? "선택한 코드의 자동 테스트를 실행해주세요." : "선택한 코드의 웹 화면을 준비해주세요.", mode, "pr", now(), requestId.current, chosenRevision === "latest" ? recent?.id : undefined, mode === "preview" && chosenAI !== "none" && !["stop", "logs"].includes(runtimeAction ?? "") ? chosenAI : undefined, false, { runtimeAction }));
       requestId.current = id();
     } catch (e) { setError(e instanceof Error ? e.message : "화면 준비 요청을 저장하지 못했습니다."); }
     finally { pending.current = false; }
   }
+  const control = [...turns].reverse().find(t => t.runtimeAction && t.status === "completed");
+  const stopped = control?.runtimeAction === "stop" && (!latest || Date.parse(control.createdAt) >= Date.parse(latest.createdAt));
+  const embedPreview = stopped ? undefined : latest?.result?.preview;
+  const canEmbed = embedPreview?.state === "ready" && embedPreview.kind === "remote" && Date.parse(embedPreview.expiresAt ?? "") > clock;
   return <section className={`${styles.detailSection} ${styles.projectScreen}`} aria-label="수정된 화면 확인">
     <div className={styles.detailHeading}><h2>수정된 화면 확인</h2>
       <div className={styles.agentTurnActions}>
@@ -82,15 +89,26 @@ export function ProjectScreen({ project }: { project: Project }) {
     </select></label>
     {previewAI === "ollama" && <p>맥미니에 설치된 TranslateGemma로 통역합니다. 모델과 실제 번역 응답을 확인한 뒤 화면을 준비하며, 구독 CLI나 유료 API로 전환하지 않습니다.</p>}
     {previewAI === "codex" && <p>지원 앱 안의 AI 기능을 구독 CLI에 연결하는 선택입니다. Jarvis의 코드 수정용 CLI 연결과는 별개입니다. 짧은 번역 응답을 실제 확인하며 요청마다 구독 사용량이 소모됩니다. API 키 과금으로 전환하지 않으며 임시 화면 한 개에서 최대 20회 요청할 수 있습니다.</p>}
-    {latest?.result?.preview ? <PreviewResult preview={latest.result.preview} project={project} turnId={latest.id} /> : <p>{!service ? project.setup ? "저장소와 실행 환경을 자동으로 준비하고 있습니다. 준비가 끝나면 개발 요청과 화면 확인이 이어집니다." : "화면 준비와 자동 테스트에 사용할 GitHub 저장소를 먼저 등록해주세요." : previewAI !== "none"
+    {nativeReady && <div className={styles.agentTurnActions} aria-label="로컬 서버 관리">
+      <button className={styles.textButton} disabled={saving || !!waiting} onClick={() => prepare("preview", previewAI, revision, "restart")}>서버 재시작</button>
+      <button className={styles.textButton} disabled={saving || !!waiting} onClick={() => prepare("preview", "none", revision, "stop")}>서버 종료</button>
+      <button className={styles.textButton} disabled={saving || !!waiting} onClick={() => prepare("preview", "none", revision, "logs")}>서버 로그</button>
+    </div>}
+    {control?.result && <details className={styles.compactDisclosure}><summary>{control.result.summary}</summary><pre className={styles.runtimeLog}>{control.result.reply}</pre></details>}
+    {stopped ? <p role="status">로컬 서버를 종료했습니다. 화면 준비로 다시 시작할 수 있습니다.</p> : latest?.result?.preview ? <PreviewResult preview={latest.result.preview} project={project} turnId={latest.id} /> : <p>{!service ? project.setup ? "저장소와 실행 환경을 자동으로 준비하고 있습니다. 준비가 끝나면 개발 요청과 화면 확인이 이어집니다." : "화면 준비와 자동 테스트에 사용할 GitHub 저장소를 먼저 등록해주세요." : previewAI !== "none"
       ? "현재 코드의 임시 앱을 실행하고 선택한 AI의 번역 응답을 확인합니다. 준비가 끝나면 이 PC에서 열 수 있습니다."
       : "배포 주소가 없으면 맥미니에서 임시 화면을 준비합니다. AI는 연결하지 않습니다."}</p>}
+    {canEmbed && <div className={styles.developmentCanvas}>
+      <button className={styles.secondaryButton} onClick={() => setEmbedded(value => !value)}>{embedded ? "작업실 화면 닫기" : "작업실에서 화면 보기"}</button>
+      {embedded && <><iframe key={latest!.id} title="개발 중인 앱" src={`/api/preview/open?${new URLSearchParams({ space: project.space, projectId: project.id, turnId: latest!.id, embed: "1" })}`} sandbox="allow-scripts allow-forms allow-same-origin allow-downloads" allow="microphone; camera; autoplay; clipboard-write" referrerPolicy="strict-origin" />
+        <small>기기에서 화면을 제한하면 위의 새 탭으로 열기를 사용해주세요. 마이크 권한도 열린 앱에서 허용할 수 있습니다.</small></>}
+    </div>}
     {latest?.result?.preview?.state === "failed" && latest.result.preview.diagnostic?.code === "preview_cli_config_unavailable" && <button className={styles.secondaryButton} disabled={saving || !service || !!waiting} onClick={() => { setPreviewAI("none"); void prepare("preview", "none"); }}>AI 연결 없이 화면 준비</button>}
     {waiting && <p role="status">화면 준비: {waiting.status === "queued" ? queuedWorkMessage(waiting, service?.monitoring, clock) : "실행기가 화면을 준비하고 있습니다. 완료되면 화면 열기 버튼이 표시됩니다."}</p>}
     {testing && <p role="status">자동 테스트: {testing.status === "queued" ? queuedWorkMessage(testing, service?.monitoring, clock) : "실행 중입니다. 결과는 아래 프로젝트 작업에 표시됩니다."}</p>}
     <details className={styles.compactDisclosure}><summary>맥미니 미리보기 이용 안내</summary>
       <p>자동 테스트는 실행 서버에서 처리합니다. 화면 표시, 자동 검증, 실제 AI·외부 서비스 연결은 각각 확인해야 합니다.</p>
-      <p>승인된 Jarvis 기기에서 미리보기를 열 수 있으며 2시간 후 종료됩니다. 맥미니·실행기·Docker가 켜져 있어야 합니다. 노트북·데스크탑에는 실행기를 설치하지 않아도 됩니다.</p>
+      <p>승인된 Jarvis 기기에서 미리보기를 열 수 있으며 2시간 후 종료됩니다. 맥미니와 실행기가 켜져 있어야 합니다. 실행기 2.9.0의 macOS 로컬 서버는 Docker 없이 실행합니다. 다른 실행 환경에서는 Docker 호환 경로를 사용합니다. 노트북·데스크탑에는 실행기를 설치하지 않아도 됩니다.</p>
       <p>임시 화면은 Cloudflare의 HTTPS 연결을 거칩니다. 주소만 복사하면 열리지 않으므로 각 PC의 Jarvis에서 화면 열기를 눌러주세요.</p>
       <p>별도의 임시 데이터로 화면을 확인합니다. 구독 CLI를 선택하면 지원 앱의 AI 연결도 검사합니다. 업무 서비스 연결과 운영 배포는 별도로 확인합니다. 정적 웹과 지원하는 Node 앱을 실행하며, 다른 실행 방식이나 연결 설정이 필요하면 이유를 표시합니다.</p>
       <Link href="/settings#cli-runner">맥미니 실행기 설정 →</Link>
@@ -98,3 +116,5 @@ export function ProjectScreen({ project }: { project: Project }) {
     {error && <p role="alert" className={styles.formError}>{error}</p>}
   </section>;
 }
+
+function turnsNative(project: Project, serviceId?: string) { return [...(project.automation?.turns ?? [])].reverse().some(turn => turn.serviceId === serviceId && turn.result?.preview?.execution === "native"); }

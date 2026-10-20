@@ -252,3 +252,23 @@ test("로컬 LLM 요청은 전용 실행기 역량과 일치하는 실제 모델
   const observed=observeWorkRunner(data,scope,{runnerVersion:"2.7.0",previewVersion:1,previewLocalVersion:1},stamp);
   expect(normalizeWorkspace(observed).services[0].monitoring?.runnerConnection?.previewLocal).toBe(true);
 });
+
+test("사진 요청은 같은 영역·프로젝트의 원본을 고정하고 구버전 실행기에서 보존한다", () => {
+  const data = automationWorkspace();
+  const image = { id: "image-fixture", sha256: "a".repeat(64) };
+  data.documents.push({ id: image.id, space: "company", projectId: "auto-project", taskId: null, name: "synthetic.jpg", mime: "image/jpeg", size: 200, createdAt: stamp });
+  const queued = enqueueWork(data, "company", "auto-project", "auto-service", "사진처럼 수정", "change", "pr", stamp, uuid, undefined, undefined, false, { images: [image] });
+  expect(normalizeWorkspace(queued).projects[0].automation!.turns[0].images).toEqual([image]);
+  expect(claimProjectWork(queued, scope, stamp).job).toBeNull();
+  expect(claimProjectWork(queued, { ...scope, development: true }, stamp).job!.images).toEqual([image]);
+  for (const [space, projectId] of [["personal", "auto-project"], ["company", "another-project"]]) {
+    const changed = structuredClone(data); Object.assign(changed.documents[0], { space, projectId });
+    expect(() => enqueueWork(changed, "company", "auto-project", "auto-service", "사진 수정", "ask", "pr", stamp, uuid, undefined, undefined, false, { images: [image] })).toThrow();
+  }
+  expect(() => enqueueWork(data, "company", "auto-project", "auto-service", "사진 수정", "preview", "pr", stamp, uuid, undefined, undefined, false, { images: [image] })).toThrow();
+});
+test("서버 제어는 명시적 형식과 새 실행기 역량이 있어야 가져간다", () => {
+  const queued = enqueueWork(automationWorkspace(), "company", "auto-project", "auto-service", "서버 종료", "preview", "pr", stamp, uuid, undefined, undefined, false, { runtimeAction: "stop" });
+  expect(claimProjectWork(queued, { ...scope, previews: true, remoteWork: true }, stamp).job).toBeNull();
+  expect(claimProjectWork(queued, { ...scope, previews: true, development: true }, stamp).job!.runtimeAction).toBe("stop");
+});

@@ -37,6 +37,8 @@ export async function ready(page: Page) {
   await expect(
     page.getByRole("button", { name: "회사", exact: true }),
   ).toBeEnabled();
+  const together = page.getByRole("navigation", { name: "개발 작업 보기" }).getByRole("button", { name: "함께 보기", exact: true });
+  if (await together.isVisible()) await together.click();
 }
 export async function state(page: Page): Promise<WorkspaceData | undefined> {
   return page.evaluate(

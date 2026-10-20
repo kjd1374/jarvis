@@ -193,9 +193,7 @@ export async function main(args = process.argv.slice(2)) {
   console.log(`GitHub ${ready.github ? "준비됨" : "로그인 필요"} · Codex 구독 ${ready.codex ? "준비됨" : "로그인 필요"} · Docker ${ready.docker ? "준비됨" : ready.dockerProblem === "client_unavailable" ? "명령 경로 확인 필요" : "엔진 접속 확인 필요"}`);
   if (args[0] === "check") return;
   if (!ready.github || !ready.codex) throw new Error("맥미니에서 gh auth login 및 codex login을 확인해주세요. 인증값을 채팅에 보내지 마세요.");
-  if (!ready.docker) throw new Error(ready.dockerProblem === "client_unavailable"
-    ? "Docker 명령을 실행하지 못했습니다. Docker Desktop을 응용 프로그램에 설치하거나 Docker CLI 설치 경로를 확인해주세요."
-    : "Docker 명령은 찾았지만 엔진에 접속하지 못했습니다. Docker Desktop의 Engine running 상태와 docker context show의 접속 대상을 확인해주세요.");
+  if (!ready.docker) console.log("Docker는 선택 사항입니다. macOS 격리 로컬 서버를 기본 사용합니다.");
   const index = args.indexOf("--config");
   if (args[0] !== "update" && (index < 0 || !args[index + 1])) throw new Error("기존 jarvis-runner.json의 경로를 --config로 지정해주세요.");
   const config = args[0] === "update" ? await installedConfig(plist, run) : validateConfig(JSON.parse(await readFile(resolve(args[index + 1]), "utf8")));
@@ -216,7 +214,7 @@ export async function main(args = process.argv.slice(2)) {
   if ((await run("plutil", ["-lint", staged])).code !== 0) throw new Error("자동 시작 설정 검증에 실패했습니다. 기존 실행기는 유지됩니다.");
   console.log("자동 실행 등록을 갱신합니다. 기존 실행기 종료와 새 등록 상태를 확인합니다.");
   await replaceLaunchAgent({ domain, plist, contents, run });
-  console.log(`실행기 ${version} 자동 시작을 등록했습니다. 설정·승인·이력은 기존 것을 사용합니다.\n맥미니에서 로그아웃하지 말고 Docker를 켜두세요. 재부팅 뒤 사용자 로그인이 필요합니다.\nJarvis 프로젝트의 ‘화면 준비’를 눌러 실제 연결과 웹 응답을 확인해주세요.\n기기 확인이 필요한 경우 ${join(directory, "runner.log")}에 12자리 번호가 표시됩니다.`);
+  console.log(`실행기 ${version} 자동 시작을 등록했습니다. 설정·승인·이력은 기존 것을 사용합니다.\n맥미니에서 로그아웃하지 말고 실행기를 유지해주세요. macOS 로컬 서버는 Docker 없이 실행합니다. 재부팅 뒤 사용자 로그인이 필요합니다.\nJarvis 프로젝트의 ‘화면 준비’를 눌러 실제 연결과 웹 응답을 확인해주세요.\n기기 확인이 필요한 경우 ${join(directory, "runner.log")}에 12자리 번호가 표시됩니다.`);
 }
 // macOS /tmp aliases /private/tmp; Node resolves the module URL, but not argv.
 if (process.argv[1] && await realpath(process.argv[1]).catch(() => null) === await realpath(fileURLToPath(import.meta.url))) main().catch(error => {
