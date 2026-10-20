@@ -40,7 +40,7 @@ export function runCommand(executable, args, { input = "", timeout = 60_000, env
       if (channel === "out") out += bytes.toString("utf8"); else err += bytes.toString("utf8");
     });
     child.on("error", () => { clearTimeout(timer); fail(new RunnerError("command_unavailable")); });
-    child.on("close", code => { clearTimeout(timer); if (!settled) { settled = true; resolveResult({ code, out, err }); } });
+    child.on("close", (code, terminationSignal) => { clearTimeout(timer); if (!settled) { settled = true; resolveResult({ code, out, err, ...(terminationSignal ? { terminationSignal } : {}) }); } });
     child.stdin.on("error", () => {});
     child.stdin.end(input);
   });

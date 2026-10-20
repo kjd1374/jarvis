@@ -140,6 +140,7 @@ export async function createRemoteGate({ localUrl, appOrigin, publicKey, remoteI
       if (appCookies.length) headers.cookie = appCookies.join("; ");
       request = http.request({ hostname: "127.0.0.1", port: upstream.port, method: "GET", path: req.url, headers });
       request.on("upgrade", (response, peer, extra) => {
+        request.setTimeout(0); peer.setTimeout(0);
         socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n${["sec-websocket-accept", "sec-websocket-protocol", "sec-websocket-extensions"].filter(key => response.headers[key]).map(key => `${key}: ${response.headers[key]}\r\n`).join("")}\r\n`);
         if (head.length) peer.write(head); if (extra.length) socket.write(extra);
         peer.on("error", () => socket.destroy()); socket.on("error", () => peer.destroy());

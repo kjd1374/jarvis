@@ -28,7 +28,7 @@ test('macOS native lifecycle reuses a live server, preserves DATA_DIR across ver
   if(req.url==='/isolation'){let denied=false;try{await readFile(${JSON.stringify(secret)});}catch{denied=true;}res.end(JSON.stringify({denied,home:process.env.HOME,credential:!!process.env.GH_TOKEN}));return;}
   res.setHeader('Content-Type','text/html');res.end('<h1>Native fixture</h1>');}).listen(Number(process.env.PORT),'127.0.0.1');`;
   await writeFile(join(cwd, 'server.mjs'), source);
-  const options = { cwd, files: ['server.mjs'], sha: 'a'.repeat(40), stateDir, group, persistent: true, run: async (bin,args,options) => { const result=await runCommand(bin,args,options); if(result.code!==0) console.error("synthetic native check:",bin,result.code,result.err.slice(-4000)); return result; } };
+  const options = { cwd, files: ['server.mjs'], sha: 'a'.repeat(40), stateDir, group, persistent: true, run: async (bin,args,options) => { const result=await runCommand(bin,args,options); if(result.code!==0) console.error("synthetic native check:",bin,result.code,result.terminationSignal,result.err.slice(-4000)); return result; } };
   try {
     const first = await startDevelopmentPreview(options);
     assert.equal(first.state, 'ready', JSON.stringify(first)); assert.equal(first.execution, 'native');
@@ -53,4 +53,14 @@ test('macOS native lifecycle reuses a live server, preserves DATA_DIR across ver
     const checks = await runDevelopmentTests({ ...options, identity:group, files:['server.mjs','fixture.test.mjs'] });
     assert.equal(checks[0].status, 'passed', JSON.stringify(checks)); assert.match(checks[0].detail, /tests 1|tests\s+1/);
   } finally { developmentStatus(group, 'stop'); await new Promise(resolve=>setTimeout(resolve,1700)); await rm(dir,{recursive:true,force:true}); }
+});
+
+test('synthetic macOS sandbox compatibility diagnostics', { skip: process.platform !== 'darwin' }, async () => {
+ const root=await realpath(await mkdtemp(join(tmpdir(),'jarvis-native-policy-'))), node=await realpath(process.execPath);
+ try { const base=developmentSandbox(root,root,[],node);
+ for(const [name,addition] of [['strict',''],['process-info','(allow process-info*)'],['system-socket','(allow system-socket)'],['system-read','(allow file-read*)']]) {
+ const result=await runCommand('/usr/bin/sandbox-exec',['-p',base+'\n'+addition,node,'-e','process.stdout.write("compatibility")'],{cwd:root,env:developmentEnvironment(root,0),timeout:10000});
+ console.log('synthetic policy probe',name,result.code,result.terminationSignal,result.out,result.err.slice(-1500));
+ }
+ } finally {await rm(root,{recursive:true,force:true});}
 });
