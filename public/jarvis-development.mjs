@@ -32,7 +32,7 @@ async function freePort() {
 export function developmentStatus(group, action = 'logs', redact = value => value) {
   const key = keyOf(group), item = servers.get(key);
   if (!item) return { running: false, detail: redact(failures.get(key) ?? '실행 중인 로컬 서버가 없습니다. 화면 준비로 시작할 수 있습니다.').slice(-1600) };
-  const detail = redact(item.log).replace(/\x1b\[[0-9;]*m/g, '').slice(-1600) || '서버가 실행 중입니다. 출력된 로그가 없습니다.';
+  const detail = redact(failures.has(key) ? '최근 준비 실패 · 이전 서버 실행 중\n' + failures.get(key) : item.log).replace(/\x1b\[[0-9;]*m/g, '').slice(-1600) || '서버가 실행 중입니다. 출력된 로그가 없습니다.';
   if (action === 'stop' || action === 'restart') item.close();
   return { running: action === 'logs', detail: action === 'stop' ? '프로젝트 서버와 원격 연결을 종료했습니다. 프로젝트 데이터는 보존됩니다.' : detail };
 }
@@ -54,7 +54,8 @@ export async function startDevelopmentPreview(options, { platform = process.plat
   if (servers.size - Number(!!previous) >= 3) throw Object.assign(new Error('development_capacity'), { stage: 'application' });
   const root = await realpath(stateDir), directory = join(root, `development-${key}-${randomUUID()}`), app = join(directory, 'app');
   const data = join(root, `development-data-${key}`);
-  let child, bridge, closed = false, stage = 'build', appLog = ''; 
+  let child, bridge, closed = false, stage = 'build', appLog = '';
+  const command = async (...args) => { const result = await run(...args); appLog = (appLog + (result.out ?? '') + (result.err ?? '')).slice(-16_000); return result; }; 
   const close = () => {
     if (closed) return; closed = true;
     bridge?.close();
@@ -81,10 +82,10 @@ export async function startDevelopmentPreview(options, { platform = process.plat
     const profile = join(directory, 'sandbox.sb');
     await writeFile(profile, developmentSandbox(directory, persistent ? data : join(directory, 'tmp', 'app-data'), ports, executable), { mode: 0o600 });
     // Fail closed if the installed macOS sandbox cannot run. Never silently execute on the host.
-    const supported = await run('/usr/bin/sandbox-exec', ['-f', profile, executable, '-e', 'process.stdout.write("sandbox-ready")'], { cwd: app, env, signal, timeout: 10_000 });
+    const supported = await command('/usr/bin/sandbox-exec', ['-f', profile, executable, '-e', 'process.stdout.write("sandbox-ready")'], { cwd: app, env, signal, timeout: 10_000 });
     if (supported.code !== 0 || supported.out !== 'sandbox-ready') throw new Error('development_sandbox_unavailable');
-    if (plan.install) await prepareDependencies({ app, directory, root, key, run, signal });
-    const sandboxRun = async (bin, args) => run('/usr/bin/sandbox-exec', ['-f', profile, bin, ...args], { cwd: app, env, signal, timeout: 300_000, maxBytes: 2_000_000 });
+    if (plan.install) await prepareDependencies({ app, directory, root, key, run: command, signal });
+    const sandboxRun = async (bin, args) => command('/usr/bin/sandbox-exec', ['-f', profile, bin, ...args], { cwd: app, env, signal, timeout: 300_000, maxBytes: 2_000_000 });
     if (plan.build && (await sandboxRun('/usr/bin/env', ['npm', 'run', 'build', '--ignore-scripts'])).code !== 0) throw new Error('development_build_failed');
     // The trusted proxy/queue and untrusted app share only this release and fixed loopback ports.
     plan.persistent = persistent; plan.cli = !!cliInference; plan.aiProvider = aiProvider;
@@ -105,7 +106,7 @@ export async function startDevelopmentPreview(options, { platform = process.plat
       config.profiles.jarvis.baseUrl = `http://127.0.0.1:${ports[2]}/v1`;
       await writeFile(join(directory, 'cli-profile.json'), JSON.stringify(config), { mode: 0o600 });
     }
-    if (persistent) await migrateDevelopmentData({ data, key, run, signal, legacyDockerData: options.legacyDockerData });
+    if (persistent) await migrateDevelopmentData({ data, key, run: command, signal, legacyDockerData: options.legacyDockerData });
     if (previous && (persistent || previous.persistent)) { previous.close(); previous = undefined; }
     stage = 'application';
     const expiresAt = new Date(Date.now() + ttl).toISOString();
@@ -134,7 +135,7 @@ export async function startDevelopmentPreview(options, { platform = process.plat
     item.ready = ready; servers.set(key, item); failures.delete(key); previous?.close();
     if (!handlers) { handlers = true; process.once('exit', () => { for (const item of servers.values()) item.close(); }); }
     return published;
-  } catch (error) { if (failures.size >= 20) failures.delete(failures.keys().next().value); failures.set(key, appLog || error.code || error.message); close(); return { ...previewFailure(sha, error, stage, !!publish), execution: 'native' }; }
+  } catch (error) { if (failures.size >= 20) failures.delete(failures.keys().next().value); failures.set(key, (String(error.code ?? error.message) + '\n' + appLog).slice(-16_000)); close(); return { ...previewFailure(sha, error, stage, !!publish), execution: 'native' }; }
 }
 
 export async function runDevelopmentTests({ cwd, files, stateDir, identity, run, signal, redact = value => value }) {

@@ -17,3 +17,5 @@
  .workspace[data-view=screen] .chat,.workspace[data-view=screen] .tests,.workspace[data-view=chat] .screen,.workspace[data-view=chat] .tests,.workspace[data-view=tests] .screen,.workspace[data-view=tests] .chat {display:none}
  .workspace[data-view=all] .tests {display:none}
 }
+
+@media(max-width:400px){.workspace .screen>section,.workspace .chat>section {padding:14px}.screen,.chat {margin-bottom:12px}}

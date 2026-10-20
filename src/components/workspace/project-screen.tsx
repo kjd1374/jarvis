@@ -109,7 +109,7 @@ export function ProjectScreen({ project }: { project: Project }) {
     {control?.result && <details className={styles.compactDisclosure}><summary>{control.result.summary}</summary><pre className={styles.runtimeLog}>{control.result.reply}</pre></details>}
     {stopped ? <p role="status">로컬 서버를 종료했습니다. 화면 준비로 다시 시작할 수 있습니다.</p> : latest?.result?.preview ? <PreviewResult preview={latest.result.preview} project={project} turnId={latest.id} /> : <p>{!service ? project.setup ? "저장소와 실행 환경을 자동으로 준비하고 있습니다. 준비가 끝나면 개발 요청과 화면 확인이 이어집니다." : "화면 준비와 자동 테스트에 사용할 GitHub 저장소를 먼저 등록해주세요." : previewAI !== "none"
       ? "현재 코드의 임시 앱을 실행하고 선택한 AI의 번역 응답을 확인합니다. 준비가 끝나면 이 PC에서 열 수 있습니다."
-      : "배포 주소가 없으면 맥미니에서 임시 화면을 준비합니다. AI는 연결하지 않습니다."}</p>}
+      : "로컬 서버를 준비한 뒤 이 기기에서 앱을 열 수 있습니다."}</p>}
     {embedBlocked && <p role="status">브라우저가 작업실 안의 연결을 제한했습니다. 위의 ‘이 PC에서 화면 열기’로 새 탭에서 사용할 수 있습니다.</p>}
     {canEmbed && <div className={styles.developmentCanvas}>
       <button className={styles.secondaryButton} onClick={() => { setEmbedBlocked(false); setEmbedded(value => !value); }}>{embedded ? "작업실 화면 닫기" : "작업실에서 화면 보기"}</button>
