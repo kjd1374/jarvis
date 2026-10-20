@@ -83,7 +83,7 @@ export function developmentStatus(group, action = 'logs', redact = value => valu
   if (action === 'stop' || action === 'restart') item.close();
   return { running: action === 'logs', detail: action === 'stop' ? '프로젝트 서버와 원격 연결을 종료했습니다. 프로젝트 데이터는 보존됩니다.' : detail };
 }
-export async function startDevelopmentPreview(options, { platform = process.platform, launch = spawn, bindAttempt = 0 } = {}) {
+export async function startDevelopmentPreview(options, { platform = process.platform, launch = spawn, bindAttempt = 0, allocatePort = freePort } = {}) {
   const { cwd, files, sha, stateDir, group, persistent, run, signal, publish, cliInference, aiProvider = 'codex', authorizeCliPreparation } = options;
   if (platform !== 'darwin') return null; // The existing isolated Docker path remains the explicit compatibility path.
   const key = keyOf(group), provider = cliInference ? aiProvider : 'none';
@@ -124,7 +124,7 @@ export async function startDevelopmentPreview(options, { platform = process.plat
     const plan = previewPlan(copied, await json('package.json'), await json('package-lock.json'));
     if (!plan) throw new Error('development_start_unsupported');
     const ports = [];
-    while (ports.length < 3) { const port = await freePort(); if (!ports.includes(port)) ports.push(port); }
+    while (ports.length < 3) { const port = await allocatePort(); if (!ports.includes(port)) ports.push(port); }
     const env = developmentEnvironment(directory, ports[0]);
     const executable = await realpath(process.execPath);
     const profile = join(directory, 'sandbox.sb');
@@ -144,11 +144,11 @@ export async function startDevelopmentPreview(options, { platform = process.plat
     plan.persistent = persistent; plan.cli = !!cliInference; plan.aiProvider = aiProvider;
     if (plan.vite) plan.start = plan.start.map(value => value === '3000' ? String(ports[0]) : value);
     const nativeApp = app; // no second copy: this release is already disposable.
-    let source = previewServerSource.replace("if(plan.entry) await cp('/app',cwd,{recursive:true});", '').replace(/'\/runtime\/([^']+)'/g, (_match, name) => quote(join(directory, name))).replaceAll("'/app'", quote(app)).replaceAll("'/tmp/jarvis-preview-app'", quote(nativeApp))
+    let source = previewServerSource.replace(/\b300[01]\b/g, value => String(ports[Number(value.at(-1))])).replace("if(plan.entry) await cp('/app',cwd,{recursive:true});", '').replace(/'\/runtime\/([^']+)'/g, (_match, name) => quote(join(directory, name))).replaceAll("'/app'", quote(app)).replaceAll("'/tmp/jarvis-preview-app'", quote(nativeApp))
       .replace("if(plan.entry) await cp('/app',cwd,{recursive:true});", '')
       .replaceAll("'/persistent'", quote(data)).replaceAll("'/tmp/app-data'", quote(join(directory, 'tmp', 'app-data')))
       .replaceAll("HOME:'/tmp',TMPDIR:'/tmp'", `HOME:${quote(env.HOME)},TMPDIR:${quote(env.TMPDIR)}`)
-      .replaceAll('3000', String(ports[0])).replaceAll('3001', String(ports[1])).replaceAll("'0.0.0.0'", "'127.0.0.1'").replace("stdio:'ignore'", "stdio:'inherit'").replace("NEXT_TELEMETRY_DISABLED:'1'", `NEXT_TELEMETRY_DISABLED:'1',OPENSSL_CONF:'/dev/null',npm_config_userconfig:${quote(env.npm_config_userconfig)},npm_config_globalconfig:${quote(env.npm_config_globalconfig)},npm_config_cache:${quote(env.npm_config_cache)}`);
+      .replaceAll("'0.0.0.0'", "'127.0.0.1'").replace("stdio:'ignore'", "stdio:'inherit'").replace("NEXT_TELEMETRY_DISABLED:'1'", `NEXT_TELEMETRY_DISABLED:'1',OPENSSL_CONF:'/dev/null',npm_config_userconfig:${quote(env.npm_config_userconfig)},npm_config_globalconfig:${quote(env.npm_config_globalconfig)},npm_config_cache:${quote(env.npm_config_cache)}`);
     const token = randomUUID(), cliToken = randomUUID();
     await writeFile(join(directory, 'server.mjs'), source, { mode: 0o600 });
     await writeFile(join(directory, 'plan.json'), JSON.stringify(plan), { mode: 0o600 });
