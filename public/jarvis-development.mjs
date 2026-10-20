@@ -1,7 +1,7 @@
 // Managed macOS processes. App code never inherits the runner's home, credentials or network.
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomUUID, randomInt } from 'node:crypto';
 import { mkdir, readFile, writeFile, rm, cp, realpath, open } from 'node:fs/promises';
 import { dirname, join, isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -56,10 +56,16 @@ export function developmentSandbox(root, data, ports, executable = process.execP
   return `(version 1)\n(deny default)\n(allow process-fork process-exec sysctl-read mach-lookup)\n(allow file-read-metadata)\n(allow file-map-executable)\n(allow signal (target self))\n(allow file-read* (literal "/") (subpath "/System") (subpath "/usr") (subpath "/bin") (subpath "/sbin") (subpath "/Library/Apple") (subpath ${quote(runtime)}) (subpath ${quote(root)}) (subpath ${quote(data)}) ${libraries.filter(p=>typeof p==='string'&&isAbsolute(p)&&!p.includes('\0')).map(p=>`(literal ${quote(p)})`).join(' ')} (literal "/dev/null") (literal "/dev/random") (literal "/dev/urandom") (literal "/private/etc/localtime") (literal "/private/etc/hosts"))\n(allow file-write* (subpath ${quote(root)}) (subpath ${quote(data)}) (literal "/dev/null"))\n${ports.map(p => `(allow network-bind network-inbound (local tcp "localhost:${p}"))\n(allow network-outbound (remote tcp "localhost:${p}"))`).join('\n')}\n`;
 }
 async function freePort() {
-  const socket = net.createServer();
-  await new Promise((resolve, reject) => { socket.once('error', reject); socket.listen(0, '127.0.0.1', resolve); });
-  const port = socket.address().port;
-  await new Promise(resolve => socket.close(resolve)); return port;
+  // Keep app listeners out of macOS's ephemeral client-port range. Health
+  // probes and npm can otherwise consume a released port before the app binds.
+  for (let attempt = 0; attempt < 32; attempt++) {
+    const socket = net.createServer(), port = randomInt(16000, 32000);
+    try {
+      await new Promise((resolve, reject) => { socket.once('error', reject); socket.listen(port, '127.0.0.1', resolve); });
+      await new Promise(resolve => socket.close(resolve)); return port;
+    } catch (error) { if (error.code !== 'EADDRINUSE') throw error; }
+  }
+  throw new Error('development_port_unavailable');
 }
 export function developmentStatus(group, action = 'logs', redact = value => value) {
   const key = keyOf(group), item = servers.get(key);
