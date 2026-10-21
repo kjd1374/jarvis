@@ -1,7 +1,7 @@
 {
-  "version": "2.9.3",
+  "version": "2.9.4",
   "files": {
-    "jarvis-runner.mjs": "e6e51c650952ba8ec50e7294f67c468ce9df1548599c0a5889053db398002852",
+    "jarvis-runner.mjs": "5d808c3fe40526047da84e06f6bcd26d0b4398d57cc0d12cf06eca2f6b5b4428",
     "jarvis-preview.mjs": "38c422670fa28e74dc35762dc1d91c40cf66d52d6d9bfa6210edc1515584eeb5",
     "jarvis-development.mjs": "f63b7aee3760c54cb5251ac52166234f495de817966a097281a8df14404f8820",
     "jarvis-stream-transport.mjs": "849ecc5dd6d0dfb9e0fc1288761d459bf273802298603f1444eb258d97e01c6d",
