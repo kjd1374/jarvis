@@ -73,7 +73,12 @@ export async function runAutopilotLifecycle({base,browser,runner,network,approve
   const agent=page.getByRole('region',{name:'프로젝트 AI 작업실',exact:true});
   for(let turn=1;turn<=2;turn++){
    if(turn===2){await agent.getByLabel('AI에게 요청',{exact:true}).fill('제목을 Continued counter로 바꾸고 저장값은 유지');await agent.getByRole('button',{name:'요청 보내기',exact:true}).click();await expect.poll(async()=> (await snapshot()).data.projects.find(p=>p.id===project.id).automation.turns.at(-1).status).toBe('queued');}
-   const work=(await runner.request('/api/automation/claim',scope)).job;assert.equal(work.kind,'work');assert.equal(work.mode,'change');assert.equal(work.projectId,project.id);
+   const queuedId=(await snapshot()).data.projects.find(p=>p.id===project.id).automation.turns.at(-1).id;
+   assert.equal((await runner.request('/api/automation/claim',{...scope,runnerVersion:'2.9.4'})).job,null);
+   const waiting=(await snapshot()).data.projects.find(p=>p.id===project.id).automation.turns.at(-1);
+   assert.equal(waiting.id,queuedId);assert.equal(waiting.status,'queued');assert.equal(waiting.attempt,0);
+   const work=(await runner.request('/api/automation/claim',scope)).job;assert.equal(work.id,queuedId);assert.equal(work.kind,'work');assert.equal(work.mode,'change');assert.equal(work.projectId,project.id);
+   assert.equal((await snapshot()).data.projects.find(p=>p.id===project.id).automation.turns.at(-1).runnerVersion,VERSION);
    await executeProjectWork(runner,work,options);
    current=(await snapshot()).data.projects.find(p=>p.id===project.id);const result=current.automation.turns.at(-1).result;assert.equal(result?.outcome,'merged',JSON.stringify(current.automation.turns.at(-1)));assert(result.checks.length>0&&result.checks.every(c=>c.status==='passed'),JSON.stringify(result.checks));assert.equal(result.preview?.state,'ready',JSON.stringify(result));assert.equal(result.preview.dataPersistence,'project');containers.push('jarvis-preview-'+createHash('sha256').update(`personal:${project.id}:${work.repository}:${result.preview.sha}:none`).digest('hex').slice(0,24));
    await expect(agent).toContainText('합성 개발 응답 '+turn,{timeout:40000});await page.reload();

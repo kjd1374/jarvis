@@ -6,7 +6,7 @@ import { createWriteStream } from "node:fs";
 import { readFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createAppClient } from "../public/jarvis-runner.mjs";
+import { createAppClient, VERSION } from "../public/jarvis-runner.mjs";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
@@ -908,12 +908,17 @@ try {
   workSnapshot.body.data.services.push({ ...autoService, id: workServiceId, projectId, monitoring: { ...autoService.monitoring, job: null } });
   workSnapshot.body.data.tasks.push({ id: `work-${workId}`, sourceMessageId: workId, space: "company", projectId, title: "합성 버튼 수정", status: "todo", dueDate: "", createdAt: autoStamp });
   assert.equal((await api("/api/workspace", a.token, "PUT", { space: "company", data: workSnapshot.body.data, revision: workSnapshot.body.revision })).status, 200);
-  const workClaim = { space: "company", projectIds: [projectId], provider: "codex", workVersion: 1 };
+  const workClaim = { space: "company", projectIds: [projectId], provider: "codex", workVersion: 1, runnerVersion: VERSION };
   assert.equal((await api("/api/automation/claim", b.token, "POST", workClaim)).status, 403);
   const wrongSpaceWork = await api("/api/automation/claim", a.token, "POST", { ...workClaim, space: "personal" });
   assert.equal(wrongSpaceWork.status, 200); assert.equal(wrongSpaceWork.body.job, null);
   assert.equal((await api("/api/automation/claim", a.token, "POST", { ...workClaim, space: "personal", projectScope: "selected" })).status, 400);
   assert.equal((await api("/api/automation/claim", a.token, "POST", { ...workClaim, workVersion: undefined })).body.job, null);
+  for (const runnerVersion of [undefined, "2.9.4"]) {
+    assert.equal((await api("/api/automation/claim", a.token, "POST", { ...workClaim, runnerVersion })).body.job, null);
+    const waiting = (await api("/api/workspace?space=company", a.token)).body.data.projects.find(p => p.id === projectId).automation.turns[0];
+    assert.equal(waiting.status, "queued"); assert.equal(waiting.attempt, 0);
+  }
   const workClaims = await Promise.all([api("/api/automation/claim", a.token, "POST", workClaim), api("/api/automation/claim", a.secondToken, "POST", workClaim)]);
   assert(workClaims.every(c => c.status === 200)); assert.equal(workClaims.filter(c => c.body.job?.kind === "work").length, 1);
   const workWinner = workClaims[0].body.job ? a.token : a.secondToken, workLoser = workWinner === a.token ? a.secondToken : a.token;
@@ -983,7 +988,7 @@ try {
   const testSnapshot = await api("/api/workspace?space=company", a.token), remoteTestId = randomUUID();
   testSnapshot.body.data.projects.find(p => p.id === projectId).automation.turns.push({ id: remoteTestId, serviceId: workServiceId, repository: "example/synthetic", request: "합성 자동 검증", mode: "test", sourceTurnId: workId, publish: "pr", status: "queued", phase: "queued", attempt: 0, createdAt: autoStamp, updatedAt: autoStamp });
   assert.equal((await api("/api/workspace", a.token, "PUT", { space: "company", data: testSnapshot.body.data, revision: testSnapshot.body.revision })).status, 200);
-  assert.notEqual((await api("/api/automation/claim", a.token, "POST", { ...workClaim, previewVersion: 1 })).body.job?.mode, "test");
+  assert.notEqual((await api("/api/automation/claim", a.token, "POST", { ...workClaim, runnerVersion: undefined, previewVersion: 1 })).body.job?.mode, "test");
   const oldRunnerState = await api("/api/workspace?space=company", a.token);
   const oldMonitor = oldRunnerState.body.data.services.find(s => s.id === workServiceId).monitoring;
   assert.equal(oldMonitor.runnerConnection.remoteWork, false); assert.equal(oldMonitor.runnerConnection.version, undefined);

@@ -44,9 +44,9 @@ export async function POST(request: Request) {
         if (setup.job) return { data, result: { job: { ...setup.job, credentials: credentialsFor(data, ownerId, space) } } };
       }
       if (supportsWork) {
-        const work = claimProjectWork(data, { space, projectIds: projects, deviceId, previews: body.previewVersion === 1, remoteWork: body.remoteWorkVersion === 1, previewCli: body.previewCliVersion === 1, previewLocal: body.previewLocalVersion === 1, managedWork: body.provisionVersion === 1, development: body.developmentVersion === 1 }, stamp);
+        const work = claimProjectWork(data, { space, projectIds: projects, deviceId, runnerVersion: typeof body.runnerVersion === "string" ? body.runnerVersion : undefined, previews: body.previewVersion === 1, remoteWork: body.remoteWorkVersion === 1, previewCli: body.previewCliVersion === 1, previewLocal: body.previewLocalVersion === 1, managedWork: body.provisionVersion === 1, development: body.developmentVersion === 1 }, stamp);
         data = work.data;
-        if (work.job) return { data, result: { job: work.job } };
+        if (work.job || work.waitingForUpdate) return { data, result: { job: work.job } };
       }
       const claimed = claimInspection(data, { space, projectIds: projects, provider, deviceId }, stamp);
       if (!claimed) return { data: JSON.stringify(data) === JSON.stringify(original) ? original : data, result: { job: null } };

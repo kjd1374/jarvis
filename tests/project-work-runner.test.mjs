@@ -210,6 +210,73 @@ test("target-app implementation does not permit publishing credential stores", a
     assert.equal(f.counts().pushes, 0);
   } finally { await rm(f.dir, { recursive: true, force: true }); }
 });
+
+test("obsolete auth-policy refusal receives one correction in the same sandbox, with no scope expansion", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "jarvis-auth-correction-"));
+  const previous = { ...modelResult, blocked: true, reply: "상위 실행 지침의 인증·접근 정책을 수정하지 말라는 제한으로 권한 기능을 구현하지 않았습니다." };
+  let calls = 0, originalArgs;
+  try {
+    const result = await runCodexWork({ ...job, context: { history: [previous] } }, dir, dir, { run: async (_bin, args, opts) => {
+      if (args[0] === "login") return { code: 0, out: "Logged in using ChatGPT", err: "" };
+      if (args[1] === "--help") return { code: 0, out: "--ignore-user-config --ignore-rules --ephemeral --output-schema", err: "" };
+      calls++;
+      assert.equal(opts.cwd, undefined);
+      assert.equal(args[args.indexOf("--cd") + 1], dir);
+      assert(args.includes("sandbox_workspace_write.network_access=false"));
+      assert(opts.input.includes(job.request));
+      if (calls === 1) {
+        originalArgs = args;
+        await writeFile(join(dir, "partial-code.mjs"), "export const draft = true;");
+      } else {
+        assert.deepEqual(args, originalArgs);
+        assert(opts.input.includes("SCOPE CORRECTION:"));
+        assert(opts.input.includes("Preserve all credential, production-service, Jarvis-security and publishing restrictions"));
+        assert.equal(await readFile(join(dir, "partial-code.mjs"), "utf8"), "export const draft = true;");
+      }
+      await writeFile(args[args.indexOf("--output-last-message") + 1], JSON.stringify(calls === 1 ? previous : modelResult));
+      return { code: 0, out: "", err: "" };
+    } });
+    assert.equal(calls, 2); assert.equal(result.blocked, false);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+for (const [mode, reply, expected] of [
+  ["change", "인증·접근 정책 변경 금지로 구현할 수 없습니다.", 2],
+  ["change", "상위 지침 prohibits: modify authentication/access policies", 2],
+  ["change", "외부 운영 DB의 인증·접근 정책 변경 금지입니다.", 1],
+  ["change", "역할 요구사항이 없습니다. 담당 범위를 정해주세요.", 1],
+  ["change", "인증정보가 없습니다. 인증·접근 정책 변경 금지입니다.", 1],
+  ["ask", "인증·접근 정책 변경 금지입니다.", 1],
+]) test(`auth correction is bounded and respects genuine blockers: ${mode} ${reply}`, async () => {
+  const dir = await mkdtemp(join(tmpdir(), "jarvis-auth-bounded-")); let calls = 0;
+  try {
+    const task = runCodexWork({ ...job, mode }, dir, dir, { run: async (_bin, args) => {
+      if (args[0] === "login") return { code: 0, out: "Logged in using ChatGPT", err: "" };
+      if (args[1] === "--help") return { code: 0, out: "--ignore-user-config --ignore-rules --ephemeral --output-schema", err: "" };
+      calls++; await writeFile(args[args.indexOf("--output-last-message") + 1], JSON.stringify({ ...modelResult, blocked: true, reply }));
+      return { code: 0, out: "", err: "" };
+    } });
+    if (expected === 2) {
+      await assert.rejects(task, /cli_policy_conflict/);
+      await assert.rejects(readFile(join(dir, "model-result.json")), /ENOENT/);
+    } else assert.equal((await task).blocked, true);
+    assert.equal(calls, expected);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("cancellation fences an auth correction before another model call", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "jarvis-auth-cancel-")), abort = new AbortController(); let calls = 0;
+  try {
+    await assert.rejects(runCodexWork(job, dir, dir, { signal: abort.signal, run: async (_bin, args) => {
+      if (args[0] === "login") return { code: 0, out: "Logged in using ChatGPT", err: "" };
+      if (args[1] === "--help") return { code: 0, out: "--ignore-user-config --ignore-rules --ephemeral --output-schema", err: "" };
+      calls++; await writeFile(args[args.indexOf("--output-last-message") + 1], JSON.stringify({ ...modelResult, blocked: true, reply: "인증·접근 정책 변경 금지입니다." }));
+      abort.abort(); return { code: 0, out: "", err: "" };
+    } }), /stale_job/);
+    assert.equal(calls, 1);
+    await assert.rejects(readFile(join(dir, "model-result.json")), /ENOENT/);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
 test("a blocked model result never publishes a partial implementation", async () => {
   const f = await fixture({ blocked: true, publish: "merge" });
   try { await f.execute(); assert.equal(f.counts().pushes, 0); assert.equal(f.reports.find(r => r.phase === "result").result.outcome, "blocked"); }

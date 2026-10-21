@@ -1,14 +1,52 @@
 import { test, expect } from "@playwright/test";
 import { automationWorkspace, automationStamp as stamp } from "../support/automation";
-import { enqueueWork, claimProjectWork, reportProjectWork, changeWorkState, parseWorkResult, parseWorkPreview } from "../../src/lib/automation/work";
+import { enqueueWork, claimProjectWork, reportProjectWork, changeWorkState, continueBlockedWork, parseWorkResult, parseWorkPreview } from "../../src/lib/automation/work";
 import { normalizeWorkspace } from "../../src/lib/workspace/validation";
 import { parseWebLinks, publicWebUrl } from "../../src/lib/automation/web-links";
 import { projectQuickLinks } from "../../src/lib/workspace/project-connections";
 import { observeWorkRunner, queuedWorkMessage, runnerProjectIds, refreshAutomaticRunner } from "../../src/lib/automation/runner-status";
-const scope = { space: "company" as const, projectIds: ["auto-project"], deviceId: "device-a" };
+const scope = { space: "company" as const, projectIds: ["auto-project"], deviceId: "device-a", runnerVersion: "2.9.5" };
 const uuid = "11111111-1111-4111-8111-111111111111";
 const result = { reply: "실제 변경과 검증을 정리했습니다.", summary: "화면 개선", currentStatus: "PR 검토", nextAction: "추가 회귀 검증", changes: ["src/page.tsx"], checks: [{ name: "CI", status: "passed", detail: "합성 검사" }], followUps: [{ title: "추가 회귀 검증", reason: "화면 범위를 넓혀 확인", kind: "todo" }], outcome: "pr_open", branch: `jarvis/work-${uuid}`, baseSha: "a".repeat(40), headSha: "b".repeat(40), prUrl: "https://github.com/example/synthetic/pull/10", deployment: { state: "not_configured", url: null, sha: null } };
 function queued() { return enqueueWork(automationWorkspace(), "company", "auto-project", "auto-service", "모바일 버튼 수정", "change", "pr", stamp, uuid); }
+test("수정 요청은 실제 claim의 실행기 버전을 검사하고 과거 실행기로는 시도하지 않는다", () => {
+  const data = observeWorkRunner(queued(), scope, { runnerVersion: "2.9.5", remoteWorkVersion: 1 }, stamp);
+  for (const runnerVersion of [undefined, "2.9.4", "2.9.3", "2.8.99", "2.9.5-beta", "invalid"]) {
+    const skipped = claimProjectWork(data, { ...scope, runnerVersion, remoteWork: true }, stamp);
+    expect(skipped.job).toBeNull();
+    expect(skipped.data).toEqual(data);
+    expect(skipped.data.projects[0].automation!.turns[0]).toMatchObject({ status: "queued", attempt: 0 });
+  }
+  const old = observeWorkRunner(data, scope, { runnerVersion: "2.9.4", remoteWorkVersion: 1 }, stamp);
+  expect(queuedWorkMessage(old.projects[0].automation!.turns[0], old.services[0].monitoring, Date.parse(stamp))).toContain("2.9.5 적용 대기");
+  for (const runnerVersion of ["2.9.5", "2.9.10", "2.10.0"]) {
+    const claimed = claimProjectWork(old, { ...scope, runnerVersion, remoteWork: true }, stamp);
+    expect(claimed.job!.id).toBe(uuid);
+    expect(claimed.job!.context.executionContext.jarvisRunner.version).toBe(runnerVersion);
+    expect(normalizeWorkspace(claimed.data).projects[0].automation!.turns[0]).toMatchObject({ runnerVersion, status: "running", attempt: 1 });
+  }
+});
+test("갱신 대기 중인 수정 요청 뒤의 서버 종료는 기존 실행기가 계속 처리한다", () => {
+  const data = enqueueWork(queued(), "company", "auto-project", "auto-service", "서버 종료", "preview", "pr", stamp, "22222222-2222-4222-8222-222222222222", undefined, undefined, false, { runtimeAction: "stop" });
+  const claimed = claimProjectWork(data, { ...scope, runnerVersion: "2.9.4", development: true, previews: true, remoteWork: true }, stamp);
+  expect(claimed.job!.runtimeAction).toBe("stop");
+  expect(claimed.data.projects[0].automation!.turns[0]).toMatchObject({ id: uuid, status: "queued", attempt: 0 });
+});
+test("미완료 요청 이어가기는 사용자 동작으로 원래 요청을 복제하고 과거 결과와 실행 버전을 보존한다", () => {
+  const claim = claimProjectWork(queued(), scope, stamp), job = claim.job!;
+  const completed = reportProjectWork(claim.data, "company", { projectId: "auto-project", jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: { ...result, outcome: "blocked", changes: [], branch: null, headSha: null, prUrl: null } }, scope.deviceId, stamp);
+  const original = structuredClone(completed.projects[0].automation!.turns[0]);
+  const requestId = "22222222-2222-4222-8222-222222222222";
+  const next = continueBlockedWork(completed, "company", "auto-project", uuid, stamp, requestId);
+  expect(next.projects[0].automation!.turns[0]).toEqual(original);
+  expect(original.runnerVersion).toBe("2.9.5");
+  expect(normalizeWorkspace(next).projects[0].automation!.turns[1]).toMatchObject({ id: requestId, request: original.request, mode: "change", publish: original.publish, status: "queued", attempt: 0 });
+  expect(continueBlockedWork(next, "company", "auto-project", uuid, stamp, requestId)).toEqual(next);
+  expect(claimProjectWork(next, { ...scope, runnerVersion: "2.9.4" }, stamp).job).toBeNull();
+  expect(claimProjectWork(next, scope, stamp).job!.id).toBe(requestId);
+  expect(() => continueBlockedWork(completed, "personal", "auto-project", uuid, stamp)).toThrow();
+  expect(() => continueBlockedWork(queued(), "company", "auto-project", uuid, stamp)).toThrow();
+});
 test("자동 연결은 현재 영역의 새 프로젝트와 20개 초과 목록을 찾고 삭제된 예전 설정을 무시한다", () => {
   const data = automationWorkspace();
   for (let n = 0; n < 25; n++) data.projects.push({ ...data.projects[0], id: `new-${n}` });

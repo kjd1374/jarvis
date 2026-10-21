@@ -90,7 +90,7 @@ test("lost save acknowledgement adopts the exact submitted request already claim
   const { enqueueWork, claimProjectWork } = await import("../../src/lib/automation/work");
   const base = automationWorkspace();
   const local = enqueueWork(base, "company", "auto-project", "auto-service", "화면 준비", "preview", "pr", stamp);
-  const remote = claimProjectWork(local, { space: "company", projectIds: ["auto-project"], deviceId: "runner", previews: true }, stamp).data;
+  const remote = claimProjectWork(local, { space: "company", projectIds: ["auto-project"], deviceId: "runner", runnerVersion: "2.9.5", previews: true }, stamp).data;
   const result = mergeCloudWorkspace(base, local, remote);
   expect(result.conflicts).toEqual([]);
   expect(result.data.projects[0].automation?.turns).toEqual(remote.projects[0].automation?.turns);
@@ -101,7 +101,7 @@ test("acknowledgement recovery also preserves the claimed change task without re
   const { enqueueWork, claimProjectWork } = await import("../../src/lib/automation/work");
   const base = automationWorkspace();
   const local = enqueueWork(base, "company", "auto-project", "auto-service", "수정 요청", "change", "pr", stamp);
-  const remote = claimProjectWork(local, { space: "company", projectIds: ["auto-project"], deviceId: "runner", remoteWork: true }, stamp).data;
+  const remote = claimProjectWork(local, { space: "company", projectIds: ["auto-project"], deviceId: "runner", runnerVersion: "2.9.5", remoteWork: true }, stamp).data;
   const merged = mergeCloudWorkspace(base, local, remote);
   expect(merged.conflicts).toEqual([]);
   expect(merged.data.tasks).toEqual(remote.tasks);
