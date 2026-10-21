@@ -406,6 +406,9 @@ test("충돌 화면에서 최신 기록을 다시 비교해도 입력을 버리�
   const review = page.getByRole("region", { name: "서버 변경 충돌 검토", exact: true });
   await review.getByRole("button", { name: "최신 기록과 다시 비교" }).click();
   await expect(review).toBeVisible();
+  // Finish the first async recheck before the fixture changes again. A click
+  // only waits for dispatch; changing the server early can resolve that recheck.
+  await expect(review.getByRole("button", { name: "최신 기록과 다시 비교" })).toBeEnabled();
   expect(remote.company.data.projects[0].description).toBe("다른 기기 입력");
   remote.company.data.projects[0].description = "서버 초기 내용"; remote.company.revision++;
   await review.getByRole("button", { name: "최신 기록과 다시 비교" }).click();
