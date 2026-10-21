@@ -14,7 +14,7 @@ const same = (a: unknown, b: unknown) =>
 function acknowledgedWork(local: unknown, remote: unknown) {
   if (!object(local) || !object(remote) || local.status !== "queued" || local.phase !== "queued" ||
     local.attempt !== 0 || local.updatedAt !== local.createdAt ||
-    ["executionDevice", "leaseOwner", "leaseToken", "leaseUntil", "error", "result"].some(key => local[key] !== undefined)) return false;
+    ["runnerVersion", "executionDevice", "leaseOwner", "leaseToken", "leaseUntil", "error", "result"].some(key => local[key] !== undefined)) return false;
   const identity = ["id", "serviceId", "repository", "request", "mode", "publish", "sourceTurnId", "followLatest", "previewAI", "createdAt"];
   return identity.every(key => same(local[key], remote[key])) &&
     Number.isInteger(remote.attempt) && (remote.attempt as number) >= 0;

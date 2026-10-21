@@ -1,6 +1,7 @@
 import { id, type Project, type Space, type WorkspaceData } from "../workspace/types";
 import { repositoryFor } from "./state";
 import { publicWebUrl } from "./web-links";
+import { projectWorkRunnerReady, workRunnerVersion } from "./work-runtime";
 import type { ProjectTurn, WorkResult, WorkPreview, WorkImage, RuntimeAction } from "./work-types";
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const text = (v: unknown, n: number): v is string => typeof v === "string" && v.length <= n;
@@ -96,6 +97,7 @@ export function validateProjectAutomation(project: Project, data: WorkspaceData)
       turn.previewAI !== undefined && (turn.mode !== "preview" || !["codex", "ollama"].includes(turn.previewAI)) ||
       !["queued", "running", "completed", "failed", "interrupted", "cancelled"].includes(turn.status) || !phaseValues.includes(turn.phase) ||
       !date(turn.createdAt) || !date(turn.updatedAt) || !Number.isInteger(turn.attempt) || turn.attempt < 0 || turn.attempt > 100 ||
+      turn.runnerVersion !== undefined && !workRunnerVersion(turn.runnerVersion) ||
       turn.executionDevice !== undefined && !text(turn.executionDevice, 200) || turn.leaseOwner !== undefined && !text(turn.leaseOwner, 200) || turn.leaseToken !== undefined && !text(turn.leaseToken, 100) ||
       turn.leaseUntil !== undefined && !date(turn.leaseUntil) || turn.error !== undefined && !text(turn.error, 100)) invalid();
     // Deleted connections may leave historical turns, but never a cross-scope connection.
@@ -162,8 +164,14 @@ export function changeWorkState(data: WorkspaceData, space: Space, projectId: st
   const next = updateTurn(data, project, { ...turn, status: action === "cancel" ? "cancelled" : "queued", phase: "queued", updatedAt: stamp, error: undefined, leaseOwner: undefined, leaseToken: undefined, leaseUntil: undefined });
   return { ...next, tasks: next.tasks.map(t => t.id === `work-${turn.id}` ? { ...t, status: action === "cancel" ? "decision" as const : "todo" as const } : t) };
 }
-export function claimProjectWork(data: WorkspaceData, scope: { space: Space; projectIds: (string | null)[]; deviceId: string; previews?: boolean; remoteWork?: boolean; previewCli?: boolean; previewLocal?: boolean; managedWork?: boolean; development?: boolean }, stamp: string) {
+export function continueBlockedWork(data: WorkspaceData, space: Space, projectId: string, turnId: string, stamp: string, requestId = id()) {
+  const turn = data.projects.find(p => p.id === projectId && p.space === space)?.automation?.turns.find(t => t.id === turnId);
+  if (!turn || turn.mode !== "change" || turn.status !== "completed" || turn.result?.outcome !== "blocked") throw new Error("이어갈 미완료 수정 요청을 확인해주세요.");
+  return enqueueWork(data, space, projectId, turn.serviceId, turn.request, "change", turn.publish, stamp, requestId, turn.sourceTurnId, undefined, !!turn.followLatest, { images: turn.images });
+}
+export function claimProjectWork(data: WorkspaceData, scope: { space: Space; projectIds: (string | null)[]; deviceId: string; runnerVersion?: string; previews?: boolean; remoteWork?: boolean; previewCli?: boolean; previewLocal?: boolean; managedWork?: boolean; development?: boolean }, stamp: string) {
   let current = data;
+  let waitingForUpdate = false;
   for (const project of current.projects.filter(p => p.space === scope.space && scope.projectIds.includes(p.id))) {
     if (project.setup && (project.setup.status !== "ready" || !scope.managedWork || project.setup.executionDevice !== scope.deviceId)) continue;
     const turns = project.automation?.turns ?? [];
@@ -180,6 +188,9 @@ export function claimProjectWork(data: WorkspaceData, scope: { space: Space; pro
       if (turn.previewAI === "codex" && !scope.previewCli || turn.previewAI === "ollama" && !scope.previewLocal) continue;
       if ((turn.mode === "test" || turn.sourceTurnId || turn.followLatest) && !scope.remoteWork) continue;
       if (turn.executionDevice && turn.executionDevice !== scope.deviceId) continue;
+      // Old CLI developer instructions cannot be overridden by a web request.
+      // Keep the request queued rather than spending another model call on them.
+      if (turn.mode === "change" && !projectWorkRunnerReady(scope.runnerVersion)) { waitingForUpdate = true; continue; }
       const service = current.services.find(s => s.id === turn.serviceId && s.space === project.space && s.projectId === project.id);
       if (!service || repositoryFor(service) !== turn.repository) {
         current = updateTurn(current, project, { ...turn, status: "failed", error: "repository_changed", updatedAt: stamp }); continue;
@@ -192,15 +203,16 @@ export function claimProjectWork(data: WorkspaceData, scope: { space: Space; pro
       // Also serialize duplicate registrations of the same repository across projects.
       if (current.projects.some(p => p.automation?.turns.some(t => t.repository === turn.repository && ["running", "interrupted"].includes(t.status)))) continue;
       const claimed: ProjectTurn = { ...turn, status: "running", phase: "preparing", updatedAt: stamp, attempt: turn.attempt + 1,
+        runnerVersion: workRunnerVersion(scope.runnerVersion),
         executionDevice: scope.deviceId, leaseOwner: scope.deviceId, leaseToken: id(), leaseUntil: new Date(Date.parse(stamp) + 10 * 60_000).toISOString() };
       current = updateTurn(current, project, claimed);
       current = { ...current, tasks: current.tasks.map(t => t.id === `work-${turn.id}` ? { ...t, status: "in_progress" as const } : t) };
       const history = turns.filter(t => t.status === "completed" && t.serviceId === turn.serviceId && t.repository === turn.repository).slice(-6).map(t => ({ request: t.request, reply: t.result?.reply, outcome: t.result?.outcome, baseSha: t.result?.baseSha, headSha: t.result?.headSha, prUrl: t.result?.prUrl, checks: t.result?.checks, preview: t.result?.preview }));
-      return { data: current, job: { kind: "work", id: turn.id, space: project.space, projectId: project.id, serviceId: service.id, repository: turn.repository,
+      return { data: current, waitingForUpdate, job: { kind: "work", id: turn.id, space: project.space, projectId: project.id, serviceId: service.id, repository: turn.repository,
         provider: "codex", ...(turn.images?.length ? { images: turn.images } : {}), ...(turn.runtimeAction ? { runtimeAction: turn.runtimeAction } : {}), leaseToken: claimed.leaseToken, attempt: claimed.attempt, request: turn.request, mode: turn.mode, publish: turn.publish, ...(turn.previewAI ? { previewAI: turn.previewAI } : {}),
         ...(source ? { source: { prUrl: source.prUrl!, headSha: source.headSha!, branch: source.branch!, baseSha: source.baseSha! } } : {}),
         context: { executionContext: {
-          jarvisRunner: { connectedAt: stamp, provider: "codex", projectId: project.id, space: project.space },
+          jarvisRunner: { connectedAt: stamp, version: claimed.runnerVersion, provider: "codex", projectId: project.id, space: project.space },
           targetRepository: turn.repository,
           webWorkflow: "사용자는 다른 PC의 Jarvis 브라우저에서 개발·테스트·화면 확인을 완료한다. 맥미니는 실행 서버다. 사용자에게 node/npm 명령, JSON 설정 실행, localhost 접속을 일반 테스트 절차로 요구하지 않는다. 자동 테스트는 Jarvis의 테스트 실행, 화면은 화면 준비와 이 PC에서 화면 열기로 안내한다. 테스트 실행 결과와 실제 AI·외부 연동 성공은 별도다. 아직 준비하지 않은 링크나 실행 결과를 만들지 않는다. 과거 답변의 구현 주장은 실제 커밋·PR·검사 상태와 구분한다. PR 작성은 병합 완료가 아니다.",
           connectionScope: "이 요청은 승인된 Jarvis 실행기가 가져왔다. 실행기 연결과 대상 저장소 앱 내부 Codex/Claude 연동은 별개다. 앱에 어댑터가 없거나 격리 작업 폴더에서 CLI/네트워크를 사용할 수 없는 것은 호스트 실행기 미연결의 근거가 아니다. 호스트의 다른 공급자 로그인·연결 상태는 미확인이다.",
@@ -210,7 +222,7 @@ export function claimProjectWork(data: WorkspaceData, scope: { space: Space; pro
           tasks: current.tasks.filter(t => t.projectId === project.id && t.space === project.space).slice(-50).map(t => ({ title: t.title, status: t.status })) } } };
     }
   }
-  return { data: current, job: null };
+  return { data: current, job: null, waitingForUpdate };
 }
 export function requireWorkLease(data: WorkspaceData, space: Space, body: Record<string, unknown>, deviceId: string, stamp: string) {
   const project = data.projects.find(p => p.id === body.projectId && p.space === space);

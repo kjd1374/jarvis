@@ -4,7 +4,7 @@ import { newProjectSetup, queueSetupRequest, claimSetup, reportSetup, changeSetu
 import { claimProjectWork } from "../../src/lib/automation/work";
 import { normalizeWorkspace } from "../../src/lib/workspace/validation";
 import { createBackup, parseBackup } from "../../src/lib/workspace/backup";
-const stamp = "2026-10-19T10:00:00Z", scope = { space: "personal" as const, projectIds: ["project"], deviceId: "runner" };
+const stamp = "2026-10-19T10:00:00Z", scope = { space: "personal" as const, projectIds: ["project"], deviceId: "runner", runnerVersion: "2.9.5" };
 const result = { repository: "example/new-project", target: "mac", database: "sqlite", reason: "맥미니", checks: [{ name: "저장소", status: "passed", detail: "초기 코드 확인" }] };
 function initial(): WorkspaceData { return { ...emptyWorkspace(), projects: [{ id: "project", space: "personal", name: "새 앱", description: "저장", createdAt: stamp, setup: newProjectSetup(stamp) }] }; }
 test("준비 중 요청을 보존하고 같은 임대 결과를 한 번만 적용해 대화 개발로 넘긴다", () => {

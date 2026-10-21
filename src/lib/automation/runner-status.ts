@@ -1,6 +1,7 @@
 import type { GitHubMonitoring } from "./types";
 import type { ProjectTurn } from "./work-types";
 import type { Space, WorkspaceData } from "../workspace/types";
+import { MIN_PROJECT_WORK_RUNNER, projectWorkRunnerReady } from "./work-runtime";
 
 export function runnerProjectIds(data: WorkspaceData, space: Space, requested: (string | null)[], mode: "space" | "selected") {
   if (mode === "space") return [...new Set([null, ...data.projects.filter(p => p.space === space).map(p => p.id)])];
@@ -41,6 +42,7 @@ export function queuedWorkMessage(turn: Pick<ProjectTurn, "mode" | "sourceTurnId
   if (!runnerOnline(monitoring, clock)) return "실행기의 최근 응답이 없습니다. 연결되면 저장된 요청을 처리합니다.";
   const connection = monitoring?.runnerConnection;
   if (!connection) return "실행기 접속은 확인됐지만 지원 기능은 아직 확인되지 않았습니다. 다음 응답을 기다리고 있습니다.";
+  if (turn.mode === "change" && !projectWorkRunnerReady(connection.version)) return `개발 지침이 수정된 실행기 ${MIN_PROJECT_WORK_RUNNER} 적용 대기 중입니다. 현재 버전 ${connection.version ?? "미확인"}에는 수정 요청을 넘기지 않으며 요청은 보관됩니다. 사용 중인 미리보기의 서버 종료 후 유휴 자동 갱신을 기다려주세요(최대 30분 주기).`;
   if ((native && turn.mode !== "ask" || turn.images?.length || turn.runtimeAction) && !connection.development) return "로컬 개발·사진 전달·서버 관리를 지원하는 실행기 2.9.0 적용 대기 중입니다. 요청과 사진은 보관됩니다.";
   if ((turn.mode === "test" || turn.sourceTurnId) && !connection.remoteWork)
     return "최근 응답한 실행기는 자동 테스트·수정본 선택을 지원하지 않습니다. 맥미니 실행기를 2.4.1 이상으로 업데이트해야 이 요청을 시작할 수 있습니다.";

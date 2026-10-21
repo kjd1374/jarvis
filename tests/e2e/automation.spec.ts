@@ -3,6 +3,29 @@ import { analyzed, collected, analysisRaw, automationWorkspace } from "../suppor
 import { applyAnalysis } from "../../src/lib/automation/state";
 import { parseAnalysis } from "../../src/lib/automation/facts";
 test.setTimeout(60_000);
+test("미완료 요청은 원래 내용을 보존해 이어가고 새 실행기 적용 전에는 대기 이유를 표시한다", async ({ page }) => {
+  const { enqueueWork, claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
+  const { observeWorkRunner } = await import("../../src/lib/automation/runner-status");
+  const stamp = new Date().toISOString(), scope = { space: "company" as const, projectIds: ["auto-project"], deviceId: "synthetic-runner", runnerVersion: "2.9.5" };
+  const queued = enqueueWork(automationWorkspace(stamp), "company", "auto-project", "auto-service", "합성 앱의 권한 기능을 이어서 구현해주세요.", "change", "pr", stamp);
+  const claimed = claimProjectWork(queued, scope, stamp), job = claimed.job!;
+  const blocked = reportProjectWork(claimed.data, "company", { projectId: "auto-project", jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: { reply: "합성 과거 응답입니다.", summary: "미완료", currentStatus: "확인 필요", nextAction: "구현", changes: [], checks: [], followUps: [], outcome: "blocked", branch: null, baseSha: "a".repeat(40), headSha: null, prUrl: null, deployment: { state: "not_configured", url: null, sha: null } } }, scope.deviceId, stamp);
+  const old = observeWorkRunner(blocked, scope, { runnerVersion: "2.9.4", remoteWorkVersion: 1, previewVersion: 1 }, stamp);
+  await seed(page, old); await page.waitForLoadState("networkidle"); await page.goto("/projects/auto-project"); await ready(page);
+  const agent = page.getByRole("region", { name: "프로젝트 AI 작업실", exact: true });
+  await expect(agent.getByLabel("이 요청의 실행기")).toHaveText("이 요청의 실행 버전 2.9.5");
+  await expect(agent).toContainText("실행기 최근 응답"); await expect(agent).toContainText("버전 2.9.4");
+  await expect(agent).toContainText("이 요청의 코드는 GitHub에 반영되지 않았습니다");
+  await agent.getByRole("button", { name: "미완료 요청 이어서 구현", exact: true }).click();
+  await expect(agent).toContainText("2.9.5 적용 대기 중");
+  const saved = (await state(page))!, turns = saved.projects[0].automation!.turns;
+  expect(turns).toHaveLength(2); expect(turns[0]).toEqual(blocked.projects[0].automation!.turns[0]);
+  expect(turns[1]).toMatchObject({ request: job.request, status: "queued", attempt: 0 });
+  expect(claimProjectWork(saved, { ...scope, runnerVersion: "2.9.4" }, stamp).job).toBeNull();
+  expect(claimProjectWork(saved, scope, stamp).job!.id).toBe(turns[1].id);
+  await page.waitForLoadState("networkidle"); await page.reload(); await ready(page); await expect(agent).toContainText("2.9.5 적용 대기 중");
+  expect((await state(page))!.projects[0].automation!.turns).toHaveLength(2);
+});
 test("저장소 없는 프로젝트는 CLI 대기 대신 등록할 항목을 안내하고 같은 프로젝트에 연결한다", async ({ page }) => {
   const data = automationWorkspace(new Date().toISOString()); data.services = [];
   await seed(page, data); await page.goto("/projects/auto-project"); await ready(page);
@@ -102,9 +125,9 @@ test("접속 중인 구버전의 대기 이유와 업데이트 후 실제 버전
   await page.setViewportSize({ width: 320, height: 740 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: info.outputPath("runner-update-needed.png"), fullPage: true });
-  const updated = observeWorkRunner(old, scope, { runnerVersion: "2.4.1", remoteWorkVersion: 1, previewVersion: 1 }, stamp);
+  const updated = observeWorkRunner(old, scope, { runnerVersion: "2.9.5", remoteWorkVersion: 1, previewVersion: 1 }, stamp);
   await seed(page, updated); await page.goto("/projects/auto-project"); await ready(page);
-  await expect(agent).toContainText("버전 2.4.1");
+  await expect(agent).toContainText("버전 2.9.5");
   await expect(agent).not.toContainText("업데이트 필요");
   await expect(agent).toContainText("요청이 실행 대기 중입니다");
   expect((await state(page))!.projects[0].automation!.turns[0]).toMatchObject({ status: "queued", attempt: 0 });

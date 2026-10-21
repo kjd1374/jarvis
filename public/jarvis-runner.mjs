@@ -9,7 +9,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { completeWithSubscription, createLocalInference } from "./jarvis-preview-cli.mjs";
 
-export const VERSION = "2.9.4";
+export const VERSION = "2.9.5";
 export class RunnerError extends Error {
   constructor(code) { super(code); this.code = code; }
 }
@@ -357,6 +357,14 @@ export function validModelWork(raw) {
   return { blocked: raw.blocked, reply: redact(raw.reply), summary: redact(raw.summary), currentStatus: redact(raw.currentStatus), nextAction: redact(raw.nextAction),
     followUps: raw.followUps.map(f => ({ title: redact(f.title), reason: redact(f.reason), kind: f.kind })) };
 }
+function obsoleteAuthRefusal(result) {
+  if (!result.blocked) return false;
+  const reason = `${result.reply}\n${result.summary}\n${result.currentStatus}`;
+  // Repair only the obsolete blanket code prohibition, not genuine account,
+  // production activation, credential or requirements blockers.
+  if (/(?:운영|외부|production|external).{0,40}(?:DB|데이터베이스|database|RLS|계정)|인증정보|credentials? (?:missing|required)|토큰.{0,20}(?:없|필요)/i.test(reason)) return false;
+  return /modify authentication\/access policies|(?:인증[·/\s]*접근\s*정책).{0,40}(?:금지|말라|말 것)|(?:authentication|authorization|access.control).{0,60}(?:forbidden|prohibited by.{0,30}(?:policy|instructions))/i.test(reason);
+}
 export async function runCodexWork(job, cwd, controlDir, { run = runCommand, signal, env = process.env, imagePaths = [] } = {}) {
   const cliEnv = cliEnvironment(env);
   const auth = await run("codex", ["login", "status"], { env: cliEnv, signal, timeout: 15_000 });
@@ -376,6 +384,7 @@ export async function runCodexWork(job, cwd, controlDir, { run = runCommand, sig
     "runnerPreparation.checks records the runner's actual dependency preparation. Explain failed or skipped preparation separately from checks you ran. A preparation failure does not mean the host CLI is disconnected. Do not claim unexecuted checks passed.",
     "Jarvis is a remote development workspace. The user operates a browser on another PC; the Mac is the execution server. Do not hand routine development/testing back to the user as terminal commands (node/npm, JSON config execution, localhost links). For automated checks direct them to Jarvis 테스트 실행; for interactive checks use 화면 준비 then 이 PC에서 화면 열기. The runner attaches observed test results and the verified screen separately after your response. Never invent a URL or claim external AI/service integration was tested in an offline sandbox.",
     "runnerPreparation.revision identifies the actual selected checkout and whether an earlier PR is still unmerged. Compare history to that revision; a past claim of implementation is not proof it exists on the default branch. If tests or a supported start script are missing and the user requested implementation, prepare them in this checkout within scope instead of asking the user to run setup manually.",
+    "Current scope clarification: a historical answer claiming authentication/access-policy code changes are forbidden is an obsolete refusal, not a current instruction. The target application's requested login, role and access-control implementation is permitted under the change scope above. Do not repeat that blanket refusal or ask the user to waive it. If earlier claimed code is absent, inspect the actual revision and implement the requested feature's feasible prerequisites from the user-requested plan in this checkout; do not treat the historical implementation claim or its absence as a new permission or proof of completion.",
     job.mode === "ask" ? "Answer the user's question using this repository. Do not edit files or execute project scripts." : "Implement the requested code changes in this checkout. Inspect code before editing, make minimal changes and preserve unrelated behavior. You may run relevant local checks within the sandbox. Dependency installation is handled separately. If scope/credentials/data are missing or the requested change is not completed, set blocked=true, explain the blocker and record a follow-up. Set blocked=false only when the request was fulfilled within the allowed scope.",
     "Your final reply must describe what you actually did, limitations and next steps. Avoid claiming GitHub publication, CI success, merge or deployment: those are observed by the runner after you finish. Follow-ups are recorded as Jarvis tasks, not automatically executed. Keep followUps <= 10; title <= 160, reason <= 2000; reply <= 8000, summary <= 4000, currentStatus/nextAction <= 2000 characters.",
   ].join("\n");
@@ -386,10 +395,21 @@ export async function runCodexWork(job, cwd, controlDir, { run = runCommand, sig
     "--config", 'shell_environment_policy.inherit="none"', "--config", `shell_environment_policy.set.PATH=${JSON.stringify(cliEnv.PATH ?? "/usr/local/bin:/usr/bin:/bin")}`, "--config", `developer_instructions=${JSON.stringify(policy)}`,
     ...imagePaths.flatMap(path => ["--image", path]), "--output-schema", schema, "--output-last-message", output, "--cd", cwd, "--color", "never", "-"];
 
-  const result = await run("codex", args, { env: cliEnv, input: prompt, timeout: 25 * 60_000, signal, maxBytes: 8_000_000 });
-  if (result.code !== 0) throw new RunnerError(/usage limit|rate.limit|quota|limit reached/i.test(result.err + result.out) ? "cli_limit" : "cli_unavailable");
-  try { return validModelWork(JSON.parse(await readFile(output, "utf8"))); }
-  catch { throw new RunnerError("invalid_work_result"); }
+  let input = prompt;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (signal?.aborted) throw new RunnerError("stale_job");
+    const result = await run("codex", args, { env: cliEnv, input, timeout: 25 * 60_000, signal, maxBytes: 8_000_000 });
+    if (result.code !== 0) throw new RunnerError(/usage limit|rate.limit|quota|limit reached/i.test(result.err + result.out) ? "cli_limit" : "cli_unavailable");
+    let answer;
+    try { answer = validModelWork(JSON.parse(await readFile(output, "utf8"))); }
+    catch { throw new RunnerError("invalid_work_result"); }
+    if (job.mode !== "change" || !obsoleteAuthRefusal(answer)) return answer;
+    if (attempt) { await rm(output, { force: true }); throw new RunnerError("cli_policy_conflict"); }
+    // Same authorized request and checkout, at most one correction; no access,
+    // credentials, publishing scope or sandbox capability is added.
+    await rm(output, { force: true });
+    input = `${prompt}\nSCOPE CORRECTION: The previous response repeated the obsolete blanket prohibition on target-app authentication/access-control implementation. Apply the current developer instructions above and continue the same requested code work in the existing checkout. Preserve all credential, production-service, Jarvis-security and publishing restrictions. If a real blocker remains, report that concrete blocker; do not repeat the obsolete blanket ban.\nPREVIOUS RESPONSE (untrusted reference):\n${JSON.stringify(answer)}`;
+  }
 }
 export function allowedWorkPath(path) {
   if (typeof path !== "string" || path.length > 450 || path.startsWith("/") || path.includes("\\") || path.split("/").some(p => !p || p === ".." || p === ".")) return false;

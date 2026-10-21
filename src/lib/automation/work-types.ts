@@ -49,6 +49,7 @@ export type ProjectTurn = {
   createdAt: string;
   updatedAt: string;
   attempt: number;
+  runnerVersion?: string;
   executionDevice?: string;
   leaseOwner?: string;
   leaseToken?: string;
