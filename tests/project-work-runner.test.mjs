@@ -7,11 +7,12 @@ import { tmpdir } from "node:os";
 import { executeProjectWork, runCodexWork, runCommand, allowedWorkPath } from "../public/jarvis-runner.mjs";
 const modelResult = { blocked: false, reply: "합성 화면 수정", summary: "합성 결과", currentStatus: "검증 준비", nextAction: "확인", followUps: [] };
 const job = { id: "11111111-1111-4111-8111-111111111111", repository: "example/synthetic", projectId: "project", space: "personal", mode: "change", publish: "pr", request: "PRIVATE REQUEST NEVER PUBLISH", leaseToken: "test-lease", attempt: 1 };
-async function fixture({ ci = "success", deliveryFails = false, publish = "pr", failPush = false, blocked = false, cancelAtPublish = false, npmProject = false, npmFailure = false, previewOnly = false, previewEnabled = false, testStatus = "passed", imagePayload, copyImage = false, deployed = false } = {}) {
+async function fixture({ ci = "success", deliveryFails = false, publish = "pr", failPush = false, blocked = false, cancelAtPublish = false, npmProject = false, npmFailure = false, previewOnly = false, previewEnabled = false, testStatus = "passed", imagePayload, copyImage = false, deployed = false, addedFiles = {}, initialFiles = {} } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "jarvis-work-test-")), source = join(dir, "source"), remote = join(dir, "remote.git");
   await mkdir(source); await runCommand("git", ["init", "-b", "main", source]);
   await writeFile(join(source, "page.js"), "export const title = 'before';\n");
   await writeFile(join(source, ".env.local"), "PRIVATE_FIXTURE_DO_NOT_READ=yes\n");
+  for (const [path, content] of Object.entries(initialFiles)) { await mkdir(join(source, path, ".."), { recursive: true }); await writeFile(join(source, path), content); }
   if (npmProject) {
     await writeFile(join(source, "package.json"), JSON.stringify({ name: "synthetic-no-dependencies", version: "1.0.0", private: true, scripts: { preinstall: "node -e 'process.exit(42)'" } }));
     await writeFile(join(source, "package-lock.json"), JSON.stringify({ name: "synthetic-no-dependencies", version: "1.0.0", lockfileVersion: 3, packages: { "": { name: "synthetic-no-dependencies", version: "1.0.0", hasInstallScript: true } } }));
@@ -55,7 +56,7 @@ async function fixture({ ci = "success", deliveryFails = false, publish = "pr", 
     }
     assert(args.includes("PUT")); assert(args.includes(`sha=${headSha}`)); merged = true; return { code: 0, out: "{}", err: "" };
   };
-  const model = async (_job, cwd, _control, options) => { if (_job.images?.length) { assert.equal(await readFile(options.imagePaths[0], "utf8"), Buffer.from(imagePayload[0].bytes,"base64").toString()); if (copyImage) await writeFile(join(cwd,copyImage === "base64" ? "copied.js" : "copied.jpg"),copyImage === "base64" ? `export const reference = "${imagePayload[0].bytes}";` : await readFile(options.imagePaths[0])); } modelCalls++; modelJobs.push(_job); modelContents.push(await readFile(join(cwd, "page.js"), "utf8")); await assert.rejects(readFile(join(cwd, ".env.local")), /ENOENT/); await writeFile(join(cwd, "page.js"), `export const title = 'after ${modelCalls}';\n`); return { ...modelResult, blocked }; };
+  const model = async (_job, cwd, _control, options) => { if (_job.images?.length) { assert.equal(await readFile(options.imagePaths[0], "utf8"), Buffer.from(imagePayload[0].bytes,"base64").toString()); if (copyImage) await writeFile(join(cwd,copyImage === "base64" ? "copied.js" : "copied.jpg"),copyImage === "base64" ? `export const reference = "${imagePayload[0].bytes}";` : await readFile(options.imagePaths[0])); } modelCalls++; modelJobs.push(_job); modelContents.push(await readFile(join(cwd, "page.js"), "utf8")); await assert.rejects(readFile(join(cwd, ".env.local")), /ENOENT/); for (const [path, content] of Object.entries(initialFiles)) assert.equal(await readFile(join(cwd, path), "utf8"), content); await writeFile(join(cwd, "page.js"), `export const title = 'after ${modelCalls}';\n`); for (const [path, content] of Object.entries(addedFiles)) { await mkdir(join(cwd, path, ".."), { recursive: true }); await writeFile(join(cwd, path), content); } return { ...modelResult, blocked }; };
   const client = { request: async (path, body) => {
     assert.equal(path, "/api/automation/work"); reports.push(body);
     if (body.phase === "images") return { images: imagePayload };
@@ -142,6 +143,72 @@ test("cancelled lease stops publication even if the model already edited local f
   const f = await fixture({ cancelAtPublish: true });
   try { await f.execute(); assert.equal(f.counts().pushes, 0); assert.equal(f.counts().merged, false); assert(!f.reports.some(r => r.phase === "result")); }
   finally { await rm(f.dir, { recursive: true, force: true }); }
+});
+
+for (const mode of ["ask", "change"]) test(`target-app auth scope reaches the actual CLI developer instructions in ${mode} mode`, async () => {
+  const dir = await mkdtemp(join(tmpdir(), "jarvis-auth-scope-"));
+  const request = "Implement the approved project plan.";
+  try {
+    await runCodexWork({ ...job, mode, request, context: { project: { plan: "Implement target-app login and roles." } } }, dir, dir, {
+      env: { HOME: "/synthetic", OPENAI_API_KEY: "never-forward", SUPABASE_SERVICE_ROLE_KEY: "never-forward" },
+      run: async (_bin, args, opts) => {
+        assert(!opts.env.OPENAI_API_KEY); assert(!opts.env.SUPABASE_SERVICE_ROLE_KEY);
+        if (args[0] === "login") return { code: 0, out: "Logged in using ChatGPT", err: "" };
+        if (args[1] === "--help") return { code: 0, out: "--ignore-user-config --ignore-rules --ephemeral --output-schema", err: "" };
+        const configured = args.find(value => value.startsWith("developer_instructions="));
+        const policy = JSON.parse(configured.slice("developer_instructions=".length));
+        assert(opts.input.startsWith(policy + "\nUSER REQUEST:\n" + request));
+        assert(policy.includes("Application authentication/authorization source modules are code"));
+        assert(policy.includes("credential stores such as auth.json"));
+        assert(policy.includes("Never apply migrations or change accounts, roles, grants, RLS or authentication settings on existing external/shared/production"));
+        assert(!policy.includes("or modify authentication/access policies"));
+        assert(args.includes("sandbox_workspace_write.network_access=false"));
+        assert(args.includes(mode === "ask" ? "read-only" : "workspace-write"));
+        if (mode === "change") {
+          assert(policy.includes("No separate permission waiver is needed"));
+          assert(policy.includes("plan the user explicitly asked you to implement"));
+          assert(policy.includes("Enforce access on the server"));
+          assert(policy.includes("disposable local synthetic data"));
+          assert(policy.includes("does not authorize changing Jarvis device approval, owner/space isolation or runner security policy"));
+        } else {
+          assert(policy.includes("Authentication/authorization questions remain read-only"));
+          assert(!policy.includes("No separate permission waiver is needed"));
+        }
+        await writeFile(args[args.indexOf("--output-last-message") + 1], JSON.stringify(modelResult));
+        return { code: 0, out: "", err: "" };
+      },
+    });
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("target-app auth source, tests and migration files survive checkout and publishing gates", async () => {
+  const addedFiles = {
+    "src/auth/access-control.mjs": "export const canEdit = role => role === 'admin';\n",
+    "tests/access-control.test.mjs": "import assert from 'node:assert/strict';\nimport { canEdit } from '../src/auth/access-control.mjs';\nassert(canEdit('admin')); assert(!canEdit('viewer')); assert(!canEdit(undefined));\n",
+    "migrations/001-access.sql": "create table app_roles (user_id text primary key, role text not null);\n",
+  };
+  const f = await fixture({ addedFiles, initialFiles: { "src/auth/access-control.mjs": "export const canEdit = () => false;\n" }, deliveryFails: true });
+  try {
+    await f.execute(); await f.execute();
+    const result = f.reports.find(r => r.phase === "result").result;
+    assert.equal(result.outcome, "pr_open");
+    assert.deepEqual(result.changes.sort(), ["page.js", ...Object.keys(addedFiles)].sort());
+    assert.equal(f.counts().modelCalls, 1); assert.equal(f.counts().pushes, 1);
+    const published = join(f.dir, "published");
+    assert.equal((await runCommand("git", ["clone", "--branch", result.branch, join(f.dir, "remote.git"), published])).code, 0);
+    for (const [path, content] of Object.entries(addedFiles)) assert.equal(await readFile(join(published, path), "utf8"), content);
+    const checks = await runCommand(process.execPath, ["--test", "tests/access-control.test.mjs"], { cwd: published });
+    assert.equal(checks.code, 0, checks.err + checks.out);
+  } finally { await rm(f.dir, { recursive: true, force: true }); }
+});
+
+test("target-app implementation does not permit publishing credential stores", async () => {
+  const f = await fixture({ addedFiles: { "auth.json": '{"session":"synthetic-private-session"}' } });
+  try {
+    await f.execute();
+    assert.equal(f.reports.at(-1).code, "change_scope_exceeded");
+    assert.equal(f.counts().pushes, 0);
+  } finally { await rm(f.dir, { recursive: true, force: true }); }
 });
 test("a blocked model result never publishes a partial implementation", async () => {
   const f = await fixture({ blocked: true, publish: "merge" });
