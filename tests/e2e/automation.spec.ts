@@ -47,7 +47,7 @@ test("저장소 없는 프로젝트는 CLI 대기 대신 등록할 항목을 안
 test("앱의 구독 CLI 미지원은 접속 실패와 구분하고 같은 수정본을 AI 없이 다시 준비한다", async ({ page }) => {
   const { enqueueWork, claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
   const { observeWorkRunner } = await import("../../src/lib/automation/runner-status");
-  const stamp = new Date().toISOString(), scope = { space: "company" as const, projectIds: ["auto-project"], deviceId: "runner", remoteWork: true, previews: true, previewCli: true };
+  const stamp = new Date().toISOString(), scope = { space: "company" as const, projectIds: ["auto-project"], deviceId: "runner", runnerVersion: "2.9.5", remoteWork: true, previews: true, previewCli: true };
   const change = claimProjectWork(enqueueWork(automationWorkspace(stamp), "company", "auto-project", "auto-service", "합성 수정", "change", "pr", stamp), scope, stamp), source = change.job!;
   let data = reportProjectWork(change.data, "company", { projectId: source.projectId, jobId: source.id, leaseToken: source.leaseToken, phase: "result", result: {
     reply: "합성 수정본", summary: "수정", currentStatus: "", nextAction: "", changes: ["src/app.tsx"], checks: [], followUps: [], outcome: "pr_open", branch: `jarvis/work-${source.id}`, baseSha: "a".repeat(40), headSha: "b".repeat(40), prUrl: "https://github.com/example/synthetic/pull/1", deployment: { state: "not_configured", url: null, sha: null },
@@ -57,7 +57,7 @@ test("앱의 구독 CLI 미지원은 접속 실패와 구분하고 같은 수정
     reply: "기존의 일반 오류 안내", summary: "미리보기 실패", currentStatus: "", nextAction: "", changes: [], checks: [], followUps: [], outcome: "blocked", branch: null, baseSha: "b".repeat(40), headSha: null, prUrl: null, deployment: { state: "not_configured", url: null, sha: null },
     preview: { state: "failed", kind: "remote", url: null, sha: "b".repeat(40), checkedAt: stamp, expiresAt: null, message: "구독 CLI의 실제 응답을 확인하지 못했습니다. 로그인·사용 한도·응답 상태를 확인해주세요.", diagnostic: { stage: "ai", code: "preview_cli_config_unavailable" } },
   } }, "runner", stamp);
-  data = observeWorkRunner(data, scope, { runnerVersion: "2.5.0", remoteWorkVersion: 1, previewVersion: 1, previewCliVersion: 1 }, stamp);
+  data = observeWorkRunner(data, scope, { runnerVersion: "2.9.5", remoteWorkVersion: 1, previewVersion: 1, previewCliVersion: 1 }, stamp);
   await seed(page, data); await page.goto("/projects/auto-project"); await ready(page);
   const screen = page.getByRole("region", { name: "수정된 화면 확인", exact: true }), agent = page.getByRole("region", { name: "프로젝트 AI 작업실", exact: true });
   await expect(agent.getByRole("status").first()).toHaveText("Jarvis CLI 연결됨");
@@ -91,7 +91,7 @@ test("실패한 원격 준비에 구버전 주소 안내를 붙이지 않고 단
   const { enqueueWork, claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
   const stamp = new Date().toISOString();
   const initial = enqueueWork(automationWorkspace(stamp), "company", "auto-project", "auto-service", "합성 화면 준비", "preview", "pr", stamp);
-  const claim = claimProjectWork(initial, { space: "company", projectIds: ["auto-project"], deviceId: "runner", previews: true }, stamp), job = claim.job!;
+  const claim = claimProjectWork(initial, { space: "company", projectIds: ["auto-project"], deviceId: "runner", runnerVersion: "2.9.5", previews: true }, stamp), job = claim.job!;
   const preview = { state: "failed", kind: "mac", url: null, sha: "a".repeat(40), checkedAt: stamp, expiresAt: null, message: "원격 미리보기 연결에 실패했습니다. 맥미니 실행기 업데이트·Docker·인터넷 연결을 확인해주세요." };
   const data = reportProjectWork(claim.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: {
     reply: preview.message, summary: "화면 준비 필요", currentStatus: "", nextAction: "", changes: [], checks: [], followUps: [], outcome: "blocked", branch: null, baseSha: preview.sha, headSha: null, prUrl: null,
@@ -216,7 +216,8 @@ test("연결된 실행기의 서버 분석을 열린 화면에서 자동 갱신�
 test("프로젝트 상단의 자동 웹 주소·대화 요청·후속 업무는 영역을 유지하고 다시 열어도 보존된다", async ({ page }, info) => {
   const stamp = new Date().toISOString(), data = automationWorkspace(stamp);
   data.services[0].monitoring!.webLinks = [{ url: "https://synthetic-project.vercel.app/", kind: "homepage", environment: "홈페이지", sourceUrl: "https://github.com/example/synthetic", observedAt: stamp }];
-  data.services[0].monitoring!.runnerSeenAt = stamp; data.services[0].monitoring!.runnerVersion = "2.0.0";
+  data.services[0].monitoring!.runnerSeenAt = stamp;
+  data.services[0].monitoring!.runnerConnection = { seenAt: stamp, version: "2.9.5", remoteWork: true, previews: true }; data.services[0].monitoring!.runnerVersion = "2.0.0";
   await seed(page, data); await page.goto("/projects/auto-project"); await ready(page);
   const links = page.getByRole("region", { name: "프로젝트 바로가기", exact: true });
   await expect(links.getByRole("link", { name: "웹 화면 열기", exact: true })).toHaveAttribute("href", "https://synthetic-project.vercel.app/");
@@ -250,7 +251,7 @@ test("CLI 결과를 자동 분류하고 수정·검증·후속 업무를 별도 
   const { enqueueWork, claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
   const stamp = new Date().toISOString();
   let data = enqueueWork(automationWorkspace(stamp), "company", "auto-project", "auto-service", "합성 모바일 여백 수정", "change", "merge", stamp);
-  const claimed = claimProjectWork(data, { space: "company", projectIds: ["auto-project"], deviceId: "runner" }, stamp), job = claimed.job!;
+  const claimed = claimProjectWork(data, { space: "company", projectIds: ["auto-project"], deviceId: "runner", runnerVersion: "2.9.5" }, stamp), job = claimed.job!;
   data = reportProjectWork(claimed.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: {
     reply: "모바일 여백을 수정했습니다. CI와 배포 결과를 확인했습니다.", summary: "모바일 가독성 개선", currentStatus: "반영됨", nextAction: "태블릿 확인", changes: ["src/page.tsx"],
     checks: [{ name: "GitHub CI", status: "passed", detail: "합성 커밋 검사 성공" }], followUps: [{ title: "태블릿 화면 회귀 확인", reason: "추가 화면 크기", kind: "todo" }, { title: "문구 최종 확인", reason: "표현 결정", kind: "decision" }],
@@ -282,6 +283,7 @@ test("장문·많은 기록은 기본 화면을 늘리지 않고 전문·이력�
   const turns = Array.from({ length: 35 }, (_, n) => ({ id: randomUUID(), serviceId: "auto-service", repository: "example/synthetic", request: n === 34 ? "최신 합성 요청" : `이전 합성 요청 ${n}`, mode: "change" as const, publish: "pr" as const, status: "completed" as const, phase: "reporting" as const, attempt: 1, createdAt: stamp, updatedAt: stamp, result }));
   data.projects[0].automation = { turns: [turns.at(-1)!] };
   data.services[0].monitoring!.runnerSeenAt = stamp;
+  data.services[0].monitoring!.runnerConnection = { seenAt: stamp, version: "2.9.5", remoteWork: true, previews: true };
   for (let n = 0; n < 24; n++) data.tasks.push({ id: `compact-task-${n}`, projectId: "auto-project", space: "company", title: `합성 후속 업무 ${n}`, status: n % 2 ? "decision" : "todo", sourceSuggestionId: `compact-${n}`, dueDate: "", createdAt: stamp });
   data.sourceRecords[0].content = '파일 SHA: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n{"syntheticSource":true}\n' + "합성 코드 원문 ".repeat(400);
   await seed(page, data); await page.goto("/projects/auto-project"); await ready(page);
@@ -357,7 +359,7 @@ test("화면 준비 요청과 맥미니 전용 링크·만료 상태를 저장�
   const saved = (await state(page))!;
   expect(saved.projects[0].automation!.turns[0].mode).toBe("preview"); expect(saved.tasks).toHaveLength(0);
   const { claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
-  const claimed = claimProjectWork(saved, { space: "company", projectIds: ["auto-project"], deviceId: "runner", previews: true }, stamp), job = claimed.job!;
+  const claimed = claimProjectWork(saved, { space: "company", projectIds: ["auto-project"], deviceId: "runner", runnerVersion: "2.9.5", previews: true }, stamp), job = claimed.job!;
   const complete = reportProjectWork(claimed.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: {
     reply: "합성 미리보기 준비", summary: "화면 준비", currentStatus: "", nextAction: "", changes: [], checks: [], followUps: [], outcome: "answered", branch: null, baseSha: "a".repeat(40), headSha: null, prUrl: null,
     deployment: { state: "not_configured", url: null, sha: null }, preview: { state: "ready", kind: "mac", url: "http://127.0.0.1:45678/", sha: "a".repeat(40), checkedAt: stamp, expiresAt: new Date(Date.parse(stamp) + 60_000).toISOString(), message: "실행한 맥미니에서 열 수 있습니다." },
@@ -387,7 +389,7 @@ test("최근 수정본으로 원격 테스트·화면 준비·후속 요청을 �
   const { enqueueWork, claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
   const stamp = new Date().toISOString();
   const initial = enqueueWork(automationWorkspace(stamp), "company", "auto-project", "auto-service", "합성 수정", "change", "pr", stamp);
-  const scope = { space: "company" as const, projectIds: ["auto-project"], deviceId: "runner", remoteWork: true, previews: true };
+  const scope = { space: "company" as const, projectIds: ["auto-project"], deviceId: "runner", runnerVersion: "2.9.5", remoteWork: true, previews: true };
   const first = claimProjectWork(initial, scope, stamp), job = first.job!;
   const data = reportProjectWork(first.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: {
     reply: "합성 수정본", summary: "수정", currentStatus: "", nextAction: "", changes: ["app.js"], checks: [], followUps: [], outcome: "pr_open", branch: `jarvis/work-${job.id}`, baseSha: "a".repeat(40), headSha: "b".repeat(40), prUrl: "https://github.com/example/synthetic/pull/1", deployment: { state: "not_configured", url: null, sha: null },
@@ -447,7 +449,7 @@ test("새 프로젝트는 자동 준비와 첫 개발 요청을 저장하고 준
 test("기본 브랜치의 최신 준비 화면은 예전 PR에 가려지지 않고 후속 요청도 같은 코드를 사용한다", async ({ page }) => {
   const { enqueueWork, claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
   const stamp = new Date(Date.now() - 60_000).toISOString(), later = new Date().toISOString();
-  const scope = { space: "company" as const, projectIds: ["auto-project"], deviceId: "runner", remoteWork: true, previews: true };
+  const scope = { space: "company" as const, projectIds: ["auto-project"], deviceId: "runner", runnerVersion: "2.9.5", remoteWork: true, previews: true };
   const first = claimProjectWork(enqueueWork(automationWorkspace(stamp), "company", "auto-project", "auto-service", "합성 수정", "change", "pr", stamp), scope, stamp), job = first.job!;
   const prResult = { reply: "합성 수정본", summary: "수정", currentStatus: "", nextAction: "", changes: ["app.js"], checks: [], followUps: [], outcome: "pr_open", branch: `jarvis/work-${job.id}`, baseSha: "a".repeat(40), headSha: "b".repeat(40), prUrl: "https://github.com/example/synthetic/pull/1", deployment: { state: "not_configured", url: null, sha: null } };
   const old = reportProjectWork(first.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: prResult }, "runner", stamp);
@@ -489,7 +491,7 @@ test("기본 브랜치의 최신 준비 화면은 예전 PR에 가려지지 않�
 test("PR 변경 실패에서 반영된 코드로 한 번에 화면 준비하며 구독 CLI 선택을 보존한다", async ({ page }) => {
   const { enqueueWork, claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
   const stamp = new Date().toISOString();
-  const scope = { space: "company" as const, projectIds: ["auto-project"], deviceId: "runner", remoteWork: true, previews: true, previewCli: true };
+  const scope = { space: "company" as const, projectIds: ["auto-project"], deviceId: "runner", runnerVersion: "2.9.5", remoteWork: true, previews: true, previewCli: true };
   const first = claimProjectWork(enqueueWork(automationWorkspace(stamp), "company", "auto-project", "auto-service", "합성 수정", "change", "pr", stamp), scope, stamp), job = first.job!;
   const old = reportProjectWork(first.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: {
     reply: "합성 수정본", summary: "수정", currentStatus: "", nextAction: "", changes: [], checks: [], followUps: [], outcome: "pr_open", branch: `jarvis/work-${job.id}`, baseSha: "a".repeat(40), headSha: "b".repeat(40), prUrl: "https://github.com/example/synthetic/pull/1", deployment: { state: "not_configured", url: null, sha: null },
@@ -558,7 +560,7 @@ test("개발 작업 공간은 사진과 설명을 같은 요청에 저장하고 
 
 test("개발 화면은 기존 서버를 새 요청 없이 열고 제한된 iframe은 새 탭으로 안내하며 서버 명령을 보관한다", async ({ page, isMobile }) => {
   const { enqueueWork, claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
-  const stamp = new Date().toISOString(), first = claimProjectWork(enqueueWork(automationWorkspace(stamp), "company", "auto-project", "auto-service", "화면 준비", "preview", "pr", stamp), { space: "company", projectIds: ["auto-project"], deviceId: "runner", previews: true }, stamp), job = first.job!;
+  const stamp = new Date().toISOString(), first = claimProjectWork(enqueueWork(automationWorkspace(stamp), "company", "auto-project", "auto-service", "화면 준비", "preview", "pr", stamp), { space: "company", projectIds: ["auto-project"], deviceId: "runner", runnerVersion: "2.9.5", previews: true }, stamp), job = first.job!;
   const url = "https://synthetic-development.trycloudflare.com/";
   const data = reportProjectWork(first.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: { reply: "로컬 서버 실행", summary: "준비", currentStatus: "", nextAction: "", changes: [], checks: [], followUps: [], outcome: "answered", branch: null, baseSha: "a".repeat(40), headSha: null, prUrl: null, deployment: { state: "not_configured", url: null, sha: null }, preview: { state: "ready", kind: "remote", execution: "native", reused: true, remoteId: job.id, url, sha: "a".repeat(40), checkedAt: stamp, expiresAt: new Date(Date.now()+3600000).toISOString(), message: "기존 서버 재사용" } } }, "runner", stamp);
   await seed(page, data);
@@ -579,7 +581,7 @@ test("개발 화면은 기존 서버를 새 요청 없이 열고 제한된 ifram
 
 test("AI 없는 화면은 연결 상태를 알리고 한 번의 명시적 요청으로 로컬 LLM을 연결한다", async ({ page, isMobile }) => {
   const { enqueueWork, claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
-  const stamp = new Date().toISOString(), first = claimProjectWork(enqueueWork(automationWorkspace(stamp), "company", "auto-project", "auto-service", "화면 준비", "preview", "pr", stamp), { space: "company", projectIds: ["auto-project"], deviceId: "runner", previews: true }, stamp), job = first.job!;
+  const stamp = new Date().toISOString(), first = claimProjectWork(enqueueWork(automationWorkspace(stamp), "company", "auto-project", "auto-service", "화면 준비", "preview", "pr", stamp), { space: "company", projectIds: ["auto-project"], deviceId: "runner", runnerVersion: "2.9.5", previews: true }, stamp), job = first.job!;
   const data = reportProjectWork(first.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: { reply: "화면 준비", summary: "준비", currentStatus: "", nextAction: "", changes: [], checks: [], followUps: [], outcome: "answered", branch: null, baseSha: "a".repeat(40), headSha: null, prUrl: null, deployment: { state: "not_configured", url: null, sha: null }, preview: { state: "ready", kind: "remote", execution: "native", remoteId: job.id, url: "https://synthetic-ai-off.trycloudflare.com/", sha: "a".repeat(40), checkedAt: stamp, expiresAt: new Date(Date.now()+3600000).toISOString(), message: "화면 준비" } } }, "runner", stamp);
   await page.context().route("**/api/preview/open?**", route => route.fulfill({ contentType: "text/html", body: "<h1>Synthetic AI-off app</h1>" }));
   await seed(page, data);
@@ -609,7 +611,7 @@ test("첫 개발 프로젝트는 다른 서비스가 없어도 준비 결과를 
   await page.route("**/api/workspace?*", route => route.fulfill({ json: remote[new URL(route.request().url()).searchParams.get("space") as "company" | "personal"] }));
   await page.goto("/projects/first-native"); await ready(page);
   const setup = page.getByRole("region", { name: "프로젝트 자동 준비" }); await expect(setup).toContainText("2.9.0");
-  const scope = { space: "company" as const, projectIds: ["first-native"], deviceId: "runner", development: true }, claim = claimSetup(data, scope, stamp), job = claim.job!;
+  const scope = { space: "company" as const, projectIds: ["first-native"], deviceId: "runner", runnerVersion: "2.9.5", development: true }, claim = claimSetup(data, scope, stamp), job = claim.job!;
   remote.company = { revision: 2, data: reportSetup(claim.data, "company", { projectId: job.projectId, jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: { repository: "example/first-native", target: "mac", database: "none", reason: "로컬 개발", checks: [{ name: "저장소", status: "passed", detail: "합성 준비" }] } }, "runner", stamp) };
   await page.clock.fastForward(6000);
   await expect(setup).toContainText("개발 환경 준비 완료");
@@ -621,7 +623,7 @@ test("첫 개발 프로젝트는 다른 서비스가 없어도 준비 결과를 
 test("개발 작업 공간은 실패를 한 곳에 표시하고 로그 조회를 테스트 통과로 세지 않는다", async ({ page, isMobile }, info) => {
   const { enqueueWork, claimProjectWork, reportProjectWork } = await import("../../src/lib/automation/work");
   const { observeWorkRunner } = await import("../../src/lib/automation/runner-status");
-  const stamp = new Date().toISOString(), scope = { space: "company" as const, projectIds: ["auto-project"], deviceId: "runner", previews: true, previewLocal: true, development: true };
+  const stamp = new Date().toISOString(), scope = { space: "company" as const, projectIds: ["auto-project"], deviceId: "runner", runnerVersion: "2.9.5", previews: true, previewLocal: true, development: true };
   const initial = automationWorkspace(stamp); initial.projects[0].stage = "development";
   const first = claimProjectWork(enqueueWork(initial, "company", "auto-project", "auto-service", "합성 화면 준비", "preview", "pr", stamp, undefined, undefined, "ollama"), scope, stamp), job = first.job!;
   const base = { currentStatus: "", nextAction: "", changes: [], followUps: [], branch: null, baseSha: null, headSha: null, prUrl: null, deployment: { state: "not_configured" as const, url: null, sha: null } };
