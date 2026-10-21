@@ -98,7 +98,7 @@ test("기획안은 개발 전환에 남고 기존 저장소가 있으면 같은 
   const repo = automationWorkspace(stamp).services[0]; d.services.push({ ...repo, space: "personal", projectId: "idea" });
   const existing = startDevelopment(d, "personal", "idea", later);
   expect(existing.projects[0].setup).toBeUndefined();
-  const job = claimProjectWork(existing, { ...scope, runnerVersion: "2.9.5", remoteWork: true, development: true }, later).job!;
+  const job = claimProjectWork(existing, { ...scope, runnerVersion: "2.9.6", remoteWork: true, development: true }, later).job!;
   expect(job.context.project.plan).toBe(answer.document);
   expect(() => startDevelopment(claim().data, "personal", "idea", later)).toThrow();
 });

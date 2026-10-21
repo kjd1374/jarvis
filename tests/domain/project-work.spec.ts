@@ -1,25 +1,25 @@
 import { test, expect } from "@playwright/test";
 import { automationWorkspace, automationStamp as stamp } from "../support/automation";
-import { enqueueWork, claimProjectWork, reportProjectWork, changeWorkState, continueBlockedWork, parseWorkResult, parseWorkPreview } from "../../src/lib/automation/work";
+import { enqueueWork, claimProjectWork, reportProjectWork, changeWorkState, continueBlockedWork, continueProjectPlan, parseWorkResult, parseWorkPreview } from "../../src/lib/automation/work";
 import { normalizeWorkspace } from "../../src/lib/workspace/validation";
 import { parseWebLinks, publicWebUrl } from "../../src/lib/automation/web-links";
 import { projectQuickLinks } from "../../src/lib/workspace/project-connections";
 import { observeWorkRunner, queuedWorkMessage, runnerProjectIds, refreshAutomaticRunner } from "../../src/lib/automation/runner-status";
-const scope = { space: "company" as const, projectIds: ["auto-project"], deviceId: "device-a", runnerVersion: "2.9.5" };
+const scope = { space: "company" as const, projectIds: ["auto-project"], deviceId: "device-a", runnerVersion: "2.9.6" };
 const uuid = "11111111-1111-4111-8111-111111111111";
 const result = { reply: "실제 변경과 검증을 정리했습니다.", summary: "화면 개선", currentStatus: "PR 검토", nextAction: "추가 회귀 검증", changes: ["src/page.tsx"], checks: [{ name: "CI", status: "passed", detail: "합성 검사" }], followUps: [{ title: "추가 회귀 검증", reason: "화면 범위를 넓혀 확인", kind: "todo" }], outcome: "pr_open", branch: `jarvis/work-${uuid}`, baseSha: "a".repeat(40), headSha: "b".repeat(40), prUrl: "https://github.com/example/synthetic/pull/10", deployment: { state: "not_configured", url: null, sha: null } };
 function queued() { return enqueueWork(automationWorkspace(), "company", "auto-project", "auto-service", "모바일 버튼 수정", "change", "pr", stamp, uuid); }
 test("수정 요청은 실제 claim의 실행기 버전을 검사하고 과거 실행기로는 시도하지 않는다", () => {
-  const data = observeWorkRunner(queued(), scope, { runnerVersion: "2.9.5", remoteWorkVersion: 1 }, stamp);
-  for (const runnerVersion of [undefined, "2.9.4", "2.9.3", "2.8.99", "2.9.5-beta", "invalid"]) {
+  const data = observeWorkRunner(queued(), scope, { runnerVersion: "2.9.6", remoteWorkVersion: 1 }, stamp);
+  for (const runnerVersion of [undefined, "2.9.5", "2.9.4", "2.9.3", "2.8.99", "2.9.6-beta", "invalid"]) {
     const skipped = claimProjectWork(data, { ...scope, runnerVersion, remoteWork: true }, stamp);
     expect(skipped.job).toBeNull();
     expect(skipped.data).toEqual(data);
     expect(skipped.data.projects[0].automation!.turns[0]).toMatchObject({ status: "queued", attempt: 0 });
   }
   const old = observeWorkRunner(data, scope, { runnerVersion: "2.9.4", remoteWorkVersion: 1 }, stamp);
-  expect(queuedWorkMessage(old.projects[0].automation!.turns[0], old.services[0].monitoring, Date.parse(stamp))).toContain("2.9.5 적용 대기");
-  for (const runnerVersion of ["2.9.5", "2.9.10", "2.10.0"]) {
+  expect(queuedWorkMessage(old.projects[0].automation!.turns[0], old.services[0].monitoring, Date.parse(stamp))).toContain("2.9.6 적용 대기");
+  for (const runnerVersion of ["2.9.6", "2.9.10", "2.10.0"]) {
     const claimed = claimProjectWork(old, { ...scope, runnerVersion, remoteWork: true }, stamp);
     expect(claimed.job!.id).toBe(uuid);
     expect(claimed.job!.context.executionContext.jarvisRunner.version).toBe(runnerVersion);
@@ -39,7 +39,7 @@ test("미완료 요청 이어가기는 사용자 동작으로 원래 요청을 �
   const requestId = "22222222-2222-4222-8222-222222222222";
   const next = continueBlockedWork(completed, "company", "auto-project", uuid, stamp, requestId);
   expect(next.projects[0].automation!.turns[0]).toEqual(original);
-  expect(original.runnerVersion).toBe("2.9.5");
+  expect(original.runnerVersion).toBe("2.9.6");
   expect(normalizeWorkspace(next).projects[0].automation!.turns[1]).toMatchObject({ id: requestId, request: original.request, mode: "change", publish: original.publish, status: "queued", attempt: 0 });
   expect(continueBlockedWork(next, "company", "auto-project", uuid, stamp, requestId)).toEqual(next);
   expect(claimProjectWork(next, { ...scope, runnerVersion: "2.9.4" }, stamp).job).toBeNull();
@@ -327,4 +327,24 @@ test("새 개발 단계는 기존 저장소여도 새 실행기의 로컬 실행
   const data = queued(); data.projects[0].stage = "development";
   expect(claimProjectWork(data, scope, stamp).job).toBeNull();
   expect(claimProjectWork(data, { ...scope, development: true }, stamp).job!.context.project.stage).toBe("development");
+});
+
+test("기획안 구현은 마지막 상태 질문을 복제하지 않고 현재 기획안과 선택한 게시 범위로 새 요청을 만든다", () => {
+  const data = automationWorkspace();
+  data.projects[0].planning = { document: { versionId: uuid, content: "합성 앱 기능과 완료 기준", revision: 3, updatedAt: stamp, author: "user" }, history: [], turns: [] };
+  const question = enqueueWork(data, "company", "auto-project", "auto-service", "지금 작업 중인가요?", "change", "pr", stamp, uuid);
+  const claim = claimProjectWork(question, scope, stamp), job = claim.job!;
+  const completed = reportProjectWork(claim.data, "company", { projectId: "auto-project", jobId: job.id, leaseToken: job.leaseToken, phase: "result", result: { ...result, outcome: "answered", changes: [], branch: null, headSha: null, prUrl: null, followUps: [] } }, scope.deviceId, stamp);
+  expect(completed.tasks.find(t => t.id === `work-${uuid}`)!.status).toBe("done");
+  const requestId = "22222222-2222-4222-8222-222222222222";
+  const next = continueProjectPlan(completed, "company", "auto-project", "auto-service", "merge", stamp, requestId);
+  const turn = next.projects[0].automation!.turns[1];
+  expect(turn).toMatchObject({ id: requestId, mode: "change", publish: "merge", followLatest: true, status: "queued", attempt: 0 });
+  expect(turn.request).toContain("기획안 구현 요청"); expect(turn.request).not.toBe(job.request);
+  expect(next.projects[0].automation!.turns[0]).toEqual(completed.projects[0].automation!.turns[0]);
+  expect(continueProjectPlan(next, "company", "auto-project", "auto-service", "merge", stamp, requestId)).toEqual(next);
+  const execution = claimProjectWork(next, { ...scope, remoteWork: true }, stamp).job!;
+  expect(execution.context.project.plan).toBe("합성 앱 기능과 완료 기준"); expect(execution.context.project.planRevision).toBe(3);
+  expect(() => continueProjectPlan(next, "personal", "auto-project", "auto-service", "merge", stamp)).toThrow();
+  expect(() => continueProjectPlan(automationWorkspace(), "company", "auto-project", "auto-service", "merge", stamp)).toThrow();
 });

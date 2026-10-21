@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { enqueueWork, changeWorkState, continueBlockedWork, latestWorkSource, preferredWorkRevision } from "@/lib/automation/work";
+import { enqueueWork, changeWorkState, continueBlockedWork, continueProjectPlan, latestWorkSource, preferredWorkRevision } from "@/lib/automation/work";
 import { prepareProjectImage, type ProjectImage } from "@/lib/projects/images";
 import { repositoryFor } from "@/lib/automation/state";
 import { queuedWorkMessage, runnerOnline } from "@/lib/automation/runner-status";
@@ -67,8 +67,8 @@ function WorkTurn({ turn, project, saving, onAction, monitoring, clock }: { turn
       </> : !turn.error && <p>{turn.status === "queued" ? queuedWorkMessage(turn, monitoring, clock, project.stage === "development") : turn.status === "cancelled" ? "이미 반영된 변경은 유지됩니다." : "작업 중입니다. 결과는 자동으로 갱신됩니다."}</p>}
       {turn.error && <p role="status">{errors[turn.error] ?? "실행을 마치지 못했습니다. 저장된 결과를 확인한 뒤 이어서 시도해주세요."}</p>}
       <div className={styles.agentTurnActions}>
-        {turn.mode === "change" && turn.status === "completed" && turn.result?.outcome === "blocked" && <button disabled={saving} onClick={() => onAction(turn, "continue")}>미완료 요청 이어서 구현</button>}
-        <span>{turn.mode === "test" ? "자동 테스트 · 코드 게시·AI 호출 없음" : turn.mode === "preview" ? turn.previewAI === "ollama" ? "화면 준비 · 로컬 LLM 선택" : turn.previewAI === "codex" ? "화면 준비 · 구독 CLI 선택" : "화면 준비 · AI 호출 없음" : turn.mode === "ask" ? "질문" : turn.publish === "merge" ? "수정·검증 후 반영" : "수정 후 PR 검토"}</span>
+        {!project.planning?.document.content.trim() && turn.mode === "change" && turn.status === "completed" && turn.result?.outcome === "blocked" && <button disabled={saving} onClick={() => onAction(turn, "continue")}>원래 수정 요청 다시 실행</button>}
+        <span>{turn.mode === "test" ? "자동 테스트 · 코드 게시·AI 호출 없음" : turn.mode === "preview" ? turn.previewAI === "ollama" ? "화면 준비 · 로컬 LLM 선택" : turn.previewAI === "codex" ? "화면 준비 · 구독 CLI 선택" : "화면 준비 · AI 호출 없음" : turn.result?.outcome === "answered" ? "질문 답변 · 개발 재개 없음" : turn.mode === "ask" ? "질문" : turn.publish === "merge" ? "수정·검증 후 반영" : "수정 후 PR 검토"}</span>
         {["failed", "interrupted"].includes(turn.status) && <button className={styles.textButton} disabled={saving} onClick={() => onAction(turn, "retry")}>이어서 실행</button>}
         {["queued", "running", "failed", "interrupted"].includes(turn.status) && <button className={styles.textButton} disabled={saving} onClick={() => onAction(turn, "cancel")}>요청 취소</button>}
       </div>
@@ -141,6 +141,14 @@ export function ProjectAgent({ project }: { project: Project }) {
     catch (e) { setError(e instanceof Error ? e.message : "상태를 변경하지 못했습니다."); }
     finally { pending.current = false; }
   }
+  async function implementPlan() {
+    if (!service || pending.current || saving) return;
+    pending.current = true; setError("");
+    const nextRequestId = id();
+    try { await mutate(d => continueProjectPlan(d, project.space, project.id, service.id, publish, now(), nextRequestId)); }
+    catch (e) { setError(e instanceof Error ? e.message : "기획안 구현 요청을 저장하지 못했습니다."); }
+    finally { pending.current = false; }
+  }
   return <section id="project-ai" className={`${styles.detailSection} ${styles.projectAgent} ${workbench.agent}`} aria-label="프로젝트 AI 작업실">
     <div className={styles.detailHeading}><h2><Icon name="message" size={18} /> 개발 대화</h2><span role="status" className={styles.runnerStatus} data-online={online && !updateNeeded}>{!service ? project.setup ? "개발 환경 자동 준비" : "GitHub 저장소 등록 필요" : updateNeeded ? "CLI 연결됨 · 새 기능 업데이트 필요" : online ? "Jarvis CLI 연결됨" : seen ? "Jarvis CLI 최근 응답 없음" : monitoring?.lastSuccessAt ? "CLI 실행 기록 있음 · 접속 미확인" : "CLI 연결 대기"}</span></div>
     {seen && <p className={styles.runnerEvidence}>실행기 최근 응답 {dateLabel(seen)} · 버전 {monitoring?.runnerConnection?.version ?? "미확인"}</p>}
@@ -151,6 +159,10 @@ export function ProjectAgent({ project }: { project: Project }) {
     {project.setup && turns.length > 0 && <div className={styles.agentHistory} role="log" aria-label="프로젝트 개발 대화">
       {turns.length > historyLimit && <button className={styles.textButton} onClick={() => setHistoryLimit(limit => limit + 10)}>이전 대화 더 보기</button>}
       {turns.slice(-historyLimit).map(turn => <WorkRecord key={turn.id} turn={turn} project={project} saving={saving} onAction={act} monitoring={turnMonitoring(turn)} clock={clock} />)}
+    </div>}
+    {service && project.planning?.document.content.trim() && <div className={styles.agentConnection}>
+      <button type="button" disabled={saving} onClick={implementPlan}>현재 기획안 구현 계속</button>
+      <p>상태 확인 질문을 반복하지 않고 현재 기획안의 미구현 기능을 실제 코드에 구현·검증하도록 요청합니다. 반영 범위는 요청 설정을 따릅니다.</p>
     </div>}
     <form onSubmit={submit} className={styles.agentComposer}>
       <div className={styles.agentAttachHeading}><label htmlFor="project-agent-message">AI에게 요청</label>

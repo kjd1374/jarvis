@@ -169,6 +169,13 @@ export function continueBlockedWork(data: WorkspaceData, space: Space, projectId
   if (!turn || turn.mode !== "change" || turn.status !== "completed" || turn.result?.outcome !== "blocked") throw new Error("이어갈 미완료 수정 요청을 확인해주세요.");
   return enqueueWork(data, space, projectId, turn.serviceId, turn.request, "change", turn.publish, stamp, requestId, turn.sourceTurnId, undefined, !!turn.followLatest, { images: turn.images });
 }
+// Continue the current plan, never replay a later status question.
+export function continueProjectPlan(data: WorkspaceData, space: Space, projectId: string, serviceId: string, publish: ProjectTurn["publish"], stamp: string, requestId = id()) {
+  const project = data.projects.find(p => p.id === projectId && p.space === space);
+  if (!project?.planning?.document.content.trim()) throw new Error("구현할 현재 기획안을 먼저 작성해주세요.");
+  const request = "현재 프로젝트 기획안의 범위와 완료 기준에 따라 개발을 실제로 계속해주세요. 이것은 상태 확인 질문의 재실행이 아니라 기획안 구현 요청입니다. 실제 저장소 코드를 먼저 확인하고, 미구현 기능과 필요한 선행 코드를 구현하고 검증해주세요. 과거 답변에만 있고 저장소에 없는 코드를 구현된 것으로 취급하지 마세요. 필요한 앱 인증·권한 코드를 포함하며 기존 자료는 보존해주세요. 실제 변경·검사·남은 항목을 구분해서 보고해주세요.";
+  return enqueueWork(data, space, projectId, serviceId, request, "change", publish, stamp, requestId, undefined, undefined, true);
+}
 export function claimProjectWork(data: WorkspaceData, scope: { space: Space; projectIds: (string | null)[]; deviceId: string; runnerVersion?: string; previews?: boolean; remoteWork?: boolean; previewCli?: boolean; previewLocal?: boolean; managedWork?: boolean; development?: boolean }, stamp: string) {
   let current = data;
   let waitingForUpdate = false;
@@ -250,7 +257,7 @@ export function reportProjectWork(data: WorkspaceData, space: Space, body: Recor
   if (result.preview?.ai && turn.previewAI !== result.preview.ai.provider || turn.previewAI && result.outcome === "answered" && !result.preview?.ai) invalid();
   if (turn.publish === "pr" && ["merged", "deployed"].includes(result.outcome)) invalid();
   const next = updateTurn(data, project, { ...turn, status: "completed", phase: "reporting", result, error: undefined, updatedAt: stamp, leaseOwner: undefined, leaseToken: undefined, leaseUntil: undefined });
-  const tasks = next.tasks.map(t => t.id === `work-${turn.id}` ? { ...t, status: result.outcome === "deployed" || result.outcome === "merged" && result.deployment.state === "not_configured" ? "done" as const : result.outcome === "merged" ? "in_progress" as const : "decision" as const } : t);
+  const tasks = next.tasks.map(t => t.id === `work-${turn.id}` ? { ...t, status: result.outcome === "answered" || result.outcome === "deployed" || result.outcome === "merged" && result.deployment.state === "not_configured" ? "done" as const : result.outcome === "merged" ? "in_progress" as const : "decision" as const } : t);
   const normalized = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
   for (const [index, follow] of result.followUps.entries()) {
     if (tasks.some(t => t.space === space && t.projectId === project.id && normalized(t.title) === normalized(follow.title))) continue;
