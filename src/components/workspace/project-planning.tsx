@@ -84,7 +84,7 @@ export function ProjectPlanning({ project }: { project: Project }) {
         {plan.history.length > 0 && <details className={styles.history}><summary>기획안 변경 이력 · 최근 {plan.history.length}개</summary>{[...plan.history].reverse().map(h => <details key={h.id}><summary>버전 {h.revision} · {h.author === "cli" ? "AI 반영" : "직접 편집"} · {dateLabel(h.updatedAt)}</summary><PlanText content={h.content || "빈 기획안"} /></details>)}</details>}
       </section>
       <section className={styles.chat} aria-label="기획 AI 대화"><div className={styles.sectionHeading}><h2>기획 AI</h2><span role="status">{online ? "기획 실행기 응답 확인" : "기획 실행기 응답 대기"}</span></div>
-        {plan.runnerSeenAt && <small>최근 실행기 응답 {dateLabel(plan.runnerSeenAt)} · 각 요청의 처리 결과는 아래에 표시됩니다.</small>}
+        {plan.runnerSeenAt && <small>최근 실행기 응답 {dateLabel(plan.runnerSeenAt)} · <span aria-label="기획 실행기 버전">{plan.runnerVersion ? `버전 ${plan.runnerVersion}` : "버전 확인 대기"}</span> · 각 요청의 처리 결과는 아래에 표시됩니다.</small>}
         <p className={styles.status}>대화에 따라 기획안을 갱신합니다. 확인되지 않은 사업성·시장 정보는 가정으로 구분합니다.</p>
         <div className={styles.messages}>{plan.turns.length ? plan.turns.map(t => <article key={t.id} aria-label="기획 요청"><p className={styles.request}>{t.request}</p>
           {t.result ? <><p>{t.result.reply}</p><small>{t.appliedRevision !== undefined ? `기획안 버전 ${t.appliedRevision}에 반영` : "직접 편집된 기획안을 보존했습니다. AI 제안을 비교해 적용할 수 있습니다."}</small>
@@ -95,7 +95,9 @@ export function ProjectPlanning({ project }: { project: Project }) {
             {["failed", "interrupted"].includes(t.status) && <button disabled={saving || busy} onClick={() => void changeRequest(t.id, "retry")}>기획 요청 재시도</button>}</div>
         </article>) : <p>무엇을 만들고 싶은지, 누구에게 필요한지 자유롭게 이야기해주세요.</p>}</div>
         <form onSubmit={send} className={styles.composer}><label htmlFor="planning-message">기획 AI에게 요청</label><textarea id="planning-message" value={message} onChange={e => setMessage(e.target.value)} rows={3} maxLength={4000} placeholder="아이디어나 기획안에서 바꿀 내용을 적어주세요." /><button disabled={saving || busy || !message.trim()}>기획 요청 보내기</button></form>
-        <details><summary>기획 AI 연결 안내</summary><p>맥미니의 구독 CLI를 사용합니다. GitHub 저장소 없이 기획하며 구독 사용량이 적용됩니다.</p><Link href="/settings#cli-runner">실행기 설정</Link></details>
+        <details><summary>기획 AI 연결 안내</summary><p>맥미니의 구독 CLI를 사용합니다. GitHub 저장소 없이 기획하며 구독 사용량이 적용됩니다.</p>
+          <p>기획 시간 초과 보완은 실행기 2.9.3부터 적용됩니다. 기존 설치는 진행 중인 작업과 미리보기 서버가 없을 때 최대 30분 주기로 자동 업데이트를 확인합니다. 실행 중인 미리보기 서버를 종료한 뒤 위의 실행기 버전을 확인해주세요.</p>
+          <Link href="/settings#cli-runner">실행기 설정</Link></details>
       </section>
     </div>
     <ProjectBasics project={project} />
