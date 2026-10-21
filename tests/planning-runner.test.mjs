@@ -36,3 +36,20 @@ test('restarting a result-pending attempt reads its cached answer without a seco
   await executePlanning({request:async()=>{}},job,{stateDir:dir,model:async()=>{models++;return answer;},log(){}});assert.equal(models,1);
  }finally{await rm(dir,{recursive:true,force:true});}
 });
+test('planning preserves timeout and invalid-answer codes through the real completion and error-report path',async()=>{
+ for(const [mode,expected] of [['timeout','cli_timeout'],['completion','invalid_completion'],['plan','invalid_planning_answer']]){
+  const dir=await mkdtemp(join(tmpdir(),'planning-failure-')),reports=[],logs=[];let executions=0;
+  try{
+   const run=async(_bin,args,options)=>{
+    if(args[0]==='login')return{code:0,out:'Logged in using ChatGPT',err:''};
+    if(args.includes('--help'))return{code:0,out:'--ignore-user-config --ignore-rules --ephemeral --output-schema',err:''};
+    executions++;assert.equal(options.timeout,120000);
+    if(mode==='timeout')throw new RunnerError('command_timeout');
+    await writeFile(args[args.indexOf('--output-last-message')+1],JSON.stringify({content:mode==='completion'?'unfinished JSON':JSON.stringify({reply:'synthetic reply',document:''})}));return{code:0,out:'',err:''};
+   };
+   await executePlanning({request:async(_path,body)=>reports.push(body)},job,{stateDir:dir,model:(job,options)=>answerPlanningWithCodex(job,{...options,run,env:{PATH:process.env.PATH}}),log:value=>logs.push(value)});
+   assert.equal(executions,1);assert.equal(reports.at(-1).phase,'error');assert.equal(reports.at(-1).error,expected);
+   assert(!reports.some(body=>body.phase==='result'));assert.deepEqual(await readdir(dir),[]);assert(logs.every(line=>!line.includes(job.request)));
+  }finally{await rm(dir,{recursive:true,force:true});}
+ }
+});

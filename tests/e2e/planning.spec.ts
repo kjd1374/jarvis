@@ -4,6 +4,35 @@ import { createStagedProject } from "../../src/lib/projects/lifecycle";
 import { enqueuePlanning, claimPlanning, reportPlanning, savePlan } from "../../src/lib/projects/planning";
 const stamp = new Date().toISOString();
 function idea() { return createStagedProject(emptyWorkspace(), { space: "company", name: "합성 기획 프로젝트", description: "작은 개인 도구", stage: "idea" }, stamp, "idea"); }
+test("과거 기획 실패의 원인을 표시하고 실행기 응답을 작업 성공과 구분한다", async ({ page, isMobile }) => {
+  let data = savePlan(idea(), "company", "idea", "기존 기획안과 결정", 0, stamp);
+  const cases = [
+    ["cli_timeout", "기획 AI 응답 대기 시간이 초과됐습니다."],
+    ["invalid_planning_answer", "AI가 반환한 기획안의 내용·형식을 확인하지 못했습니다."],
+    ["cli_unavailable", "맥미니에서 구독 CLI를 실행하지 못했습니다."],
+    ["constructor", "기획 요청을 완료하지 못했습니다."],
+  ];
+  for (const [code] of cases) {
+    const claim = claimPlanning(enqueuePlanning(data, "company", "idea", "합성 기획 요청", stamp), { space: "company", projectIds: ["idea"], deviceId: "runner" }, stamp), job = claim.job!;
+    data = reportPlanning(claim.data, "company", { projectId: "idea", jobId: job.id, leaseToken: job.leaseToken, phase: "error", error: code }, "runner", stamp);
+  }
+  const original = structuredClone(data.projects[0].planning);
+  await seed(page, data); await page.goto("/projects/idea"); await ready(page);
+  if (isMobile) await page.getByRole("navigation", { name: "기획 공간 보기" }).getByRole("button", { name: "AI 대화", exact: true }).click();
+  const chat = page.getByRole("region", { name: "기획 AI 대화", exact: true });
+  await expect(chat).toContainText("기획 실행기 응답 확인"); await expect(chat).not.toContainText("기획 CLI 연결됨");
+  for (const [code, message] of cases) {
+    const turn = chat.getByRole("article", { name: "기획 요청", exact: true }).filter({ has: page.locator("code", { hasText: code }) });
+    await expect(turn).toContainText(message); await expect(turn).toContainText("요청과 기존 기획안은 보존됩니다.");
+    await expect(turn.getByRole("button", { name: "기획 요청 재시도", exact: true })).toBeEnabled();
+  }
+  expect((await state(page))!.projects[0].planning).toEqual(original);
+  await page.reload(); await ready(page);
+  expect((await state(page))!.projects[0].planning).toEqual(original);
+  if (isMobile) await page.getByRole("navigation", { name: "기획 공간 보기" }).getByRole("button", { name: "AI 대화", exact: true }).click();
+  await expect(chat.locator("code", { hasText: "cli_timeout" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
 test("세 등록 카드 중 아이디어는 자원 생성 없이 기획 공간으로 열리고 문서·요청을 보존한다", async ({ page, isMobile }) => {
   await seed(page, emptyWorkspace()); await page.goto("/projects"); await ready(page);
   await page.getByRole("button", { name: "프로젝트 만들기", exact: true }).click();

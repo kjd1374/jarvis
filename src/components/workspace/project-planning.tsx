@@ -6,6 +6,7 @@ import { useRef, useState } from "react";
 import type { Project } from "@/lib/workspace/types";
 import { id, now, dateLabel } from "@/lib/workspace/types";
 import { savePlan, enqueuePlanning, changePlanning, applyPlanningProposal, planningBusy, newPlanning } from "@/lib/projects/planning";
+import { planningFailure } from "@/lib/projects/planning-status";
 import { startDevelopment, projectStage, stageLabels } from "@/lib/projects/lifecycle";
 import { projectUrl } from "@/lib/workspace/project-links";
 import { useWorkspace } from "./workspace-provider";
@@ -16,6 +17,14 @@ import styles from "./project-planning.module.css";
 function PlanText({ content }: { content: string }) {
   return <div className={styles.planText}>{content.split("\n").map((line, i) => /^#{1,3} /.test(line)
     ? <h3 key={i}>{line.replace(/^#+ /, "")}</h3> : <p key={i}>{line || "\u00a0"}</p>)}</div>;
+}
+function PlanningFailure({ turn }: { turn: Parameters<typeof planningFailure>[0] & { updatedAt: string; attempt: number } }) {
+  const failure = planningFailure(turn);
+  return <div role="status" className={styles.failure}>
+    <p>{failure.message}</p><p>{failure.action}</p>
+    <p>요청과 기존 기획안은 보존됩니다.</p>
+    <small>오류 코드: <code>{failure.code}</code> · 확인 {dateLabel(turn.updatedAt)} · 실행 시도 {turn.attempt}회</small>
+  </div>;
 }
 function ProjectControls({ project }: { project: Project }) {
   const router = useRouter();
@@ -74,12 +83,14 @@ export function ProjectPlanning({ project }: { project: Project }) {
           : <div className={styles.empty}><h3>한 문장 아이디어부터 시작하세요</h3><p>문제와 사용자, 핵심 기능, 확인할 가정과 개발 완료 기준을 대화하며 정리합니다.</p><button onClick={() => { setMessage("이 아이디어의 목표 사용자와 해결할 문제를 정리하고 첫 기획안을 만들어주세요."); setTab("chat"); }}>첫 기획안 만들기</button></div>}
         {plan.history.length > 0 && <details className={styles.history}><summary>기획안 변경 이력 · 최근 {plan.history.length}개</summary>{[...plan.history].reverse().map(h => <details key={h.id}><summary>버전 {h.revision} · {h.author === "cli" ? "AI 반영" : "직접 편집"} · {dateLabel(h.updatedAt)}</summary><PlanText content={h.content || "빈 기획안"} /></details>)}</details>}
       </section>
-      <section className={styles.chat} aria-label="기획 AI 대화"><div className={styles.sectionHeading}><h2>기획 AI</h2><span role="status">{online ? "기획 CLI 연결됨" : "기획 CLI 연결 대기"}</span></div>
+      <section className={styles.chat} aria-label="기획 AI 대화"><div className={styles.sectionHeading}><h2>기획 AI</h2><span role="status">{online ? "기획 실행기 응답 확인" : "기획 실행기 응답 대기"}</span></div>
+        {plan.runnerSeenAt && <small>최근 실행기 응답 {dateLabel(plan.runnerSeenAt)} · 각 요청의 처리 결과는 아래에 표시됩니다.</small>}
         <p className={styles.status}>대화에 따라 기획안을 갱신합니다. 확인되지 않은 사업성·시장 정보는 가정으로 구분합니다.</p>
         <div className={styles.messages}>{plan.turns.length ? plan.turns.map(t => <article key={t.id} aria-label="기획 요청"><p className={styles.request}>{t.request}</p>
           {t.result ? <><p>{t.result.reply}</p><small>{t.appliedRevision !== undefined ? `기획안 버전 ${t.appliedRevision}에 반영` : "직접 편집된 기획안을 보존했습니다. AI 제안을 비교해 적용할 수 있습니다."}</small>
             {t.appliedRevision === undefined && <details><summary>AI 기획안 제안 보기</summary><PlanText content={t.result.document} /><button disabled={saving || !!edit} onClick={() => void act(d => applyPlanningProposal(d, project.space, project.id, t.id, doc.revision, now(), doc.versionId))}>현재 기획안에 제안 적용</button></details>}</>
-            : <p role="status">{t.status === "queued" ? !account?.authenticated ? "이 기기에 저장됐습니다. 서버 연결 후 기획 실행기가 처리합니다." : !online ? "기획을 지원하는 실행기 2.8.0 연결을 기다립니다. 업데이트가 적용되면 저장된 요청을 처리합니다." : "기획 요청 대기 중입니다." : t.status === "running" ? "기획안을 작성하고 있습니다." : t.status === "cancelled" ? "요청을 취소했습니다." : t.error === "cli_limit" ? "구독 사용 한도에 도달했습니다." : t.error === "cli_login_required" ? "맥미니의 구독 CLI 로그인을 확인해주세요." : "기획 요청을 완료하지 못했습니다. 기존 기획안은 보존됩니다."}</p>}
+            : ["failed", "interrupted"].includes(t.status) ? <PlanningFailure turn={t} />
+            : <p role="status">{t.status === "queued" ? !account?.authenticated ? "이 기기에 저장됐습니다. 서버 연결 후 기획 실행기가 처리합니다." : !online ? "기획을 지원하는 실행기 2.8.0 연결을 기다립니다. 업데이트가 적용되면 저장된 요청을 처리합니다." : "기획 요청 대기 중입니다." : t.status === "running" ? "기획안을 작성하고 있습니다." : "요청을 취소했습니다."}</p>}
           <div className={styles.actions}>{["queued", "running"].includes(t.status) && <button disabled={saving} onClick={() => void changeRequest(t.id, "cancel")}>기획 요청 취소</button>}
             {["failed", "interrupted"].includes(t.status) && <button disabled={saving || busy} onClick={() => void changeRequest(t.id, "retry")}>기획 요청 재시도</button>}</div>
         </article>) : <p>무엇을 만들고 싶은지, 누구에게 필요한지 자유롭게 이야기해주세요.</p>}</div>

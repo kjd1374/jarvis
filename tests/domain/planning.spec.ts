@@ -7,11 +7,19 @@ import { mergeCloudWorkspace } from "../../src/lib/cloud/merge";
 import { createBackup, parseBackup } from "../../src/lib/workspace/backup";
 import { automationWorkspace } from "../support/automation";
 import { claimProjectWork } from "../../src/lib/automation/work";
+import { planningFailure } from "../../src/lib/projects/planning-status";
 const stamp = "2026-10-20T01:00:00.000Z", later = "2026-10-20T01:00:01.000Z";
 const scope = { space: "personal" as const, projectIds: ["idea"], deviceId: "runner-a" };
 const answer = { reply: "목표와 검증할 가정을 정리했습니다.", document: "# 합성 기획안\n목표 사용자와 핵심 기능\n## 확인할 가정\n사용자 인터뷰 필요" };
 function idea() { return createStagedProject(emptyWorkspace(), { space: "personal", name: "합성 아이디어", description: "개인 도구", stage: "idea", automatic: true }, stamp, "idea"); }
 function claim() { return claimPlanning(enqueuePlanning(idea(), "personal", "idea", "첫 기획안을 만들어주세요", stamp), scope, later); }
+test("알 수 없는 과거 오류도 코드를 보존하고 상세 원인이 없는 기록은 추측하지 않는다", () => {
+  for (const code of ["network_error", "constructor", "__proto__"]) {
+    expect(planningFailure({ status: "failed", error: code }).code).toBe(code);
+  }
+  expect(planningFailure({ status: "failed" })).toMatchObject({ code: "planning_failed", action: expect.stringContaining("기록된 상세 원인이 없습니다") });
+  expect(planningFailure({ status: "interrupted" }).code).toBe("runner_interrupted");
+});
 test("단계 없는 기존 프로젝트는 자료·작업을 보존하고 개발 화면으로 해석한다", () => {
   const old = automationWorkspace(stamp), next = normalizeWorkspace(old);
   expect(next).toEqual(old); expect(next.projects[0].stage).toBeUndefined(); expect(projectStage(next.projects[0])).toBe("development");
