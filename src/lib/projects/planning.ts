@@ -12,6 +12,7 @@ export type ProjectPlanning = {
   history: (PlanDocument & { id: string })[];
   turns: PlanningTurn[];
   runnerSeenAt?: string;
+  runnerVersion?: string;
 };
 const text = (v: unknown, max: number): v is string => typeof v === "string" && v.length <= max;
 const date = (v: unknown): v is string => text(v, 100) && Number.isFinite(Date.parse(v));
@@ -27,7 +28,8 @@ export function validatePlanning(project: Project) {
   const doc = (d: PlanDocument) => d && uuid(d.versionId) && text(d.content, 16000) && revision(d.revision) && date(d.updatedAt) && ["user", "cli"].includes(d.author);
   if (!doc(p.document) || !Array.isArray(p.history) || p.history.length > 20 || p.history.some(d => !uuid(d.id) || !doc(d)) ||
     new Set(p.history.map(d => d.id)).size !== p.history.length || !Array.isArray(p.turns) || p.turns.length > 100 ||
-    new Set(p.turns.map(t => t.id)).size !== p.turns.length || p.runnerSeenAt !== undefined && !date(p.runnerSeenAt)) throw new Error("기획안 형식을 확인해주세요.");
+    new Set(p.turns.map(t => t.id)).size !== p.turns.length || p.runnerSeenAt !== undefined && !date(p.runnerSeenAt) ||
+    p.runnerVersion !== undefined && (typeof p.runnerVersion !== "string" || !/^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(p.runnerVersion))) throw new Error("기획안 형식을 확인해주세요.");
   for (const t of p.turns) {
     if (!uuid(t.id) || !text(t.request, 4000) || !t.request.trim() || !date(t.createdAt) || !date(t.updatedAt) ||
       !["queued", "running", "completed", "failed", "interrupted", "cancelled"].includes(t.status) || !Number.isInteger(t.attempt) || t.attempt < 0 || t.attempt > 100 ||
@@ -83,12 +85,14 @@ export function applyPlanningProposal(data: WorkspaceData, space: Space, project
   const next = revised(plan, t.result.document, stamp, "cli");
   return replace(data, p, { ...next, turns: next.turns.map(row => row.id === t.id ? { ...row, appliedRevision: next.document.revision } : row) });
 }
-export function claimPlanning(data: WorkspaceData, scope: { space: Space; projectIds: (string | null)[]; deviceId: string }, stamp: string) {
+export function claimPlanning(data: WorkspaceData, scope: { space: Space; projectIds: (string | null)[]; deviceId: string; runnerVersion?: string }, stamp: string) {
+  const runnerVersion = typeof scope.runnerVersion === "string" && /^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(scope.runnerVersion) ? scope.runnerVersion : undefined;
   for (const original of data.projects.filter(p => p.space === scope.space && scope.projectIds.includes(p.id) && p.stage === "idea")) {
     let plan = original.planning ?? newPlanning(stamp);
     plan = { ...plan, turns: plan.turns.map(t => t.status === "running" && Date.parse(t.leaseUntil ?? "") <= Date.parse(stamp)
       ? { ...t, status: "interrupted" as const, error: "runner_interrupted", updatedAt: stamp, leaseToken: undefined, leaseUntil: undefined } : t),
-    runnerSeenAt: !plan.runnerSeenAt || Date.parse(stamp) - Date.parse(plan.runnerSeenAt) >= 60000 ? stamp : plan.runnerSeenAt };
+    runnerVersion,
+    runnerSeenAt: runnerVersion !== plan.runnerVersion || !plan.runnerSeenAt || Date.parse(stamp) - Date.parse(plan.runnerSeenAt) >= 60000 ? stamp : plan.runnerSeenAt };
     data = replace(data, original, plan);
     if (plan.turns.some(t => t.status === "running")) continue;
     const t = plan.turns.find(t => t.status === "queued");

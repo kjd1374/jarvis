@@ -29,7 +29,7 @@ export async function POST(request: Request) {
       const original = data;
       if (supportsWork) data = observeWorkRunner(data, { space, projectIds: projects, projectScope }, body, stamp);
       if (supportsWork && body.planningVersion === 1) {
-        const planning = claimPlanning(data, { space, projectIds: projects, deviceId }, stamp);
+        const planning = claimPlanning(data, { space, projectIds: projects, deviceId, runnerVersion: typeof body.runnerVersion === "string" ? body.runnerVersion : undefined }, stamp);
         data = planning.data;
         if (planning.job) return { data, result: { job: planning.job } };
       }

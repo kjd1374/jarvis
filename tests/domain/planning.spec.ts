@@ -20,6 +20,25 @@ test("알 수 없는 과거 오류도 코드를 보존하고 상세 원인이 �
   expect(planningFailure({ status: "failed" })).toMatchObject({ code: "planning_failed", action: expect.stringContaining("기록된 상세 원인이 없습니다") });
   expect(planningFailure({ status: "interrupted" }).code).toBe("runner_interrupted");
 });
+test("기획 실행기 버전은 같은 분 안의 교체도 반영하며 기기 편집과 충돌하지 않는다", () => {
+  const base = claimPlanning(idea(), { ...scope, runnerVersion: "2.9.2" }, stamp).data;
+  const local = savePlan(base, "personal", "idea", "기기에 남긴 기획안", 0, later);
+  local.projects[0].planning!.runnerVersion = "2.9.1";
+  const remote = claimPlanning(base, { ...scope, runnerVersion: "2.9.3" }, later).data;
+  const merged = mergeCloudWorkspace(base, local, remote);
+  expect(merged.conflicts).toEqual([]);
+  expect(merged.data.projects[0].planning).toMatchObject({ runnerVersion: "2.9.3", runnerSeenAt: later, document: { content: "기기에 남긴 기획안" } });
+  const invalid = structuredClone(base); invalid.projects[0].planning!.runnerVersion = "private diagnostic";
+  expect(() => normalizeWorkspace(invalid)).toThrow();
+});
+test("긴 기획은 heartbeat로 갱신한 임대 안에서 원래 5분이 지난 뒤에도 결과를 저장한다", () => {
+  const c = claim(), j = c.job!, start = Date.parse(later);
+  const body = { projectId: "idea", jobId: j.id, leaseToken: j.leaseToken };
+  const live = reportPlanning(c.data, "personal", { ...body, phase: "heartbeat" }, scope.deviceId, new Date(start + 280000).toISOString());
+  const completed = reportPlanning(live, "personal", { ...body, phase: "result", answer }, scope.deviceId, new Date(start + 330000).toISOString());
+  expect(completed.projects[0].planning!.document.content).toBe(answer.document);
+  expect(() => reportPlanning(c.data, "personal", { ...body, phase: "result", answer }, scope.deviceId, new Date(start + 330000).toISOString())).toThrow("stale_job");
+});
 test("단계 없는 기존 프로젝트는 자료·작업을 보존하고 개발 화면으로 해석한다", () => {
   const old = automationWorkspace(stamp), next = normalizeWorkspace(old);
   expect(next).toEqual(old); expect(next.projects[0].stage).toBeUndefined(); expect(projectStage(next.projects[0])).toBe("development");

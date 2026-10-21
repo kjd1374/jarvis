@@ -33,7 +33,7 @@ export async function runPlanningLifecycle({ base, browser, runner, approve, sna
     const current=async()=> (await snapshot()).data.projects.find(p=>p.id===project.id);
     await expect.poll(async()=> (await current()).planning.turns.at(-1)?.status).toBe('queued');
     assert.equal((await runner.request('/api/automation/claim',scope)).job,null,'old runner cannot claim planning');
-    const first=(await runner.request('/api/automation/claim',{...scope,planningVersion:1})).job;assert.equal(first.kind,'planning');assert.equal(first.projectId,project.id);
+    const first=(await runner.request('/api/automation/claim',{...scope,planningVersion:1})).job;assert.equal((await current()).planning.runnerVersion,VERSION);assert.equal(first.kind,'planning');assert.equal(first.projectId,project.id);
     await executePlanning(runner,first,{stateDir:dir,model:async()=>{models++;return{reply:'첫 범위를 정리했습니다.',document:'# 첫 기획안\n사용자와 완료 기준'};},log(){}});
     assert.equal((await current()).planning.document.content,'# 첫 기획안\n사용자와 완료 기준','planning result must actually persist before observing the browser');
     // Browser status refresh is every 5 seconds; allow a full interval plus CI transport/render time.
