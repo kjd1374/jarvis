@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { executeProjectWork, runCodexWork, runCommand, allowedWorkPath } from "../public/jarvis-runner.mjs";
 const modelResult = { blocked: false, reply: "합성 화면 수정", summary: "합성 결과", currentStatus: "검증 준비", nextAction: "확인", followUps: [] };
 const job = { id: "11111111-1111-4111-8111-111111111111", repository: "example/synthetic", projectId: "project", space: "personal", mode: "change", publish: "pr", request: "PRIVATE REQUEST NEVER PUBLISH", leaseToken: "test-lease", attempt: 1 };
-async function fixture({ ci = "success", deliveryFails = false, publish = "pr", failPush = false, blocked = false, cancelAtPublish = false, npmProject = false, npmFailure = false, previewOnly = false, previewEnabled = false, testStatus = "passed", imagePayload, copyImage = false, deployed = false, addedFiles = {}, initialFiles = {} } = {}) {
+async function fixture({ ci = "success", deliveryFails = false, publish = "pr", failPush = false, blocked = false, cancelAtPublish = false, npmProject = false, npmFailure = false, previewOnly = false, previewEnabled = false, testStatus = "passed", imagePayload, copyImage = false, deployed = false, addedFiles = {}, initialFiles = {}, action } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "jarvis-work-test-")), source = join(dir, "source"), remote = join(dir, "remote.git");
   await mkdir(source); await runCommand("git", ["init", "-b", "main", source]);
   await writeFile(join(source, "page.js"), "export const title = 'before';\n");
@@ -56,7 +56,7 @@ async function fixture({ ci = "success", deliveryFails = false, publish = "pr", 
     }
     assert(args.includes("PUT")); assert(args.includes(`sha=${headSha}`)); merged = true; return { code: 0, out: "{}", err: "" };
   };
-  const model = async (_job, cwd, _control, options) => { if (_job.images?.length) { assert.equal(await readFile(options.imagePaths[0], "utf8"), Buffer.from(imagePayload[0].bytes,"base64").toString()); if (copyImage) await writeFile(join(cwd,copyImage === "base64" ? "copied.js" : "copied.jpg"),copyImage === "base64" ? `export const reference = "${imagePayload[0].bytes}";` : await readFile(options.imagePaths[0])); } modelCalls++; modelJobs.push(_job); modelContents.push(await readFile(join(cwd, "page.js"), "utf8")); await assert.rejects(readFile(join(cwd, ".env.local")), /ENOENT/); for (const [path, content] of Object.entries(initialFiles)) assert.equal(await readFile(join(cwd, path), "utf8"), content); await writeFile(join(cwd, "page.js"), `export const title = 'after ${modelCalls}';\n`); for (const [path, content] of Object.entries(addedFiles)) { await mkdir(join(cwd, path, ".."), { recursive: true }); await writeFile(join(cwd, path), content); } return { ...modelResult, blocked }; };
+  const model = async (_job, cwd, _control, options) => { if (_job.images?.length) { assert.equal(await readFile(options.imagePaths[0], "utf8"), Buffer.from(imagePayload[0].bytes,"base64").toString()); if (copyImage) await writeFile(join(cwd,copyImage === "base64" ? "copied.js" : "copied.jpg"),copyImage === "base64" ? `export const reference = "${imagePayload[0].bytes}";` : await readFile(options.imagePaths[0])); } modelCalls++; modelJobs.push(_job); modelContents.push(await readFile(join(cwd, "page.js"), "utf8")); await assert.rejects(readFile(join(cwd, ".env.local")), /ENOENT/); for (const [path, content] of Object.entries(initialFiles)) assert.equal(await readFile(join(cwd, path), "utf8"), content); await writeFile(join(cwd, "page.js"), `export const title = 'after ${modelCalls}';\n`); for (const [path, content] of Object.entries(addedFiles)) { await mkdir(join(cwd, path, ".."), { recursive: true }); await writeFile(join(cwd, path), content); } return { ...modelResult, blocked, ...(action ? { action } : {}) }; };
   const client = { request: async (path, body) => {
     assert.equal(path, "/api/automation/work"); reports.push(body);
     if (body.phase === "images") return { images: imagePayload };
@@ -360,4 +360,46 @@ test("a model cannot publish private screenshots as files or inline base64", asy
 
 test("explicit development uses project-persistent local execution even when a deployment exists",async()=>{
  for(const stage of [undefined,"development"]){const f=await fixture({previewOnly:true,previewEnabled:true,deployed:true});try{await f.execute({context:{project:{stage}}});const result=f.reports.at(-1).result;assert.equal(result.preview.kind,stage?"mac":"deployment");if(stage)assert.equal(result.preview.dataPersistence,"project");}finally{await rm(f.dir,{recursive:true,force:true});}}
+});
+
+test("status question in change mode answers without tests, publication or preview, even if a model edited locally", async () => {
+  const f = await fixture({ action: "answer", publish: "merge", previewEnabled: true });
+  try {
+    await f.execute({ request: "이전 개발이 진행 중인가요?", context: { history: [{ outcome: "blocked" }] } });
+    const result = f.reports.find(r => r.phase === "result").result;
+    assert.equal(result.outcome, "answered"); assert.equal(result.blocked, false);
+    assert.deepEqual(result.changes, []); assert.equal(result.prUrl, null); assert.equal(result.branch, null);
+    assert.equal(result.preview, undefined); assert.equal(f.testCalls(), 0); assert.equal(f.counts().pushes, 0);
+    assert.deepEqual(f.ghCalls, []);
+  } finally { await rm(f.dir, { recursive: true, force: true }); }
+});
+test("explicit edit action still implements, tests and publishes under the original scope", async () => {
+  const f = await fixture({ action: "edit" });
+  try { await f.execute(); const result = f.reports.find(r => r.phase === "result").result;
+    assert.equal(result.outcome, "pr_open"); assert.equal(f.testCalls(), 1); assert.equal(f.counts().pushes, 1);
+  } finally { await rm(f.dir, { recursive: true, force: true }); }
+});
+test("structured current-request intent keeps old development blockers separate from a completed status answer", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "jarvis-intent-test-"));
+  try {
+    const answer = await runCodexWork({ ...job, request: "지금 작업 중인가요?", context: { history: [{ blocked: true }] } }, dir, dir, { run: async (_bin, args, opts) => {
+      if (args[0] === "login") return { code: 0, out: "Logged in using ChatGPT", err: "" };
+      if (args[1] === "--help") return { code: 0, out: "--ignore-user-config --ignore-rules --ephemeral --output-schema", err: "" };
+      const schema = JSON.parse(await readFile(args[args.indexOf("--output-schema") + 1], "utf8"));
+      assert(schema.required.includes("action")); assert.deepEqual(schema.properties.action.enum, ["answer", "edit"]);
+      assert(opts.input.includes("Change mode is a permission ceiling")); assert(opts.input.includes("not whether earlier development finished"));
+      await writeFile(args[args.indexOf("--output-last-message") + 1], JSON.stringify({ ...modelResult, action: "answer", reply: "이전 개발은 멈췄고 이번에는 상태 질문에 답했습니다." }));
+      return { code: 0, out: "", err: "" };
+    } });
+    assert.equal(answer.action, "answer"); assert.equal(answer.blocked, false);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+test('ask scope stays read-only for publication even when a model returns edit intent', async () => {
+  const f = await fixture({ action: 'edit', publish: 'merge', previewEnabled: true });
+  try {
+    await f.execute({ mode: 'ask' });
+    const result = f.reports.find(r => r.phase === 'result').result;
+    assert.equal(result.outcome, 'answered'); assert.deepEqual(result.changes, []);
+    assert.equal(f.counts().pushes, 0); assert.equal(f.testCalls(), 0); assert.equal(result.preview, undefined);
+  } finally { await rm(f.dir, { recursive: true, force: true }); }
 });

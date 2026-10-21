@@ -1,5 +1,5 @@
 // The CLI policy lives in the installed runner, not the deployed web service.
-export const MIN_PROJECT_WORK_RUNNER = "2.9.5";
+export const MIN_PROJECT_WORK_RUNNER = "2.9.6";
 export function workRunnerVersion(value: unknown): string | undefined {
   return typeof value === "string" && /^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(value) ? value : undefined;
 }
