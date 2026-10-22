@@ -598,6 +598,7 @@ try {
         .click();
       await page.getByRole("button", { name: "회사", exact: true }).waitFor();
       await page.goto(base);
+      await page.getByRole("region", { name: "빠른 메모", exact: true }).locator("summary").filter({ hasText: /^최근 메모/ }).click();
       await page.getByText(label === "device-a" ? "합성 회사 결과 수정됨" : "동시 변경에도 보존할 새 메모", { exact: true }).waitFor();
       assert.equal(
         await page.getByText("합성 개인 전용 비밀", { exact: true }).count(),
@@ -737,6 +738,7 @@ try {
         await resumed.route("**/*", allowStorage);
         const resumedPage = await resumed.newPage();
         await resumedPage.goto(base);
+        await resumedPage.getByRole("region", { name: "빠른 메모", exact: true }).locator("summary").filter({ hasText: /^최근 메모/ }).click();
         await resumedPage
           .getByText("브라우저에서 실제 서버로 저장한 합성 메모", {
             exact: true,
