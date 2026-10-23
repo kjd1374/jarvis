@@ -1,9 +1,9 @@
 "use client";
-import Link from "next/link";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { dateLabel, id, now, spaceLabels } from "@/lib/workspace/types";
 import { useWorkspace } from "./workspace-provider";
 import { Icon } from "./icon";
+import { SavedNotes } from "./saved-notes";
 import styles from "./studio.module.css";
 import layout from "./integrated-home.module.css";
 
@@ -39,30 +39,31 @@ function NotesView({
 }) {
   const { data, ready, saving, mutate } = useWorkspace();
   const space = data.activeSpace;
+  const projects = useMemo(() => data.projects.filter(project => project.space === space), [data.projects, space]);
   const [content, setContent] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const pending = useRef(false);
   const [linkedProject, setLinkedProject] = useState(projectId ?? "");
-  const [recentOpen, setRecentOpen] = useState(false);
-  const notes = data.notes
+  const [savedId, setSavedId] = useState("");
+  const notes = useMemo(() => data.notes
     .filter(
       (n) => n.space === space && (!projectId || n.projectId === projectId),
     )
     .slice()
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), [data.notes, space, projectId]);
   async function save(event: React.FormEvent) {
     event.preventDefault();
     if (!content.trim() || saving || pending.current) return;
     pending.current = true;
     try {
-      const stamp = now();
+      const stamp = now(), noteId = id();
       await mutate((d) => ({
         ...d,
         notes: [
           ...d.notes,
           {
-            id: id(),
+            id: noteId,
             space,
             projectId: home ? linkedProject || null : projectId,
             content: content.trim(),
@@ -72,7 +73,7 @@ function NotesView({
         ],
       }));
       setContent("");
-      setRecentOpen(true);
+      setSavedId(noteId);
       setError("");
       setNotice(
         "메모를 저장했습니다. 외부 서비스에는 변경을 보내지 않았습니다.",
@@ -114,19 +115,23 @@ function NotesView({
         </div>
   );
   return (
-    <section className={styles.detailSection} aria-label="빠른 메모">
+    <section className={styles.detailSection} aria-label="빠른 메모" id={home ? "home-notes" : undefined}>
       <div className={styles.detailHeading}>
         <h2>
           <Icon name="note" size={17} />{" "}
-          {compact ? "빠른 메모" : "내 메모와 생각"}
+          {home ? "메모 · 기록" : compact ? "빠른 메모" : "내 메모와 생각"}
         </h2>
         <span>
           {spaceLabels[space]} ·{" "}
           {projectId
             ? data.projects.find((p) => p.id === projectId)?.name
-            : "영역 공통"}
+            : home ? "전체 프로젝트" : "영역 공통"}
         </span>
+        {home && <a href="#home-saved-notes" className={layout.noteJump}>저장한 메모 {notes.length}개 ↓</a>}
       </div>
+      {home && <p className={layout.noteIntro}>새 생각을 남기고, 저장한 기록을 바로 찾아보세요.</p>}
+      <div className={home ? layout.noteWorkspace : undefined}>
+      <div>
       <form onSubmit={save} className={styles.quickNoteForm} aria-busy={saving}>
         <label
           className={styles.srOnly}
@@ -172,14 +177,9 @@ function NotesView({
           {notice}
         </p>
       )}
-      {notes.length ? home ? <details className={layout.recentNotes} open={recentOpen} onToggle={event => setRecentOpen(event.currentTarget.open)}>
-        <summary>최근 메모 {notes.length}개</summary>
-
-        {recentNotes}
-        <Link href="/notes" className={layout.more}>전체 메모 보기 →</Link>
-      </details> : recentNotes : (
-        <p className={styles.detailFootnote}>아직 메모가 없습니다. 기록한 메모는 해당 영역과 프로젝트에 보관됩니다.</p>
-      )}
+      </div>
+      {home ? <SavedNotes key={savedId} notes={notes} projects={projects} compact /> : notes.length ? recentNotes : <p className={styles.detailFootnote}>아직 메모가 없습니다. 기록한 메모는 해당 영역과 프로젝트에 보관됩니다.</p>}
+      </div>
     </section>
   );
 }

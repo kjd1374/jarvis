@@ -47,6 +47,11 @@ jobs:
       - name: Homebrew Node native startup and isolation
         if: ${{ !cancelled() }}
         run: '"$(brew --prefix node)/bin/node" --test --test-force-exit tests/development-runtime.test.mjs tests/interpreter-preview.test.mjs'
+      - name: Capture bounded native loopback address diagnostics
+        if: ${{ !cancelled() }}
+        run: |
+          node scripts/diagnose-native-loopback.mjs
+          "$(brew --prefix node)/bin/node" scripts/diagnose-native-loopback.mjs
 
   browser-tests:
     runs-on: ubuntu-latest
@@ -62,6 +67,16 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci --no-audit --no-fund
+      # The Azure Ubuntu mirror stalled before tests in run 39877396082.
+      # Keep Ubuntu's signed repositories and all browser checks.
+      - name: Use the canonical Ubuntu package mirror
+        run: |
+          for apt_source in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources /etc/apt/apt-mirrors.txt; do
+            if [ -f "$apt_source" ]; then
+              sudo sed -i 's|http://azure\.archive\.ubuntu\.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' "$apt_source"
+            fi
+          done
+          cat /etc/apt/apt-mirrors.txt
       - run: npx playwright install --with-deps chromium webkit
       # No environment secrets: each suite builds a disposable, local-only app.
       - run: npm run test:${{ matrix.suite }}
@@ -85,6 +100,14 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci --no-audit --no-fund
+      - name: Use the canonical Ubuntu package mirror
+        run: |
+          for apt_source in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources /etc/apt/apt-mirrors.txt; do
+            if [ -f "$apt_source" ]; then
+              sudo sed -i 's|http://azure\.archive\.ubuntu\.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' "$apt_source"
+            fi
+          done
+          cat /etc/apt/apt-mirrors.txt
       - run: npx playwright install --with-deps chromium
       # Disposable local Docker Supabase; no production variables or secrets.
       - run: npx playwright install --with-deps webkit

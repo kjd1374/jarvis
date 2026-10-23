@@ -28,7 +28,7 @@ export function HomeProjects({ projects }: { projects: Project[] }) {
     } catch { setError("프로젝트 선택을 저장하지 못했습니다. 다시 열어주세요."); }
     finally { pending.current = false; }
   }
-  return <section className={styles.detailSection} aria-label="프로젝트 이어가기">
+  return <section className={styles.detailSection} aria-label="프로젝트 이어가기" id="home-projects">
     <div className={styles.detailHeading}><h2><Icon name="folder" size={17} /> 프로젝트 이어가기</h2><Link href="/projects">프로젝트 관리 →</Link></div>
     {error && <p className={styles.formError} role="alert">{error}</p>}
     <div className={home.projectGroups}>
@@ -36,7 +36,7 @@ export function HomeProjects({ projects }: { projects: Project[] }) {
         const items = projects.filter(p => projectStage(p) === group.stage).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
         return <section key={group.stage} aria-label={group.title} className={home.projectGroup}>
           <h3>{group.title}<span>{items.length}</span></h3>
-          {items.length ? items.slice(0, 3).map(project => {
+          {items.length ? items.slice(0, 2).map(project => {
             const live = group.stage === "live", launch = live ? projectHref(project.launchUrl) : null;
             const Entry = launch ? "a" : Link;
             return <article key={project.id} className={home.projectCard}>
@@ -48,7 +48,7 @@ export function HomeProjects({ projects }: { projects: Project[] }) {
               {live && <Link className={home.manage} href={`/projects/${project.id}`} onClick={event => void open(event, project)}>{project.name} 관리</Link>}
             </article>;
           }) : <p className={home.empty}>{group.empty}</p>}
-          {items.length > 3 && <Link href="/projects" className={home.more}>프로젝트 {items.length - 3}개 더 보기 →</Link>}
+          {items.length > 2 && <Link href="/projects" className={home.more}>프로젝트 {items.length - 2}개 더 보기 →</Link>}
         </section>;
       })}
     </div>
