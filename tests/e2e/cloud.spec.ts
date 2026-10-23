@@ -97,6 +97,51 @@ async function create(page: Page, name: string) {
   await expect(form).not.toBeVisible();
 }
 
+test("서버 메모 모아보기와 저장 진단은 기록·선택 프로젝트를 서버에 쓰지 않는다", async ({ page }) => {
+  const remote = fixture(), at = "2026-10-16T00:00:00.000Z";
+  remote.company.data.activeProjects.company = "company-project";
+  for (let n = 0; n < 4; n++) remote.company.data.notes.push({ id: `inspection-company-${n}`, space: "company", projectId: n ? null : "company-project", content: `합성 회사 저장 진단 ${n}`, createdAt: at, updatedAt: at });
+  for (let n = 0; n < 3; n++) remote.personal.data.notes.push({ id: `inspection-personal-${n}`, space: "personal", projectId: "personal-project", content: `합성 개인 저장 진단 ${n}`, createdAt: at, updatedAt: at });
+  const before = structuredClone(remote);
+  const { control } = await connect(page, remote);
+  await page.goto("/memos"); await ready(page);
+  const archive = page.getByRole("region", { name: "저장한 메모", exact: true });
+  await expect(archive.getByRole("listitem")).toHaveCount(4);
+  await expect(archive).not.toContainText("합성 개인 저장 진단");
+  await page.getByLabel("프로젝트 범위").selectOption("company-project");
+  await expect(archive.getByRole("listitem")).toHaveCount(1);
+  await expect(archive).toContainText("이 프로젝트 밖에 메모 3개가 있습니다.");
+  // An ordinary refresh still hydrates the saved project preference, without
+  // overriding the archive's independent local view filter.
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await page.waitForLoadState("networkidle");
+  await ready(page);
+  await archive.getByRole("button", { name: "모든 프로젝트 메모 보기", exact: true }).click();
+  await expect(archive.getByRole("listitem")).toHaveCount(4);
+  expect(control.puts).toBe(0);
+  expect(remote).toEqual(before);
+  await page.waitForLoadState("networkidle"); await page.goto("/settings#storage-recovery"); await ready(page); await page.waitForLoadState("networkidle");
+  const recovery = page.getByRole("region", { name: "브라우저 저장 진단과 복구", exact: true });
+  const stored = () => page.evaluate(owner => new Promise(resolve => {
+    const request = indexedDB.open(`jarvis-workspace-owner-${owner}`, 1);
+    request.onsuccess = () => {
+      const db = request.result, transaction = db.transaction("workspace", "readonly"), records = transaction.objectStore("workspace").getAll();
+      transaction.oncomplete = () => { db.close(); resolve(records.result); };
+    };
+  }), owner);
+  const original = await stored();
+  await recovery.getByRole("button", { name: "이 브라우저 저장 상태 확인", exact: true }).click();
+  await expect(recovery).toContainText("현재 브라우저 저장본 · 회사 전체 프로젝트: 메모 4개 · 누적 맥락 0개");
+  await expect(recovery).toContainText("마지막 정상 저장본 · 회사 전체 프로젝트: 메모 4개 · 누적 맥락 0개");
+  await expect(recovery).not.toContainText("합성 회사 저장 진단");
+  await expect(recovery).not.toContainText("합성 개인 저장 진단");
+  await expect(recovery.getByRole("button", { name: "마지막 정상 저장본 복구", exact: true })).toHaveCount(0);
+  expect(await stored()).toEqual(original);
+  expect(control.puts).toBe(0);
+  expect(remote).toEqual(before);
+  await page.waitForLoadState("networkidle");
+});
+
 test("확인되지 않은 기기는 로그인 화면 없이 확인 번호만 표시하고 기존 기록을 노출하지 않는다", async ({
   page,
 }) => {

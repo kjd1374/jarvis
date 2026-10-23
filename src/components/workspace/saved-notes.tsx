@@ -1,13 +1,19 @@
 "use client";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { dateLabel, type Note, type Project } from "@/lib/workspace/types";
 import { Modal } from "./workspace-controls";
 import { Icon } from "./icon";
 import styles from "./studio.module.css";
 import notesStyle from "./saved-notes.module.css";
 
-export function SavedNotes({ notes, projects, compact = false }: { notes: Note[]; projects: Project[]; compact?: boolean }) {
+export function MemoScopeNotice({ count, onShowAll }: { count: number; onShowAll?: () => void }) {
+  return <p className={notesStyle.scopeNotice}>이 프로젝트 밖에 메모 {count}개가 있습니다.{" "}
+    {onShowAll ? <button type="button" onClick={onShowAll}>모든 프로젝트 메모 보기</button> : <Link href="/memos">모든 프로젝트 메모 보기</Link>}
+  </p>;
+}
+
+export function SavedNotes({ notes, projects, compact = false, scopeHelp }: { notes: Note[]; projects: Project[]; compact?: boolean; scopeHelp?: ReactNode }) {
   const [filter, setFilter] = useState({ query: "", page: 0 });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const pageSize = compact ? 3 : 10;
@@ -30,14 +36,16 @@ export function SavedNotes({ notes, projects, compact = false }: { notes: Note[]
       <input aria-label="저장한 메모 검색" type="search" maxLength={200} value={filter.query} onChange={event => setFilter({ query: event.target.value, page: 0 })} placeholder="내용이나 프로젝트로 찾기" />
     </label>
     <div className={notesStyle.results} aria-live="polite" role="status">{filter.query.trim() ? `검색 결과 ${found.length}개` : `최근 수정 순 · ${notes.length}개`}</div>
+    {scopeHelp}
     {found.length ? <ul className={notesStyle.list}>{found.slice(page * pageSize, (page + 1) * pageSize).map(note => {
       const title = note.content.split(/\r?\n/, 1)[0].trim().slice(0, 80) || "내용 보기";
       const preview = note.content.includes("\n") ? note.content.slice(note.content.indexOf("\n") + 1).trim() : note.content.slice(80);
       return <li key={note.id}><button type="button" aria-label={`메모 읽기: ${title}`} className={notesStyle.card} onClick={() => setSelectedId(note.id)}>
         <div><strong>{title}</strong>{preview && <p>{preview.slice(0, 180)}</p>}<small>{projectName(note)} · {dateLabel(note.updatedAt)}</small></div><Icon name="arrow" size={15} />
       </button></li>;
-    })}</ul> : <div className={notesStyle.empty}><Icon name="note" size={24} /><p>{notes.length ? "일치하는 메모가 없습니다." : "저장한 메모가 여기에 바로 보입니다."}</p>
+    })}</ul> : <div className={notesStyle.empty}><Icon name="note" size={24} /><p>{notes.length ? "일치하는 메모가 없습니다." : "이 범위에서 표시할 메모가 없습니다."}</p>
       {filter.query && <button type="button" onClick={() => setFilter({ query: "", page: 0 })}>검색 지우기</button>}
+      {!notes.length && !scopeHelp && <Link href="/settings#storage-recovery">메모 저장 위치 확인</Link>}
     </div>}
     {pages > 1 && <nav className={notesStyle.pagination} aria-label="메모 페이지">
       <button type="button" disabled={page === 0} onClick={() => setFilter(current => ({ ...current, page: page - 1 }))}>이전 메모</button>
