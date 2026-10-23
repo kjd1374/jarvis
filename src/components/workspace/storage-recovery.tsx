@@ -7,11 +7,13 @@ import {
   type StorageRecovery as Recovery,
 } from "@/lib/workspace/storage";
 import { useWorkspace } from "./workspace-provider";
+import { spaceLabels, type Space } from "@/lib/workspace/types";
 import styles from "./studio.module.css";
 
 export function StorageRecovery() {
-  const { saving, retryLoad } = useWorkspace();
-  const [result, setResult] = useState<Recovery | null>(null);
+  const { data, saving, retryLoad } = useWorkspace();
+  const space = data.activeSpace;
+  const [result, setResult] = useState<(Recovery & { space: Space }) | null>(null);
   const [origin, setOrigin] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -40,7 +42,7 @@ export function StorageRecovery() {
           "정상 저장본을 복구했습니다. 읽지 못했던 기록과 파일 원본은 삭제하지 않았습니다.",
         );
       }
-      setResult(await inspectStorageRecovery());
+      setResult({ ...await inspectStorageRecovery(), space });
       setOrigin(window.location.origin);
       setConfirmed(false);
     } catch (e) {
@@ -71,7 +73,7 @@ export function StorageRecovery() {
       >
         {busy ? "확인 중…" : "이 브라우저 저장 상태 확인"}
       </button>
-      {result && (
+      {result && result.space === space && (
         <div className={styles.storageInspection}>
           <p>현재 주소: {origin}</p>
           <p>
@@ -82,6 +84,7 @@ export function StorageRecovery() {
                 ? "저장된 현재 기록 없음"
                 : "기록이 있으나 읽을 수 없음"}
           </p>
+          {result.currentCounts && <p>현재 브라우저 저장본 · {spaceLabels[space]} 전체 프로젝트: 메모 {result.currentCounts[space].notes}개 · 누적 맥락 {result.currentCounts[space].contexts}개</p>}
           {result.checkpoint ? (
             <>
               <p>
@@ -93,6 +96,7 @@ export function StorageRecovery() {
                   (한국 시간)
                 </time>
               </p>
+              <p>마지막 정상 저장본 · {spaceLabels[space]} 전체 프로젝트: 메모 {result.checkpoint.data.notes.filter(note => note.space === space).length}개 · 누적 맥락 {result.checkpoint.data.contexts.filter(context => context.space === space).length}개</p>
               <p>
                 복구본의 프로젝트: 회사{" "}
                 {

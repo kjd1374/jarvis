@@ -10,9 +10,11 @@ import styles from "./studio.module.css";
 export function WorkspaceControls({
   selectedProjectId,
   onScopeChange,
+  onProjectFilterChange,
 }: {
   selectedProjectId?: string;
   onScopeChange?: (projectId: string | null, space: Space) => void;
+  onProjectFilterChange?: (projectId: string | null, space: Space) => void;
 } = {}) {
   const {
     data,
@@ -57,6 +59,10 @@ export function WorkspaceControls({
             value={selectedProjectId ?? data.activeProjects[space] ?? ""}
             onChange={(event) => {
               const projectId = event.target.value || null;
+              if (onProjectFilterChange) {
+                onProjectFilterChange(projectId, space);
+                return;
+              }
               void mutate((d) => ({
                 ...d,
                 activeProjects: {

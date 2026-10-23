@@ -1,9 +1,10 @@
 "use client";
+import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 import { dateLabel, id, now, spaceLabels } from "@/lib/workspace/types";
 import { useWorkspace } from "./workspace-provider";
 import { Icon } from "./icon";
-import { SavedNotes } from "./saved-notes";
+import { MemoScopeNotice, SavedNotes } from "./saved-notes";
 import styles from "./studio.module.css";
 import layout from "./integrated-home.module.css";
 
@@ -52,6 +53,8 @@ function NotesView({
     )
     .slice()
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), [data.notes, space, projectId]);
+  const outsideCount = projectId ? data.notes.filter(note => note.space === space && note.projectId !== projectId).length : 0;
+  const scopeHelp = outsideCount ? <MemoScopeNotice count={outsideCount} /> : undefined;
   async function save(event: React.FormEvent) {
     event.preventDefault();
     if (!content.trim() || saving || pending.current) return;
@@ -178,7 +181,7 @@ function NotesView({
         </p>
       )}
       </div>
-      {home ? <SavedNotes key={savedId} notes={notes} projects={projects} compact /> : notes.length ? recentNotes : <p className={styles.detailFootnote}>아직 메모가 없습니다. 기록한 메모는 해당 영역과 프로젝트에 보관됩니다.</p>}
+      {home ? <SavedNotes key={savedId} notes={notes} projects={projects} compact scopeHelp={scopeHelp} /> : <div>{scopeHelp}{notes.length ? recentNotes : <p className={styles.detailFootnote}>이 범위에서 표시할 메모가 없습니다.{" "}{!scopeHelp && <Link href="/settings#storage-recovery">메모 저장 위치 확인</Link>}</p>}</div>}
       </div>
     </section>
   );

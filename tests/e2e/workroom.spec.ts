@@ -724,6 +724,57 @@ test("메모 우선 업무실은 단계별로 이어가고 메모 연결·새로
   await page.waitForLoadState("networkidle");
 });
 
+test("저장한 메모는 프로젝트 밖의 기록을 안내하고 모아보기 필터는 저장 범위를 바꾸지 않는다", async ({ page }) => {
+  const data = emptyWorkspace();
+  data.projects.push(
+    { id: "memo-empty", space: "company", name: "메모 없는 프로젝트", description: "합성", createdAt: stamp },
+    { id: "memo-recorded", space: "company", name: "기록 있는 프로젝트", description: "합성", createdAt: stamp },
+    { id: "memo-personal", space: "personal", name: "개인 프로젝트", description: "합성", createdAt: stamp },
+  );
+  data.activeProjects.company = "memo-empty";
+  data.activeProjects.personal = "memo-personal";
+  data.notes.push(
+    { id: "memo-linked", space: "company", projectId: "memo-recorded", content: "다른 프로젝트의 기존 기록", createdAt: stamp, updatedAt: stamp },
+    { id: "memo-common", space: "company", projectId: null, content: "프로젝트 연결 없는 기존 기록", createdAt: stamp, updatedAt: stamp },
+    { id: "memo-secret", space: "personal", projectId: "memo-personal", content: "개인 영역 전용 기록", createdAt: stamp, updatedAt: stamp },
+  );
+  await seed(page, data);
+  const before = structuredClone((await state(page))!);
+  const home = page.getByRole("region", { name: "빠른 메모", exact: true });
+  await expect(home).toContainText("이 프로젝트 밖에 메모 2개가 있습니다.");
+  await expect(home).not.toContainText("개인 영역 전용 기록");
+  await page.waitForLoadState("networkidle"); await page.goto("/notes"); await ready(page);
+  await expect(home).toContainText("이 프로젝트 밖에 메모 2개가 있습니다.");
+  await home.getByRole("link", { name: "모든 프로젝트 메모 보기", exact: true }).click();
+  await expect(page).toHaveURL(/\/memos$/); await ready(page);
+  const archive = page.getByRole("region", { name: "저장한 메모", exact: true });
+  await expect(page.getByLabel("프로젝트 범위")).toHaveValue("");
+  await expect(archive.getByRole("listitem")).toHaveCount(2);
+  await expect(archive).not.toContainText("개인 영역 전용 기록");
+  await archive.getByRole("button", { name: "메모 읽기: 다른 프로젝트의 기존 기록", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "메모 읽기", exact: true })).toContainText("다른 프로젝트의 기존 기록");
+  await page.keyboard.press("Escape");
+  await page.getByLabel("프로젝트 범위").selectOption("memo-empty");
+  await expect(archive).toContainText("이 프로젝트 밖에 메모 2개가 있습니다.");
+  await archive.getByRole("button", { name: "모든 프로젝트 메모 보기", exact: true }).click();
+  await expect(archive.getByRole("listitem")).toHaveCount(2);
+  await page.getByLabel("프로젝트 범위").selectOption("memo-recorded");
+  await expect(archive.getByRole("listitem")).toHaveCount(1);
+  expect(await state(page)).toEqual(before);
+  await page.waitForLoadState("networkidle"); await page.reload(); await ready(page);
+  await expect(page.getByLabel("프로젝트 범위")).toHaveValue("");
+  await expect(archive.getByRole("listitem")).toHaveCount(2);
+  expect(await state(page)).toEqual(before);
+  await page.getByRole("button", { name: "개인", exact: true }).click(); await ready(page);
+  await expect(page.getByLabel("프로젝트 범위")).toHaveValue("");
+  await expect(archive.getByRole("listitem")).toHaveCount(1);
+  await expect(archive).toContainText("개인 영역 전용 기록");
+  await expect(archive).not.toContainText("다른 프로젝트의 기존 기록");
+  expect((await state(page))!.notes).toEqual(before.notes);
+  expect((await state(page))!.activeProjects).toEqual(before.activeProjects);
+  await page.waitForLoadState("networkidle");
+});
+
 test("저장한 메모는 입력창 근처에서 검색·전문 읽기하고 30개 이후 기록까지 찾는다", async ({ page }, testInfo) => {
   const at = new Date().toISOString(), data = emptyWorkspace();
   data.projects.push({ id: "notes-project", space: "company", name: "합성 영업", description: "합성 목표", createdAt: at }, { id: "other-notes-project", space: "company", name: "합성 다른 업무", description: "합성", createdAt: at }, { id: "private-project", space: "personal", name: "개인 전용 프로젝트", description: "합성", createdAt: at });

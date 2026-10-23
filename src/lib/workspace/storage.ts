@@ -1,4 +1,4 @@
-import { type WorkspaceData } from "./types";
+import { type Space, type WorkspaceData } from "./types";
 import { normalizeWorkspace } from "./validation";
 import { scopeWorkspace } from "./transfer";
 import { canonical, emptySync, type SyncState } from "../cloud/records";
@@ -85,6 +85,7 @@ function decodeFile(value: unknown): Blob | undefined {
 const checkpointKey = "last-confirmed";
 export type StorageRecovery = {
   current: "valid" | "missing" | "unreadable";
+  currentCounts: Record<Space, { notes: number; contexts: number }> | null;
   checkpoint: { data: WorkspaceData; savedAt: string } | null;
 };
 
@@ -294,9 +295,15 @@ export async function inspectStorageRecovery(): Promise<StorageRecovery> {
     tx.oncomplete = () => {
       try {
         let status: StorageRecovery["current"] = "missing";
+        let currentCounts: StorageRecovery["currentCounts"] = null;
         if (current.result !== undefined) {
           try {
-            decode(current.result);
+            const data = decode(current.result);
+            const count = (space: Space) => ({
+              notes: data.notes.filter(note => note.space === space).length,
+              contexts: data.contexts.filter(context => context.space === space).length,
+            });
+            currentCounts = { company: count("company"), personal: count("personal") };
             status = "valid";
           } catch {
             status = "unreadable";
@@ -312,6 +319,7 @@ export async function inspectStorageRecovery(): Promise<StorageRecovery> {
           throw new Error("정상 저장본의 저장 시각을 확인할 수 없습니다.");
         resolve({
           current: status,
+          currentCounts,
           checkpoint: copy
             ? { data: decode(copy.data), savedAt: copy.savedAt }
             : null,
