@@ -4,6 +4,7 @@ const routes = [
   ["업무실", "/"],
   ["업무", "/tasks"],
   ["프로젝트", "/projects"],
+  ["메모", "/memos"],
   ["자료실", "/library"],
   ["맥락", "/notes"],
   ["설정", "/settings"],

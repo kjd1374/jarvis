@@ -42,13 +42,13 @@ export function IntegratedHome() {
     <div className={home.home}>
       <header className={home.heading}>
         <div><h1>업무실</h1><p>{spaceLabels[space]} · {projects.find(project => project.id === projectId)?.name ?? "전체 프로젝트"}</p></div>
-        <nav className={home.tools} aria-label="업무실 도구">
-          <Link href="/settings#connections"><Icon name="link" size={14} /> 연결 준비</Link>
-          <Link href="/assistant"><Icon name="search" size={14} /> 자료 검색 · AI 질문</Link>
+        <nav className={home.sectionNav} aria-label="업무실 바로가기">
+          <a href="#home-notes">메모</a><a href="#workroom-next-actions">할 일</a><a href="#home-projects">프로젝트</a><a href="#home-services">서비스</a>
         </nav>
       </header>
       {!ready ? <div className={styles.loadState} role="status"><p>{error ? "기존 기록을 다시 불러와주세요." : "업무실을 불러오는 중입니다."}</p></div> : <>
         <NotesPanel projectId={projectId} compact home />
+        <div className={home.workGrid}>
         <section className={styles.detailSection} aria-label="오늘의 다음 행동" id="workroom-next-actions">
           <div className={styles.detailHeading}><h2><Icon name="check" size={17} /> 지금 확인할 일</h2><Link href="/tasks?view=records">업무 관리 →</Link></div>
           <div className={home.metrics} aria-label="업무 요약">
@@ -76,7 +76,8 @@ export function IntegratedHome() {
           </div>
         </section>
         <HomeProjects projects={projects} />
-        <section className={styles.detailSection} aria-label="자주 쓰는 서비스">
+        </div>
+        <section className={styles.detailSection} aria-label="자주 쓰는 서비스" id="home-services">
           <div className={styles.detailHeading}><h2><Icon name="link" size={17} /> 자주 쓰는 서비스</h2><Link href="/settings#services">서비스 관리 →</Link></div>
           {favorites.length ? <div className={home.services}>{favorites.slice(0, 6).map(service => {
             const href = projectHref(service.webUrl);
@@ -86,6 +87,10 @@ export function IntegratedHome() {
           })}</div> : <p className={home.empty}>자주 사용하는 서비스 주소를 등록하면 바로 열 수 있습니다.</p>}
           {favorites.length > 6 && <Link href="/settings#services" className={home.more}>서비스 {favorites.length - 6}개 더 보기 →</Link>}
         </section>
+        <nav className={home.tools} aria-label="업무실 도구">
+          <Link href="/settings#connections"><Icon name="link" size={14} /> 연결 준비</Link>
+          <Link href="/assistant"><Icon name="search" size={14} /> 자료 검색 · AI 질문</Link>
+        </nav>
         <details className={home.diagnostics}><summary>서비스 관리·연결 기록</summary><ServicesPanel projectId={projectId ?? undefined} favoritesOnly /></details>
         <details className={home.diagnostics}><summary>최근 결과·연결 진단 {issues.length ? `· 확인 ${issues.length}개` : ""}</summary>
           <SourceResults projectId={projectId ?? undefined} />

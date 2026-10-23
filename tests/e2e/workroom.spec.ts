@@ -280,10 +280,10 @@ test("프로젝트에 서비스·메모·할 일·요청을 저장하고 실제 
   await page.goto("/");
   const homeMemo = page.getByRole("region", { name: "빠른 메모", exact: true });
   await expect(homeMemo.getByText(memo, { exact: true })).not.toBeVisible();
-  await openDetails(page, "최근 메모");
-  await homeMemo.getByText("메모 전체 보기", { exact: true }).click();
-  await expect(homeMemo.getByText(memo, { exact: true })).toBeVisible();
-  await homeMemo.getByText("메모 전체 보기", { exact: true }).click();
+  await homeMemo.getByRole("button", { name: /^메모 읽기:/ }).first().click();
+  const memoReader = page.getByRole("dialog", { name: "메모 읽기", exact: true });
+  await expect(memoReader.getByText(memo, { exact: true })).toBeVisible();
+  await memoReader.getByRole("button", { name: "읽기 닫기", exact: true }).click();
   await expect(
     page
       .getByRole("region", { name: "오늘의 다음 행동", exact: true })
@@ -476,7 +476,6 @@ test("메모 저장 실패·연속 제출을 처리하고 연결 실패는 데�
   await page.waitForLoadState("networkidle");
   await page.reload();
   await ready(page);
-  await openDetails(page, "최근 메모");
   await expect(
     page.getByText("저장 재시도 합성 메모", { exact: true }),
   ).toBeVisible();
@@ -684,11 +683,16 @@ test("메모 우선 업무실은 단계별로 이어가고 메모 연결·새로
   const projects = page.getByRole("region", { name: "프로젝트 이어가기", exact: true }), services = page.getByRole("region", { name: "자주 쓰는 서비스", exact: true });
   const boxes = await Promise.all([memo,next,projects,services].map(item => item.boundingBox()));
   expect(boxes.every(Boolean)).toBe(true);
-  for (let i = 1; i < boxes.length; i++) expect(boxes[i]!.y).toBeGreaterThan(boxes[i - 1]!.y);
+  expect(boxes[1]!.y).toBeGreaterThan(boxes[0]!.y);
+  expect(boxes[3]!.y).toBeGreaterThan(Math.max(boxes[1]!.y, boxes[2]!.y));
+  if (page.viewportSize()!.width > 1100) expect(boxes[2]!.x).toBeGreaterThan(boxes[1]!.x);
+  else expect(boxes[2]!.y).toBeGreaterThan(boxes[1]!.y);
   const input = memo.getByLabel("빠른 메모 내용");
   expect((await input.boundingBox())!.y + 50).toBeLessThan(page.viewportSize()!.height);
-  await expect(memo.getByText("최근 메모 12개", { exact: true })).toBeVisible();
-  await expect(memo.locator("details").first()).not.toHaveAttribute("open");
+  const savedNotes = memo.getByRole("region", { name: "저장한 메모", exact: true });
+  await expect(savedNotes.getByRole("heading", { name: /저장한 메모/ })).toHaveText("저장한 메모 12");
+  await expect(savedNotes.getByRole("listitem")).toHaveCount(3);
+  await expect(savedNotes.getByRole("list")).toBeVisible();
   await expect(next).toContainText("합성 진행 중인 기능 구현"); await expect(next).toContainText("저장소 확인 중");
   await expect(projects.getByRole("region", { name: "아이디어", exact: true })).toContainText("합성 아이디어");
   await expect(projects.getByRole("region", { name: "개발 중", exact: true })).toContainText("합성 개발");
@@ -705,7 +709,7 @@ test("메모 우선 업무실은 단계별로 이어가고 메모 연결·새로
   expect((await state(page))!.notes.find(row => row.content === note)).toMatchObject({ projectId: "home-development", space: "company" });
   expect((await state(page))!.notes).toHaveLength(14);
   await page.waitForLoadState("networkidle"); await page.reload(); await ready(page);
-  await openDetails(page, "최근 메모"); await expect(memo.getByText(note, { exact: true })).toBeVisible();
+  await expect(memo.getByText(note, { exact: true })).toBeVisible();
   const popupEvent = page.waitForEvent("popup"); await projects.getByRole("link", { name: "합성 사용 서비스 서비스 열기", exact: true }).click();
   const popup = await popupEvent; await popup.waitForLoadState(); expect(popup.url()).toContain("/api/health?synthetic=live"); await popup.close();
   await projects.getByRole("link", { name: "합성 아이디어 기획 이어가기", exact: true }).click();
@@ -716,6 +720,56 @@ test("메모 우선 업무실은 단계별로 이어가고 메모 연결·새로
   await expect(projects).toContainText("개인 전용 프로젝트"); await expect(projects).not.toContainText("합성 아이디어");
   await expect(next).not.toContainText("합성 진행 중인 기능 구현");
   await expect(memo.getByLabel("메모 연결 프로젝트").locator("option")).toHaveText(["프로젝트 연결 안 함", "개인 전용 프로젝트"]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.waitForLoadState("networkidle");
+});
+
+test("저장한 메모는 입력창 근처에서 검색·전문 읽기하고 30개 이후 기록까지 찾는다", async ({ page }, testInfo) => {
+  const at = new Date().toISOString(), data = emptyWorkspace();
+  data.projects.push({ id: "notes-project", space: "company", name: "합성 영업", description: "합성 목표", createdAt: at }, { id: "other-notes-project", space: "company", name: "합성 다른 업무", description: "합성", createdAt: at }, { id: "private-project", space: "personal", name: "개인 전용 프로젝트", description: "합성", createdAt: at });
+  for (let n = 0; n < 35; n++) data.notes.push({ id: `notes-browser-${n}`, space: "company", projectId: n % 2 === 0 ? "notes-project" : "other-notes-project", content: `합성 기록 ${String(n).padStart(2,"0")}\n` + (n === 34 ? "오래된 찾기검증 <img src=x onerror=alert(1)>\n".repeat(70) : "확인할 후속 업무"), createdAt: new Date(Date.now() - n * 60000).toISOString(), updatedAt: new Date(Date.now() - n * 60000).toISOString() });
+  data.notes.push({ id: "personal-browser-note", space: "personal", projectId: "private-project", content: "개인 전용 비밀 메모", createdAt: at, updatedAt: at });
+  await seed(page, data); await ready(page);
+  const before = structuredClone((await state(page))!);
+  const memo = page.getByRole("region", { name: "빠른 메모", exact: true }), saved = page.getByRole("region", { name: "저장한 메모", exact: true });
+  await expect(saved.getByRole("button", { name: "메모 읽기: 합성 기록 00", exact: true })).toBeVisible();
+  await expect(saved.getByRole("listitem")).toHaveCount(3);
+  const left = (await memo.getByLabel("빠른 메모 내용").boundingBox())!, right = (await saved.boundingBox())!;
+  if (page.viewportSize()!.width > 760) { expect(right.x).toBeGreaterThan(left.x); expect(right.y).toBeLessThan(left.y + 80); }
+  else expect(right.y).toBeGreaterThan(left.y);
+  await memo.getByLabel("빠른 메모 내용").fill("읽는 동안 유지할 임시 입력");
+  await saved.getByLabel("저장한 메모 검색").fill("찾기검증");
+  await expect(saved.getByRole("status")).toHaveText("검색 결과 1개");
+  const read = saved.getByRole("button", { name: "메모 읽기: 합성 기록 34", exact: true });
+  await read.focus(); await page.keyboard.press("Enter");
+  const reader = page.getByRole("dialog", { name: "메모 읽기", exact: true });
+  await expect(reader.getByText(data.notes[34].content, { exact: true })).toBeVisible();
+  await expect(reader.getByRole("link", { name: "연결 프로젝트 열기 →", exact: true })).toHaveAttribute("href", "/projects/notes-project");
+  await page.keyboard.press("Escape"); await expect(reader).not.toBeVisible(); await expect(read).toBeFocused();
+  await saved.getByLabel("저장한 메모 검색").fill("없는검색어"); await expect(saved).toContainText("일치하는 메모가 없습니다.");
+  await saved.getByRole("button", { name: "검색 지우기", exact: true }).click();
+  await saved.getByRole("button", { name: "다음 메모", exact: true }).click(); await expect(saved).toContainText("2 / 12");
+  expect((await state(page))!.notes).toEqual(before.notes);
+  await expect(memo.getByLabel("빠른 메모 내용")).toHaveValue("읽는 동안 유지할 임시 입력");
+  await memo.getByLabel("빠른 메모 내용").fill("");
+  await page.evaluate(() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); window.scrollTo(0,0); });
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+  await page.screenshot({ path: testInfo.outputPath("visible-notes-workroom.png"), fullPage: true });
+  await saved.getByRole("link", { name: "메모 모아보기 →", exact: true }).click(); await expect(page).toHaveURL(/\/memos$/); await ready(page);
+  const archive = page.getByRole("region", { name: "저장한 메모", exact: true });
+  await expect(archive.getByRole("listitem")).toHaveCount(10);
+  for (let n = 0; n < 3; n++) await archive.getByRole("button", { name: "다음 메모", exact: true }).click();
+  await expect(archive.getByRole("button", { name: "메모 읽기: 합성 기록 34", exact: true })).toBeVisible();
+  await expect(archive.getByRole("button", { name: "다음 메모", exact: true })).toBeDisabled();
+  await page.getByLabel("프로젝트 범위").selectOption("other-notes-project");
+  await archive.getByLabel("저장한 메모 검색").fill("찾기검증"); await expect(archive).toContainText("검색 결과 0개");
+  await page.getByRole("button", { name: "개인", exact: true }).click(); await ready(page);
+  await expect(archive.getByLabel("저장한 메모 검색")).toHaveValue("");
+  await expect(archive.getByRole("button", { name: "메모 읽기: 개인 전용 비밀 메모", exact: true })).toBeVisible();
+  await archive.getByLabel("저장한 메모 검색").fill("합성 기록"); await expect(archive).toContainText("검색 결과 0개");
+  expect((await state(page))!.notes).toEqual(before.notes);
+  await page.waitForLoadState("networkidle"); await page.reload(); await ready(page);
+  await expect(archive.getByRole("button", { name: "메모 읽기: 개인 전용 비밀 메모", exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.waitForLoadState("networkidle");
 });

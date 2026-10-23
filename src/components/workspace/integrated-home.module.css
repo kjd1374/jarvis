@@ -47,3 +47,25 @@
 .recentNotes > summary { font-size:12px; color:var(--muted); cursor:pointer; min-height:30px; }
 @media(max-width:1000px) { .projectGroups { grid-template-columns:1fr; } .projectGroup { display:grid; grid-template-columns:1fr 1fr; gap:10px; } .projectGroup h3,.projectGroup > .empty,.projectGroup > .more { grid-column:1/-1; } .projectCard { margin:0; } .services { grid-template-columns:1fr 1fr; } }
 @media(max-width:680px) { .home { gap:14px; } .heading { align-items:flex-start; } .heading h1 { font-size:21px; } .tools { gap:6px; flex-direction:column; align-items:flex-end; flex-shrink:0; font-size:11px; } .tools a { min-height:26px; } .nextColumns,.services,.projectGroup { grid-template-columns:1fr; } .nextColumns { gap:20px; } .metrics { gap:6px; } .metrics a,.metrics span { padding:7px 9px; font-size:11px; } .row { gap:8px; } .badge { font-size:10px; max-width:125px; white-space:normal; text-align:center; } .noteTools { align-items:center; gap:10px; } .noteTools label { width:100%; } .noteTools select { flex:1; max-width:none; font-size:16px; } .noteTools button { width:100%; justify-content:center; } }
+
+/* Keep recording, finding and resuming close together. */
+.noteIntro { color:var(--muted); font-size:12px; line-height:1.8; margin:-8px 0 20px; }
+.noteWorkspace { display:grid; grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr); gap:28px; align-items:start; }
+.noteWorkspace > div { min-width:0; }
+.noteWorkspace textarea { min-height:170px; }
+.noteWorkspace > section { border-left:1px solid var(--border); padding-left:28px; }
+.noteJump { color:var(--accent); font-size:12px; padding:6px 0; min-height:30px; display:inline-flex; align-items:center; }
+.sectionNav { display:flex; gap:6px; flex-wrap:wrap; }
+.sectionNav a { display:inline-flex; align-items:center; justify-content:center; font-size:12px; padding:8px 14px; min-height:36px; border:1px solid var(--border); border-radius:8px; color:var(--secondary); }
+.sectionNav a:hover { background:var(--surface-raised); color:var(--foreground); }
+.workGrid { display:grid; grid-template-columns:minmax(0,.95fr) minmax(0,1.05fr); gap:20px; align-items:start; }
+.workGrid .nextColumns { grid-template-columns:1fr; gap:20px; }
+.workGrid .projectGroups { grid-template-columns:1fr; gap:18px; }
+.workGrid .projectGroup { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.workGrid .projectGroup h3,.workGrid .projectGroup > .empty,.workGrid .projectGroup > .more { grid-column:1/-1; margin-bottom:0; }
+.workGrid .projectCard { margin-top:0; }
+.workGrid .projectCard > a:first-child { padding:13px; }
+.workGrid .projectCard p { -webkit-line-clamp:1; }
+@media(max-width:1100px) { .workGrid { grid-template-columns:1fr; } .workGrid .nextColumns { grid-template-columns:1fr 1fr; } .noteWorkspace { gap:20px; } .noteWorkspace > section { padding-left:20px; } }
+@media(max-width:760px) { .noteWorkspace { grid-template-columns:1fr; gap:22px; } .noteWorkspace textarea { min-height:108px; } .noteWorkspace > section { padding-left:0; padding-top:18px; border-left:0; border-top:1px solid var(--border); } .heading { flex-wrap:wrap; gap:12px; } .sectionNav { width:100%; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); } .sectionNav a { padding:8px 5px; } }
+@media(max-width:680px) { .workGrid { gap:14px; } .workGrid .nextColumns,.workGrid .projectGroup { grid-template-columns:1fr; } .noteWorkspace .noteTools { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:end; } .noteWorkspace .noteTools label { display:grid; gap:5px; } .noteWorkspace .noteTools button { width:auto; margin:0; white-space:nowrap; } }

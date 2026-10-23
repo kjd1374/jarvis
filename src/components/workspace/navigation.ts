@@ -29,6 +29,13 @@ export const navigation: {
     color: "purple",
   },
   {
+    href: "/memos",
+    label: "메모",
+    icon: "note",
+    description: "저장한 기록을 검색하고 읽어보는 곳",
+    color: "orange",
+  },
+  {
     href: "/library",
     label: "자료실",
     icon: "folder",
