@@ -33,8 +33,8 @@ export default defineConfig({
     },
     {
       name: "safari",
-      testMatch: /(?:automation|workroom)\.spec\.ts/,
-      grep: /개발 작업 공간은 사진과 설명|개발 작업 공간은 실패|AI 없는 화면은 연결 상태|미완료 요청은 원래 내용을 보존|현재 기획안 구현은 마지막 상태 질문|메모 우선 업무실은 단계별로|저장한 메모는 입력창 근처|저장한 메모는 프로젝트 밖/,
+      testMatch: /(?:automation|workroom|sheets)\.spec\.ts/,
+      grep: /개발 작업 공간은 사진과 설명|개발 작업 공간은 실패|AI 없는 화면은 연결 상태|미완료 요청은 원래 내용을 보존|현재 기획안 구현은 마지막 상태 질문|메모 우선 업무실은 단계별로|저장한 메모는 입력창 근처|저장한 메모는 프로젝트 밖|stored sheet connections remain|changing the local sheet project filter|moving a sheet to another project/,
       use: { ...devices["iPhone 13"] },
     },
     {
