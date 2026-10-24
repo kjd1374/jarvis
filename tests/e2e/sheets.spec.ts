@@ -117,6 +117,39 @@ test("changing the local sheet project filter fences delayed reads and preserves
   await page.waitForLoadState("networkidle");
 });
 
+test("moving a sheet to another project during a read preserves the document and rejects stale success", async ({ page }) => {
+  const remote = await cloud(page);
+  remote.company.data.projects.push({ id: "moved-sheet-project", space: "company", name: "이동 대상 합성 프로젝트", description: "합성", createdAt: "2026-10-17T00:00:00Z" });
+  await mockGoogle(page);
+  let reads = 0, release: (() => void) | undefined;
+  const delayed = new Promise<void>(resolve => { release = resolve; });
+  await page.route("https://sheets.googleapis.com/**", async route => {
+    if (route.request().url().includes("/values/")) {
+      reads++; await delayed;
+      return route.fulfill({ headers: { "Access-Control-Allow-Origin": "*" }, json: { values: [["이동 전 요청의 늦은 값"]] } });
+    }
+    return route.fulfill({ headers: { "Access-Control-Allow-Origin": "*" }, json: { spreadsheetId: "synthetic_sheet_123", properties: { title: "이동 전 읽기 제목" }, sheets: [{ properties: { sheetId: 7, title: "일정", sheetType: "GRID" } }] } });
+  });
+  let writes = 0;
+  page.on("request", request => { if (new URL(request.url()).pathname === "/api/workspace" && request.method() === "PUT") writes++; });
+  await page.goto("/tasks"); await ready(page);
+  await page.getByRole("button", { name: "탭 전체 불러오기", exact: true }).click();
+  await expect.poll(() => reads).toBe(1);
+  const moved = remote.company.data.documents[0];
+  moved.projectId = "moved-sheet-project"; moved.name = "다른 기기에서 옮긴 합성 시트";
+  const expected = structuredClone(moved); remote.company.revision++;
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await expect(page.getByRole("heading", { name: moved.name, exact: true })).toBeVisible();
+  const response = page.waitForResponse(r => r.url().includes("sheets.googleapis.com") && r.url().includes("/values/"));
+  release!(); await response;
+  await expect(page.getByRole("status").filter({ hasText: "시트 연결이 바뀌어 이번에 읽은 내용은 저장하지 않았습니다." })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "합성 일정", exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "이동 전 요청의 늦은 값", exact: true })).toHaveCount(0);
+  expect(remote.company.data.documents[0]).toEqual(expected);
+  expect(writes).toBe(0);
+  await page.waitForLoadState("networkidle");
+});
+
 test("sheet layout preserves legacy tasks, scopes and archived content across reload", async ({ page }, info) => {
   const data = sheetWorkspace();
   data.tasks.push({ id: "old-task", title: "보존할 이전 할 일", space: "company", projectId: "sheet-project", status: "todo", dueDate: "", createdAt: "2026-10-17T00:00:00Z" });

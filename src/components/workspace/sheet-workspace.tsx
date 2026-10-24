@@ -124,7 +124,9 @@ function SheetWorkspaceView({ initialDocument, projectId, onProjectFilterChange 
     if (!latestTab) throw new Error("원본에서 이 탭을 찾지 못했습니다. 다른 탭을 선택하거나 파일 선택기에서 다시 연결해주세요.");
     const loaded = await readWholeSheet(config, document.sheet.spreadsheetId, latestTab);
     if (!mounted.current) return;
+    let stored = false;
     await mutate(d => {
+      stored = false;
       const current = d.documents.find(row => row.id === document.id && row.space === space);
       if (!current?.sheet || current.sheet.archivedAt || !mounted.current || d.activeSpace !== space || current.projectId !== document.projectId) return d;
       const updated = { ...current, name: metadata.name, sheet: { ...current.sheet, tabs: metadata.tabs.map(t => ({ ...current.sheet!.tabs.find(old => old.id === t.id), ...t })) } };
@@ -132,8 +134,13 @@ function SheetWorkspaceView({ initialDocument, projectId, onProjectFilterChange 
       const saved = saveWholeSheet(next, space, current.id, latestTab.id, loaded);
       if (new TextEncoder().encode(JSON.stringify({ space, revision: Number.MAX_SAFE_INTEGER, data: scopeWorkspace(saved, space) })).byteLength > 3_900_000)
         throw new Error("전체 탭을 보관하면 서버 저장 한도를 넘습니다. 기존 내용은 유지됩니다. Google에서 원본을 열어주세요.");
+      stored = true;
       return saved;
     });
+    if (!stored) {
+      if (mounted.current && generation === selectionGeneration.current) setNotice("시트 연결이 바뀌어 이번에 읽은 내용은 저장하지 않았습니다. 현재 시트를 확인한 뒤 다시 불러와주세요.");
+      return;
+    }
     if (mounted.current && generation === selectionGeneration.current) { setPageIndex(0); setNotice(`${latestTab.title} · 탭 전체 ${loaded.wholeRead.rowCount.toLocaleString()}행·${loaded.wholeRead.columnCount.toLocaleString()}열을 불러와 보관했습니다.`); }
   }
   const disabled = busy || saving || !ready;
