@@ -30,4 +30,18 @@
 .metadata > span { min-width:0; overflow-wrap:anywhere; }
 .fullText { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.9; font-size:14px; max-height:55dvh; overflow:auto; padding:18px; border-radius:10px; background:var(--surface-raised); border:1px solid var(--border); }
 :global(dialog):has(.reader) { max-width:740px; }
+.compact .heading { margin-bottom:8px; }
+.compact .search input { padding:7px 0; font-size:12px; }
+.compact .results { margin:5px 0; font-size:10px; }
+.compact .list { gap:5px; }
+.compact .card { padding:6px 9px; gap:7px; }
+.compact .card > div { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:8px; }
+.compact .card strong { font-size:12px; line-height:20px; }
+.compact .card p { display:none; }
+.compact .card small { max-width:145px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:9px; }
+.compact .pagination { margin-top:6px; }
+.compact .pagination button { min-height:28px; padding:4px 8px; }
+.compact .empty { min-height:95px; }
 @media(max-width:680px) { .search input { font-size:16px; } .heading { margin-top:4px; } .card { padding:12px; } .fullText { padding:14px; font-size:14px; } .pagination button { min-height:42px; } }
+
+@media(max-width:680px) { .compact .search input { font-size:16px; } }

@@ -19,8 +19,8 @@ test("연결 준비에서 v4·GitHub·시트를 등록하고 자동화 상태를
 }, testInfo) => {
   await page.goto("/");
   await ready(page);
-  await page.getByRole("link", { name: "연결 준비", exact: true }).click();
-  await expect(page).toHaveURL(/\/settings#connections$/);
+  await page.getByRole("link", { name: "연결 관리", exact: true }).click();
+  await expect(page).toHaveURL(/\/settings#services$/);
   const setup = page.getByRole("region", { name: "연결 준비", exact: true });
   await expect(setup).toContainText("회사 영역");
   await setup.getByRole("button", { name: "v4 웹 등록", exact: true }).click();
@@ -286,7 +286,7 @@ test("프로젝트에 서비스·메모·할 일·요청을 저장하고 실제 
   await memoReader.getByRole("button", { name: "읽기 닫기", exact: true }).click();
   await expect(
     page
-      .getByRole("region", { name: "오늘의 다음 행동", exact: true })
+      .getByRole("tabpanel", { name: /^확인할 일/ })
       .getByText("합성 서비스 결과 검토", { exact: true })
       .first(),
   ).toBeVisible();
@@ -308,7 +308,7 @@ test("프로젝트에 서비스·메모·할 일·요청을 저장하고 실제 
   await page.getByRole("button", { name: "개인", exact: true }).click();
   await ready(page);
   await expect(page.getByText(memo, { exact: true })).toHaveCount(0);
-  await openDetails(page, "서비스 관리·연결 기록");
+  await page.goto("/settings#services"); await ready(page);
   await page.getByRole("button", { name: "서비스 등록", exact: true }).click();
   await expect(
     page.getByLabel("서비스 연결 방식").locator("option[value=v4]"),
@@ -379,8 +379,8 @@ test("수집 오류는 마지막 결과·출처·시각을 유지하고 회사 �
     },
   );
   await seed(page, data);
+  await page.goto("/settings#services"); await ready(page);
   await openDetails(page, "최근 결과·연결 진단");
-  await openDetails(page, "서비스 관리·연결 기록");
   const results = page.getByRole("region", {
     name: "최근 결과와 진행 상황",
     exact: true,
@@ -679,14 +679,12 @@ test("메모 우선 업무실은 단계별로 이어가고 메모 연결·새로
   const queued = enqueueWork(data, "company", "home-development", "home-service", "합성 진행 중인 기능 구현", "change", "pr", at);
   data = claimProjectWork(queued, { space: "company", projectIds: ["home-development"], deviceId: "synthetic-home-runner", runnerVersion: "2.9.6", development: true }, at).data;
   await seed(page, data); await ready(page);
-  const memo = page.getByRole("region", { name: "빠른 메모", exact: true }), next = page.getByRole("region", { name: "오늘의 다음 행동", exact: true });
-  const projects = page.getByRole("region", { name: "프로젝트 이어가기", exact: true }), services = page.getByRole("region", { name: "자주 쓰는 서비스", exact: true });
-  const boxes = await Promise.all([memo,next,projects,services].map(item => item.boundingBox()));
+  const memo = page.getByRole("region", { name: "빠른 메모", exact: true }), next = page.getByRole("tabpanel", { name: /^확인할 일/ });
+  const board = page.getByRole("region", { name: "서비스별 업무 현황", exact: true });
+  const projects = page.getByRole("region", { name: "프로젝트 이어가기", exact: true });
+  const boxes = await Promise.all([memo,board].map(item => item.boundingBox()));
   expect(boxes.every(Boolean)).toBe(true);
   expect(boxes[1]!.y).toBeGreaterThan(boxes[0]!.y);
-  expect(boxes[3]!.y).toBeGreaterThan(Math.max(boxes[1]!.y, boxes[2]!.y));
-  if (page.viewportSize()!.width > 1100) expect(boxes[2]!.x).toBeGreaterThan(boxes[1]!.x);
-  else expect(boxes[2]!.y).toBeGreaterThan(boxes[1]!.y);
   const input = memo.getByLabel("빠른 메모 내용");
   expect((await input.boundingBox())!.y + 50).toBeLessThan(page.viewportSize()!.height);
   const savedNotes = memo.getByRole("region", { name: "저장한 메모", exact: true });
@@ -694,12 +692,15 @@ test("메모 우선 업무실은 단계별로 이어가고 메모 연결·새로
   await expect(savedNotes.getByRole("listitem")).toHaveCount(3);
   await expect(savedNotes.getByRole("list")).toBeVisible();
   await expect(next).toContainText("합성 진행 중인 기능 구현"); await expect(next).toContainText("저장소 확인 중");
+  await board.getByRole("button", { name:"합성 즐겨찾기 현황 보기",exact:true }).click();
+  await expect(board.getByRole("link", { name:"합성 즐겨찾기 서비스 열기",exact:true })).toHaveAttribute("target","_blank");
+  await board.getByRole("button", { name:/^전체 업무/ }).click();
+  await board.getByRole("tab", { name:/^프로젝트/ }).click();
   await expect(projects.getByRole("region", { name: "아이디어", exact: true })).toContainText("합성 아이디어");
   await expect(projects.getByRole("region", { name: "개발 중", exact: true })).toContainText("합성 개발");
   await expect(projects.getByRole("link", { name: "합성 사용 서비스 서비스 열기", exact: true })).toHaveAttribute("href", "http://127.0.0.1:4317/api/health?synthetic=live");
-  await expect(services.getByRole("link", { name: "합성 즐겨찾기 바로 열기", exact: true })).toHaveAttribute("target", "_blank");
   await expect(page.getByText("개인 전용 프로젝트", { exact: true })).toHaveCount(0);
-  await expect(page.locator("details").filter({ has: page.locator("summary").filter({ hasText: /^최근 결과·연결 진단/ }) }).first()).not.toHaveAttribute("open");
+  await expect(page.locator("summary").filter({ hasText:/^최근 결과·연결 진단/ })).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("memo-first-home.png"), fullPage: true });
   const note = "합성 메모를 개발 프로젝트에 연결했습니다.";
   await input.fill(note); await memo.getByLabel("메모 연결 프로젝트").selectOption("home-development");
@@ -710,15 +711,18 @@ test("메모 우선 업무실은 단계별로 이어가고 메모 연결·새로
   expect((await state(page))!.notes).toHaveLength(14);
   await page.waitForLoadState("networkidle"); await page.reload(); await ready(page);
   await expect(memo.getByText(note, { exact: true })).toBeVisible();
+  await board.getByRole("tab", { name:/^프로젝트/ }).click();
   const popupEvent = page.waitForEvent("popup"); await projects.getByRole("link", { name: "합성 사용 서비스 서비스 열기", exact: true }).click();
   const popup = await popupEvent; await popup.waitForLoadState(); expect(popup.url()).toContain("/api/health?synthetic=live"); await popup.close();
   await projects.getByRole("link", { name: "합성 아이디어 기획 이어가기", exact: true }).click();
   await expect(page).toHaveURL(/\/projects\/home-idea$/); expect((await state(page))!.activeProjects.company).toBe("home-idea");
   await page.waitForLoadState("networkidle"); await page.goto("/"); await ready(page);
-  await expect(projects).not.toContainText("합성 개발");
+  await board.getByRole("tab", { name:/^프로젝트/ }).click();
+  await expect(projects).toContainText("합성 개발");
   await page.getByRole("button", { name: "개인", exact: true }).click();
-  await expect(projects).toContainText("개인 전용 프로젝트"); await expect(projects).not.toContainText("합성 아이디어");
   await expect(next).not.toContainText("합성 진행 중인 기능 구현");
+  await board.getByRole("tab", { name:/^프로젝트/ }).click();
+  await expect(projects).toContainText("개인 전용 프로젝트"); await expect(projects).not.toContainText("합성 아이디어");
   await expect(memo.getByLabel("메모 연결 프로젝트").locator("option")).toHaveText(["프로젝트 연결 안 함", "개인 전용 프로젝트"]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.waitForLoadState("networkidle");
@@ -741,7 +745,8 @@ test("저장한 메모는 프로젝트 밖의 기록을 안내하고 모아보�
   await seed(page, data);
   const before = structuredClone((await state(page))!);
   const home = page.getByRole("region", { name: "빠른 메모", exact: true });
-  await expect(home).toContainText("이 프로젝트 밖에 메모 2개가 있습니다.");
+  await expect(home.getByRole("region", { name:"저장한 메모",exact:true }).getByRole("listitem")).toHaveCount(2);
+  await expect(home).toContainText("다른 프로젝트의 기존 기록");
   await expect(home).not.toContainText("개인 영역 전용 기록");
   await page.waitForLoadState("networkidle"); await page.goto("/notes"); await ready(page);
   await expect(home).toContainText("이 프로젝트 밖에 메모 2개가 있습니다.");

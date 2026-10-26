@@ -30,7 +30,7 @@ export function SavedNotes({ notes, projects, compact = false, scopeHelp }: { no
   const selected = selectedId ? notes.find(note => note.id === selectedId) : undefined;
   const selectedProject = selected && projectById.get(selected.projectId ?? "");
   const projectName = (note: Note) => projectById.get(note.projectId ?? "")?.name ?? "프로젝트 연결 없음";
-  return <section className={notesStyle.browser} aria-label="저장한 메모" id={compact ? "home-saved-notes" : undefined}>
+  return <section className={`${notesStyle.browser} ${compact ? notesStyle.compact : ""}`} aria-label="저장한 메모" id={compact ? "home-saved-notes" : undefined}>
     <div className={notesStyle.heading}><h3>저장한 메모 <span>{notes.length}</span></h3>{compact && <Link href="/memos">메모 모아보기 →</Link>}</div>
     <label className={notesStyle.search}><Icon name="search" size={16} /><span className={styles.srOnly}>저장한 메모 검색</span>
       <input aria-label="저장한 메모 검색" type="search" maxLength={200} value={filter.query} onChange={event => setFilter({ query: event.target.value, page: 0 })} placeholder="내용이나 프로젝트로 찾기" />

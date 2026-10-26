@@ -11,10 +11,14 @@ export function WorkspaceControls({
   selectedProjectId,
   onScopeChange,
   onProjectFilterChange,
+  showProjectFilter = true,
+  className = "",
 }: {
   selectedProjectId?: string;
   onScopeChange?: (projectId: string | null, space: Space) => void;
   onProjectFilterChange?: (projectId: string | null, space: Space) => void;
+  showProjectFilter?: boolean;
+  className?: string;
 } = {}) {
   const {
     data,
@@ -30,7 +34,7 @@ export function WorkspaceControls({
   } = useWorkspace();
   const space = data.activeSpace;
   return (
-    <div className={styles.workspaceControls}>
+    <div className={`${styles.workspaceControls} ${className}`}>
       <div className={styles.scopeControls}>
         <div className={styles.spaceSwitch} aria-label="업무 영역">
           {(["company", "personal"] as Space[]).map((value) => (
@@ -50,7 +54,7 @@ export function WorkspaceControls({
             </button>
           ))}
         </div>
-        <span className={styles.scopeDivider} />
+        {showProjectFilter && <><span className={styles.scopeDivider} />
         <label className={styles.projectSelect}>
           <Icon name="folder" size={15} />
           <select
@@ -83,7 +87,7 @@ export function WorkspaceControls({
                 </option>
               ))}
           </select>
-        </label>
+        </label></>}
       </div>
       <span
         className={error ? styles.storageError : styles.saveStatus}
