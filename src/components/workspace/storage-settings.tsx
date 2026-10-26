@@ -9,6 +9,8 @@ import { ConnectionSetup } from "./connection-setup";
 import { StorageRecovery } from "./storage-recovery";
 import { AccountConnection } from "./account-connection";
 import { CloudConflictReview } from "./cloud-conflict";
+import { ServicesPanel } from "./services-panel";
+import { SourceResults } from "./sources-panel";
 import styles from "./studio.module.css";
 
 export function StorageSettings() {
@@ -27,6 +29,8 @@ export function StorageSettings() {
       <AccountConnection />
       <CloudConflictReview key={conflict?.reviewId ?? "none"} />
       <ConnectionSetup />
+      <section id="services" aria-label="서비스 관리"><ServicesPanel /></section>
+      <details className={styles.homeDetails}><summary>최근 결과·연결 진단</summary><SourceResults /></details>
       <CliRunnerSetup />
       <DataTransferPanel />
       {(!account?.enabled || account.authenticated) && <StorageRecovery />}

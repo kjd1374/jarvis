@@ -79,7 +79,7 @@ function NotesView({
       setSavedId(noteId);
       setError("");
       setNotice(
-        "메모를 저장했습니다. 외부 서비스에는 변경을 보내지 않았습니다.",
+        "메모를 저장했습니다.",
       );
     } catch (error) {
       setError(
@@ -91,6 +91,10 @@ function NotesView({
       pending.current = false;
     }
   }
+  const heading = <div className={styles.detailHeading}>
+    <h2><Icon name="note" size={17} /> {home ? "빠른 메모" : compact ? "빠른 메모" : "내 메모와 생각"}</h2>
+    <span>{spaceLabels[space]} · {projectId ? data.projects.find(project => project.id === projectId)?.name : "전체 프로젝트"}</span>
+  </div>;
   const recentNotes = (
         <div className={styles.memoList}>
           {notes.slice(0, compact ? 3 : 30).map((note) => (
@@ -118,23 +122,11 @@ function NotesView({
         </div>
   );
   return (
-    <section className={styles.detailSection} aria-label="빠른 메모" id={home ? "home-notes" : undefined}>
-      <div className={styles.detailHeading}>
-        <h2>
-          <Icon name="note" size={17} />{" "}
-          {home ? "메모 · 기록" : compact ? "빠른 메모" : "내 메모와 생각"}
-        </h2>
-        <span>
-          {spaceLabels[space]} ·{" "}
-          {projectId
-            ? data.projects.find((p) => p.id === projectId)?.name
-            : home ? "전체 프로젝트" : "영역 공통"}
-        </span>
-        {home && <a href="#home-saved-notes" className={layout.noteJump}>저장한 메모 {notes.length}개 ↓</a>}
-      </div>
-      {home && <p className={layout.noteIntro}>새 생각을 남기고, 저장한 기록을 바로 찾아보세요.</p>}
+    <section className={`${styles.detailSection} ${home ? layout.memoBand : ""}`} aria-label="빠른 메모" id={home ? "home-notes" : undefined}>
+      {!home && heading}
       <div className={home ? layout.noteWorkspace : undefined}>
       <div>
+      {home && heading}
       <form onSubmit={save} className={styles.quickNoteForm} aria-busy={saving}>
         <label
           className={styles.srOnly}
@@ -147,7 +139,7 @@ function NotesView({
           aria-label="빠른 메모 내용"
           value={content}
           maxLength={50000}
-          rows={compact ? 3 : 4}
+          rows={home ? 2 : compact ? 3 : 4}
           disabled={!ready || saving}
           placeholder="떠오른 생각, 확인할 내용, 다음에 할 일을 남겨주세요."
           onChange={(event) => setContent(event.target.value)}

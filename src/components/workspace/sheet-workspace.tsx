@@ -4,7 +4,7 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 import Link from "next/link";
 import { useWorkspace } from "./workspace-provider";
 import { Modal, WorkspaceControls } from "./workspace-controls";
-import { id, now, type Document } from "@/lib/workspace/types";
+import { id, now, type Document, type Space } from "@/lib/workspace/types";
 import { scopeWorkspace } from "@/lib/workspace/transfer";
 import { addSheet, archiveSheet, columnName, parseSheetRange, removeSheet, replaceSheet, saveWholeSheet, sheetUrl } from "@/lib/sheets/documents";
 import { changeDocumentQuestion, enqueueDocumentQuestion } from "@/lib/sheets/questions";
@@ -21,13 +21,22 @@ const errors: Record<string, string> = { cli_login_required: "맥미니에서 Co
 
 export function SheetWorkspace({ initialDocument }: { initialDocument?: string }) {
   const { data, account } = useWorkspace();
+  const [filters, setFilters] = useState<Record<Space, string | null>>({ company: null, personal: null });
+  const space = data.activeSpace;
+  const projectId = data.projects.some(project => project.space === space && project.id === filters[space]) ? filters[space] : null;
   useEffect(() => () => forgetGoogleToken(), [account?.accountId]);
-  return <SheetWorkspaceView key={`${account?.accountId ?? "local"}:${data.activeSpace}:${data.activeProjects[data.activeSpace]}:${initialDocument ?? ""}`} initialDocument={initialDocument} />;
+  return <SheetWorkspaceView key={`${account?.accountId ?? "local"}:${space}:${projectId}:${initialDocument ?? ""}`} initialDocument={initialDocument} projectId={projectId} onProjectFilterChange={(id, scope) => setFilters(current => ({ ...current, [scope]: id }))} />;
 }
-function SheetWorkspaceView({ initialDocument }: { initialDocument?: string }) {
+function SheetWorkspaceView({ initialDocument, projectId, onProjectFilterChange }: {
+  initialDocument?: string;
+  projectId: string | null;
+  onProjectFilterChange: (projectId: string | null, space: Space) => void;
+}) {
   const { data, ready, saving, account, mutate, retryLoad, error: storageError } = useWorkspace();
-  const space = data.activeSpace, projectId = data.activeProjects[space];
-  const all = data.documents.filter(d => d.space === space && (!projectId || d.projectId === projectId) && d.sheet);
+  const space = data.activeSpace;
+  const spaceDocuments = data.documents.filter(d => d.space === space && d.sheet);
+  const all = spaceDocuments.filter(d => !projectId || d.projectId === projectId);
+  const outsideCount = projectId ? spaceDocuments.filter(d => !d.sheet!.archivedAt && d.projectId !== projectId).length : 0;
   const [selectedId, setSelectedId] = useState(initialDocument ?? "");
   const [tabId, setTabId] = useState<number | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
@@ -78,6 +87,14 @@ function SheetWorkspaceView({ initialDocument }: { initialDocument?: string }) {
     selectionGeneration.current++;
     setSelectedId(documentId); setTabId(nextTabId); setPageIndex(0); setNotice(""); setError("");
   }
+  function changeProjectFilter(next: string | null, scope: Space) {
+    if (next === projectId) return;
+    // Fence in-flight Google operations immediately, before the keyed view's
+    // effect cleanup. A remote workroom preference change is not a scope change.
+    mounted.current = false;
+    selectionGeneration.current++;
+    onProjectFilterChange(next, scope);
+  }
   async function add() {
     if (!config) return;
     const generation = selectionGeneration.current;
@@ -89,7 +106,7 @@ function SheetWorkspaceView({ initialDocument }: { initialDocument?: string }) {
     if (!mounted.current) return;
     let selected = "";
     await mutate(d => {
-      if (!mounted.current || d.activeSpace !== space || d.activeProjects[space] !== projectId) return d;
+      if (!mounted.current || d.activeSpace !== space) return d;
       const result = addSheet(d, space, projectId, spreadsheetId, metadata.name, metadata.tabs, now());
       selected = result.documentId; return result.data;
     });
@@ -107,16 +124,23 @@ function SheetWorkspaceView({ initialDocument }: { initialDocument?: string }) {
     if (!latestTab) throw new Error("원본에서 이 탭을 찾지 못했습니다. 다른 탭을 선택하거나 파일 선택기에서 다시 연결해주세요.");
     const loaded = await readWholeSheet(config, document.sheet.spreadsheetId, latestTab);
     if (!mounted.current) return;
+    let stored = false;
     await mutate(d => {
+      stored = false;
       const current = d.documents.find(row => row.id === document.id && row.space === space);
-      if (!current?.sheet || current.sheet.archivedAt || !mounted.current || d.activeSpace !== space || d.activeProjects[space] !== projectId) return d;
+      if (!current?.sheet || current.sheet.archivedAt || !mounted.current || d.activeSpace !== space || current.projectId !== document.projectId) return d;
       const updated = { ...current, name: metadata.name, sheet: { ...current.sheet, tabs: metadata.tabs.map(t => ({ ...current.sheet!.tabs.find(old => old.id === t.id), ...t })) } };
       const next = { ...d, documents: d.documents.map(row => row.id === current.id ? updated : row) };
       const saved = saveWholeSheet(next, space, current.id, latestTab.id, loaded);
       if (new TextEncoder().encode(JSON.stringify({ space, revision: Number.MAX_SAFE_INTEGER, data: scopeWorkspace(saved, space) })).byteLength > 3_900_000)
         throw new Error("전체 탭을 보관하면 서버 저장 한도를 넘습니다. 기존 내용은 유지됩니다. Google에서 원본을 열어주세요.");
+      stored = true;
       return saved;
     });
+    if (!stored) {
+      if (mounted.current && generation === selectionGeneration.current) setNotice("시트 연결이 바뀌어 이번에 읽은 내용은 저장하지 않았습니다. 현재 시트를 확인한 뒤 다시 불러와주세요.");
+      return;
+    }
     if (mounted.current && generation === selectionGeneration.current) { setPageIndex(0); setNotice(`${latestTab.title} · 탭 전체 ${loaded.wholeRead.rowCount.toLocaleString()}행·${loaded.wholeRead.columnCount.toLocaleString()}열을 불러와 보관했습니다.`); }
   }
   const disabled = busy || saving || !ready;
@@ -134,9 +158,9 @@ function SheetWorkspaceView({ initialDocument }: { initialDocument?: string }) {
     return () => { active = false; };
   }, [disabled, googleReady, config, document?.id, document?.sheet?.archivedAt, tab?.id, snapshot?.id]);
   return <div className={studio.studio}>
-    <WorkspaceControls />
+    <WorkspaceControls selectedProjectId={projectId ?? ""} onProjectFilterChange={changeProjectFilter} />
     <div className={styles.heading}>
-      <div><p className={studio.eyebrow}>WORKSPACE</p><h1>업무</h1><p>시트를 펼쳐 보고, 필요한 내용을 바로 물어보세요.</p></div>
+      <div><p className={studio.eyebrow}>WORKSPACE</p><h1>업무</h1><p>현재 영역의 모든 연결 시트부터 보여줍니다. 프로젝트를 골라 좁혀볼 수 있습니다.</p></div>
       <nav><Link href="/library">자료실</Link><Link href="/tasks?view=records">기존 할 일</Link><Link href="/tasks?view=requests">수정 요청</Link></nav>
     </div>
     {error && <p role="alert" className={studio.formError}>{error}</p>}
@@ -144,6 +168,7 @@ function SheetWorkspaceView({ initialDocument }: { initialDocument?: string }) {
     <section className={styles.workspace} aria-label="시트 작업 공간" aria-busy={!ready || busy} data-questions-collapsed={questionsCollapsed}>
       <aside className={styles.tree} aria-label="시트 목록">
         <div className={styles.treeHeading}><strong>작업 중인 시트</strong><span>{activeDocuments.length}</span></div>
+        {!!outsideCount && <p className={styles.scopeNotice}>이 프로젝트 밖에 연결한 시트 {outsideCount}개가 있습니다.{" "}<button type="button" onClick={() => changeProjectFilter(null, space)}>모든 프로젝트 시트 보기</button></p>}
         <button className={studio.primaryButton} disabled={disabled || !googleReady} onClick={() => void action(add)}>＋ 시트 연결</button>
         <input aria-label="시트 찾기" placeholder="시트 찾기" value={search} onChange={e => setSearch(e.target.value)} />
         <div className={styles.treeItems}>{folders.map(folder => <details key={folder} open><summary>{folder}</summary>
@@ -155,7 +180,7 @@ function SheetWorkspaceView({ initialDocument }: { initialDocument?: string }) {
       </aside>
       <section className={styles.sheet} aria-label="선택한 시트">
         {!ready ? <div className={styles.empty} role="status"><h2>{storageError ? "업무를 불러오지 못했습니다" : "시트를 불러오고 있습니다"}</h2>{storageError && <button onClick={retryLoad}>다시 불러오기</button>}</div> : document?.sheet ? <>
-          <div className={styles.documentHeading}><div><small>{document.sheet.archivedAt ? "자료실 · 보관한 내용" : "GOOGLE SHEETS"}</small><h2>{document.name}</h2></div>
+          <div className={styles.documentHeading}><div><small>{document.sheet.archivedAt ? "자료실 · 보관한 내용" : "GOOGLE SHEETS"} · {data.projects.find(project => project.space === space && project.id === document.projectId)?.name ?? "프로젝트 연결 없음"}</small><h2>{document.name}</h2></div>
             <a href={sheetUrl(document.sheet.spreadsheetId, tab?.id)} target="_blank" rel="noopener noreferrer">Google에서 수정 ↗</a>
           </div>
           <div className={styles.documentActions}>
@@ -184,7 +209,7 @@ function SheetWorkspaceView({ initialDocument }: { initialDocument?: string }) {
         {error && <p role="alert" className={studio.formError}>{error}</p>}
         <div className={studio.modalActions}><button autoFocus disabled={busy} onClick={() => setRemoveTarget(null)}>취소</button><button className={studio.primaryButton} disabled={disabled} onClick={() => void action(async () => {
           await mutate(d => {
-            if (!mounted.current || d.activeSpace !== space || d.activeProjects[space] !== projectId) throw new Error("작업 공간이 바뀌었습니다. 다시 확인해주세요.");
+            if (!mounted.current || d.activeSpace !== space) throw new Error("작업 공간이 바뀌었습니다. 다시 확인해주세요.");
             return removeSheet(d, space, removeTarget.id);
           });
           if (mounted.current) { setRemoveTarget(null); setSelectedId(""); setTabId(null); setPageIndex(0); setNotice("자비스에서 시트 연결과 보관 내용을 제거했습니다. Google 원본은 그대로입니다."); }

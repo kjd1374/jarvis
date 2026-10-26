@@ -14,7 +14,7 @@ const groups = [
   { stage: "development", title: "개발 중", action: "작업실 열기", empty: "개발할 프로젝트를 등록하면 이곳에서 이어갑니다." },
   { stage: "live", title: "사용 중", action: "서비스 열기", empty: "완성된 서비스는 여기서 바로 이용합니다." },
 ] as const;
-export function HomeProjects({ projects }: { projects: Project[] }) {
+export function HomeProjects({ projects, embedded = false }: { projects: Project[]; embedded?: boolean }) {
   const { ready, saving, mutate } = useWorkspace(), router = useRouter();
   const pending = useRef(false), [error, setError] = useState("");
   async function open(event: React.MouseEvent, project: Project) {
@@ -28,11 +28,11 @@ export function HomeProjects({ projects }: { projects: Project[] }) {
     } catch { setError("프로젝트 선택을 저장하지 못했습니다. 다시 열어주세요."); }
     finally { pending.current = false; }
   }
-  return <section className={styles.detailSection} aria-label="프로젝트 이어가기" id="home-projects">
+  return <section className={`${styles.detailSection} ${embedded ? home.projectPane : ""}`} aria-label="프로젝트 이어가기" id="home-projects">
     <div className={styles.detailHeading}><h2><Icon name="folder" size={17} /> 프로젝트 이어가기</h2><Link href="/projects">프로젝트 관리 →</Link></div>
     {error && <p className={styles.formError} role="alert">{error}</p>}
     <div className={home.projectGroups}>
-      {groups.map(group => {
+      {groups.filter(group => !embedded || projects.some(project => projectStage(project) === group.stage)).map(group => {
         const items = projects.filter(p => projectStage(p) === group.stage).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
         return <section key={group.stage} aria-label={group.title} className={home.projectGroup}>
           <h3>{group.title}<span>{items.length}</span></h3>
@@ -52,5 +52,6 @@ export function HomeProjects({ projects }: { projects: Project[] }) {
         </section>;
       })}
     </div>
+    {!projects.length && embedded && <p className={home.empty}>연결된 프로젝트가 없습니다. 전체 업무에서 기존 프로젝트를 확인하거나 서비스 관리에서 프로젝트를 연결하세요.</p>}
   </section>;
 }

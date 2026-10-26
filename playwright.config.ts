@@ -23,18 +23,18 @@ export default defineConfig({
   projects: [
     {
       name: "desktop",
-      testMatch: /(?:ui|workroom|cloud|automation|sheets|planning|release)\.spec\.ts/,
+      testMatch: /(?:ui|workroom|cloud|automation|sheets|planning|release|service-board)\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "mobile",
-      testMatch: /(?:ui|workroom|cloud|automation|sheets|planning|release)\.spec\.ts/,
+      testMatch: /(?:ui|workroom|cloud|automation|sheets|planning|release|service-board)\.spec\.ts/,
       use: { ...devices["Pixel 7"] },
     },
     {
       name: "safari",
-      testMatch: /(?:automation|workroom)\.spec\.ts/,
-      grep: /개발 작업 공간은 사진과 설명|개발 작업 공간은 실패|AI 없는 화면은 연결 상태|미완료 요청은 원래 내용을 보존|현재 기획안 구현은 마지막 상태 질문|메모 우선 업무실은 단계별로|저장한 메모는 입력창 근처|저장한 메모는 프로젝트 밖/,
+      testMatch: /(?:automation|workroom|sheets|service-board)\.spec\.ts/,
+      grep: /개발 작업 공간은 사진과 설명|개발 작업 공간은 실패|AI 없는 화면은 연결 상태|미완료 요청은 원래 내용을 보존|현재 기획안 구현은 마지막 상태 질문|메모 우선 업무실은 단계별로|저장한 메모는 입력창 근처|저장한 메모는 프로젝트 밖|stored sheet connections remain|changing the local sheet project filter|moving a sheet to another project|서비스별 작업판|서비스 전환 중/,
       use: { ...devices["iPhone 13"] },
     },
     {

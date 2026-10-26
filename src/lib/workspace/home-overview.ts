@@ -3,6 +3,7 @@ import type { Project, WorkspaceData } from "./types";
 export type HomeRequest = {
   id: string; projectId: string; projectName: string; title: string; label: string;
   state: "running" | "queued" | "attention"; updatedAt: string;
+  serviceId?: string;
 };
 const phases: Record<string, string> = { preparing: "저장소 확인 중", coding: "코드 수정 중", testing: "검사 중", publishing: "GitHub 반영 중", reporting: "결과 정리 중" };
 
@@ -10,10 +11,10 @@ const phases: Record<string, string> = { preparing: "저장소 확인 중", codi
 export function homeRequests(projects: Project[], clock: number): HomeRequest[] {
   const rows: HomeRequest[] = [];
   for (const project of projects) {
-    const add = (kind: string, item: { id: string; status: string; updatedAt: string; leaseUntil?: string }, title: string, label: string, blocked = false, attentionLabel = "확인 필요") => {
+    const add = (kind: string, item: { id: string; status: string; updatedAt: string; leaseUntil?: string }, title: string, label: string, blocked = false, attentionLabel = "확인 필요", serviceId?: string) => {
       const expired = item.status === "running" && (!item.leaseUntil || Date.parse(item.leaseUntil) <= clock);
       const state = item.status === "queued" ? "queued" : item.status === "running" && !expired ? "running" : ["failed", "interrupted"].includes(item.status) || blocked || expired ? "attention" : null;
-      if (state) rows.push({ id: `${project.id}:${kind}:${item.id}`, projectId: project.id, projectName: project.name, title,
+      if (state) rows.push({ id: `${project.id}:${kind}:${item.id}`, projectId: project.id, projectName: project.name, title, ...(serviceId ? { serviceId } : {}),
         label: expired ? "실행 응답 확인 필요" : state === "attention" ? attentionLabel : state === "queued" ? "실행 대기" : label, state, updatedAt: item.updatedAt });
     };
     const turns = project.automation?.turns ?? [];
@@ -34,7 +35,7 @@ export function homeRequests(projects: Project[], clock: number): HomeRequest[] 
       const pending = result?.outcome === "merged" && ["pending", "failure"].includes(result.deployment.state);
       add("work", turn, turn.request, phases[turn.phase] ?? `${kind} 처리 중`,
         turn.status === "completed" && (result?.outcome === "blocked" || !!failed || review || pending),
-        failed ? "검사 결과 확인" : review ? "PR 검토 대기" : pending ? "반영 결과 확인" : "확인 필요");
+        failed ? "검사 결과 확인" : review ? "PR 검토 대기" : pending ? "반영 결과 확인" : "확인 필요", turn.serviceId);
     }
     const plans = project.planning?.turns ?? [];
     for (const turn of plans) {
